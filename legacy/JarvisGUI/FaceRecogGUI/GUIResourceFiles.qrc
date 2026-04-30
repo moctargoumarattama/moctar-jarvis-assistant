@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/">
+        <file>../JarvisImages/exitButton.png</file>
+        <file>../JarvisImages/ironmanSidePose.jpg</file>
+        <file>../JarvisImages/loginButton.png</file>
+    </qresource>
+</RCC>

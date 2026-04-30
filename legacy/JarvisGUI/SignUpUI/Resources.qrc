@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/">
+        <file>../JarvisImages/exitButton.png</file>
+        <file>../JarvisImages/listening.gif</file>
+        <file>../JarvisImages/startButton.png</file>
+        <file>../JarvisImages/voicerecog.gif</file>
+    </qresource>
+</RCC>

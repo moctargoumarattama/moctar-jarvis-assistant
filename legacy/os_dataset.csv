@@ -1,0 +1,23 @@
+text,label
+open chrome,open chrome
+activate chrome,open chrome
+open brave,open brave
+activate brave,open brave
+open youtube,open youtube
+activate youtube,open youtube
+open youtube music,open youtube music
+activate youtube music,open youtube music
+open music,open youtube music
+open google,open google
+open gmail,open gmail
+open whatsapp,open whatsapp
+open calculator,open calculator
+open notepad,open notepad
+open cmd,open cmd
+open terminal,open cmd
+open explorer,open explorer
+open vscode,open vscode
+close chrome,close chrome
+close brave,close brave
+close edge,close edge
+close notepad,close notepad

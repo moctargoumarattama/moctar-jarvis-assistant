@@ -1,0 +1,9 @@
+{
+    "files": [
+        "MainFile.qrc",
+        "dialog.py",
+        "form.ui",
+        "mainFile.qrc",
+        "signup.qrc"
+    ]
+}

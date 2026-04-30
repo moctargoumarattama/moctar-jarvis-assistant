@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/">
+        <file>../JarvisImages/backButton.png</file>
+        <file>../JarvisImages/exitButton.png</file>
+        <file>../JarvisImages/signUp.png</file>
+    </qresource>
+</RCC>

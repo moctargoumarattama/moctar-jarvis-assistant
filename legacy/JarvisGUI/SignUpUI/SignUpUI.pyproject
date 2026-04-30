@@ -1,0 +1,7 @@
+{
+    "files": [
+        "Resources.qrc",
+        "dialog.py",
+        "form.ui"
+    ]
+}
