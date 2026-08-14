@@ -63,6 +63,9 @@ def build_default_registry(assistant):
     registry.register("remind_me", "personal", assistant._handle_remind_me)
     registry.register("summarize_file", "personal", assistant._handle_summarize_file)
     registry.register("search_personal", "personal", assistant._handle_search_personal)
+    registry.register("daily_brief", "local_ai", assistant._handle_daily_brief)
+    registry.register("next_action", "local_ai", assistant._handle_next_action)
+    registry.register("assistant_capabilities", "local_ai", assistant._handle_capabilities)
 
     registry.register("energy_consumption", "energy", assistant._handle_energy_plugin)
     registry.register("energy_cost", "energy", assistant._handle_energy_plugin)

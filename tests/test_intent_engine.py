@@ -57,6 +57,21 @@ class IntentEngineTests(unittest.TestCase):
 
         self.assertEqual("list_todos", intent["intent"])
 
+    def test_detects_daily_brief(self):
+        intent = detect_intent("resume ma journee")
+
+        self.assertEqual("daily_brief", intent["intent"])
+
+    def test_detects_next_action(self):
+        intent = detect_intent("quoi faire maintenant")
+
+        self.assertEqual("next_action", intent["intent"])
+
+    def test_detects_capabilities_request(self):
+        intent = detect_intent("que peux tu faire")
+
+        self.assertEqual("assistant_capabilities", intent["intent"])
+
     def test_detects_summarize_file(self):
         intent = detect_intent("resume le fichier notes/audit.txt")
 

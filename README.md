@@ -11,6 +11,7 @@ Le coeur actif est offline-first :
 - `actions/` regroupe la logique metier par domaine
 - `wake_word_simple.py` gere le wake word moderne local
 - la reponse generique est locale par defaut, sans dependance obligatoire a ChatGPT
+- `ai_brain.py` peut maintenant produire des briefs quotidiens, des priorites et des suggestions locales sans cloud
 
 Les anciens modules `JarvisGUI/`, `Gesture Control/` et autres scripts legacy ont ete regroupes sous `legacy/`. Ils sont conserves pour reference, mais ils ne pilotent plus le coeur moderne.
 Le fichier `wake_word.py` est maintenant un chemin deprecated de compatibilite. Le runtime moderne utilise `wake_word_simple.py`.
@@ -139,6 +140,9 @@ Personnel local :
 - `cree une note idee audit solaire`
 - `ajoute todo appeler client demain`
 - `liste mes todos`
+- `resume ma journee`
+- `quoi faire maintenant`
+- `que peux tu faire`
 - `resume le fichier notes/audit.txt`
 - `rappelle moi appeler le client a 18h30`
 
@@ -150,6 +154,7 @@ Le module `energy_actions.py` est deja pret et teste. Les integrations vocales e
 - `config.py` sert de source unique pour chemins, URLs, projets et parametres runtime.
 - `actions/` separe la logique par responsabilite, ce qui facilite le nettoyage et la reutilisation.
 - `assistant_memory.py` ajoute une memoire de session + memoire utilisateur locale (`data/user_memory.json`).
+- `ai_brain.py` transforme cette memoire locale + les todos + les rappels en brief du jour et priorisation offline.
 - Les rappels tournent localement pendant que l'application reste ouverte.
 - `assistant_security.py` impose confirmations sur actions sensibles et permissions par domaine.
 

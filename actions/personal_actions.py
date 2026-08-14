@@ -72,6 +72,11 @@ class PersonalAssistant:
             lines.append(f"- [{status}] {todo.get('content', '')}")
         return "\n".join(lines)
 
+    def get_open_todos(self, limit=10):
+        todos = self._load_json(self.todos_file)
+        open_todos = [todo for todo in todos if not todo.get("done")]
+        return open_todos[:limit]
+
     def search(self, query):
         query_lower = query.lower().strip()
         query_tokens = {token for token in re.findall(r"\w+", query_lower) if token}
@@ -168,6 +173,28 @@ class PersonalAssistant:
         if due_messages:
             self._save_json(self.reminders_file, reminders)
         return due_messages
+
+    def get_upcoming_reminders(self, limit=5, now=None):
+        current = now or datetime.now()
+        reminders = self._load_json(self.reminders_file)
+        upcoming = []
+        for reminder in reminders:
+            due_at_raw = reminder.get("due_at")
+            if not due_at_raw:
+                continue
+            try:
+                due_at = datetime.fromisoformat(due_at_raw)
+            except ValueError:
+                continue
+            if reminder.get("notified"):
+                continue
+            if due_at >= current:
+                item = dict(reminder)
+                item["due_at"] = due_at.isoformat(timespec="seconds")
+                upcoming.append(item)
+
+        upcoming.sort(key=lambda item: item["due_at"])
+        return upcoming[:limit]
 
     def summarize_file(self, file_path):
         path = Path(file_path)

@@ -452,6 +452,39 @@ def detect_intent(raw_text):
     if any(token in text for token in ["liste mes todos", "liste les todos", "mes todos", "liste todo"]):
         return {"intent": "list_todos", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
 
+    if any(
+        token in text
+        for token in [
+            "brief du jour",
+            "resume ma journee",
+            "organise ma journee",
+            "rappelle mes priorites",
+        ]
+    ):
+        return {"intent": "daily_brief", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
+    if any(
+        token in text
+        for token in [
+            "quoi faire maintenant",
+            "quelle est ma prochaine tache",
+            "quelle est ma prochaine action",
+            "prochaine priorite",
+        ]
+    ):
+        return {"intent": "next_action", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
+    if any(
+        token in text
+        for token in [
+            "que peux tu faire",
+            "qu est ce que tu peux faire",
+            "aide moi",
+            "montre tes capacites",
+        ]
+    ):
+        return {"intent": "assistant_capabilities", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
     if text.startswith("resume le fichier ") or text.startswith("resume fichier "):
         target = extract_after_prefix(text, ["resume le fichier ", "resume fichier "])
         return {"intent": "summarize_file", "target": target, "confidence": 95, "raw": raw_text, "slots": {}}

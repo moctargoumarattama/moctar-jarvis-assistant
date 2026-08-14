@@ -1,5 +1,6 @@
 import logging
 
+import ai_brain
 import config
 from actions import (
     energy_actions,
@@ -33,6 +34,7 @@ class AssistantCore:
         self.security = SecurityPolicy()
         self.session_memory = SessionMemory()
         self.user_memory = UserMemoryStore()
+        self.local_brain = ai_brain.LocalBrain()
         self.pending_confirmation = None
 
     def recommend_music(self, mood="musique populaire du moment"):
@@ -316,11 +318,42 @@ class AssistantCore:
         slots = intent_data.get("slots", {})
         return iot_actions.set_relay_state(slots.get("relay_id", 1), False)
 
+    @staticmethod
+    def _safe_list(value):
+        return value if isinstance(value, list) else []
+
+    def _local_brain_context(self):
+        personal = self.personal_assistant
+        todos = []
+        reminders = []
+
+        if hasattr(personal, "get_open_todos"):
+            todos = self._safe_list(personal.get_open_todos())
+        if hasattr(personal, "get_upcoming_reminders"):
+            reminders = self._safe_list(personal.get_upcoming_reminders())
+
+        return {
+            "todos": todos,
+            "reminders": reminders,
+            "history": self.user_memory.get_history(limit=12),
+            "preferences": self.user_memory.get_preferences(),
+            "session_turn": self.session_memory.last_turn(),
+        }
+
+    def _handle_daily_brief(self, _intent_data):
+        return self.local_brain.generate_daily_brief(**self._local_brain_context())
+
+    def _handle_next_action(self, _intent_data):
+        return self.local_brain.suggest_next_action(**self._local_brain_context())
+
+    def _handle_capabilities(self, _intent_data):
+        return self.local_brain.explain_capabilities()
+
     def _handle_local_chat_fallback(self, intent_data):
         target = (intent_data.get("target", "") or "").strip()
         if target.startswith("mets ") or target.startswith("joue "):
             return "Je peux lancer la musique localement. Dis par exemple: mets du ninho."
-        return (
-            "Mode local actif. Je ne depens pas d'un service externe pour cette commande. "
-            "Essaie une commande systeme, web, projet, personnelle, energie ou iot."
+        return self.local_brain.answer(
+            target,
+            **self._local_brain_context(),
         )

@@ -14,6 +14,8 @@ class AssistantCorePhase2Tests(unittest.TestCase):
         self.mock_personal_class = personal_patcher.start()
         self.mock_project_class.return_value = Mock()
         self.mock_personal_class.return_value = Mock()
+        self.mock_personal_class.return_value.get_open_todos.return_value = []
+        self.mock_personal_class.return_value.get_upcoming_reminders.return_value = []
         self.assistant = AssistantCore()
 
     def test_energy_intent_uses_energy_module(self):
@@ -68,6 +70,41 @@ class AssistantCorePhase2Tests(unittest.TestCase):
             }
         )
         self.assertIn("Mode local actif", response)
+
+    def test_daily_brief_uses_local_personal_context(self):
+        self.mock_personal_class.return_value.get_open_todos.return_value = [
+            {"content": "appeler client"},
+        ]
+        self.mock_personal_class.return_value.get_upcoming_reminders.return_value = [
+            {"content": "reunion", "due_at": "2026-08-14T11:00:00"},
+        ]
+
+        response = self.assistant.handle_intent(
+            {
+                "intent": "daily_brief",
+                "target": "",
+                "slots": {},
+            }
+        )
+
+        self.assertIn("Brief local", response)
+        self.assertIn("appeler client", response)
+        self.assertIn("reunion", response)
+
+    def test_next_action_prefers_upcoming_reminder(self):
+        self.mock_personal_class.return_value.get_upcoming_reminders.return_value = [
+            {"content": "envoyer rapport", "due_at": "2026-08-14T08:30:00"},
+        ]
+
+        response = self.assistant.handle_intent(
+            {
+                "intent": "next_action",
+                "target": "",
+                "slots": {},
+            }
+        )
+
+        self.assertIn("envoyer rapport", response)
 
     def test_sensitive_intent_requires_confirmation_before_execution(self):
         with patch("assistant_core.system_actions.close_app", return_value="Application fermee.") as close_app:

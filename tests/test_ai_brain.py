@@ -22,5 +22,40 @@ class AiBrainConfigTests(unittest.TestCase):
         self.assertEqual("fallback local", answer)
 
 
+class LocalBrainTests(unittest.TestCase):
+    def setUp(self):
+        self.brain = ai_brain.LocalBrain()
+
+    def test_generates_daily_brief_from_local_context(self):
+        response = self.brain.generate_daily_brief(
+            todos=[
+                {"content": "appeler client"},
+                {"content": "verifier les panneaux"},
+            ],
+            reminders=[
+                {"content": "reunion chantier", "due_at": "2026-08-14T09:30:00"},
+            ],
+            history=[
+                {"intent": "open_project", "target": "audit energetique"},
+                {"intent": "open_project", "target": "audit energetique"},
+            ],
+            preferences={"favorite_music": "afrobeat"},
+        )
+
+        self.assertIn("Brief local", response)
+        self.assertIn("reunion chantier", response)
+        self.assertIn("appeler client", response)
+        self.assertIn("afrobeat", response)
+
+    def test_suggests_next_action_from_first_reminder(self):
+        response = self.brain.suggest_next_action(
+            todos=[{"content": "preparer devis"}],
+            reminders=[{"content": "envoyer rapport", "due_at": "2026-08-14T08:00:00"}],
+            history=[],
+        )
+
+        self.assertIn("envoyer rapport", response)
+
+
 if __name__ == "__main__":
     unittest.main()

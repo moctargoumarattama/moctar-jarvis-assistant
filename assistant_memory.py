@@ -62,6 +62,10 @@ class UserMemoryStore:
         payload = self._load()
         return payload.get("preferences", {}).get(key, default)
 
+    def get_preferences(self):
+        payload = self._load()
+        return dict(payload.get("preferences", {}))
+
     def record_interaction(self, intent, target, response):
         payload = self._load()
         history = payload.setdefault("history", [])
@@ -75,3 +79,10 @@ class UserMemoryStore:
         )
         payload["history"] = history[-100:]
         self._save(payload)
+
+    def get_history(self, limit=None):
+        payload = self._load()
+        history = list(payload.get("history", []))
+        if limit is None:
+            return history
+        return history[-limit:]
