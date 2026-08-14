@@ -157,13 +157,25 @@ class AssistantCore:
     def _resolve_confirmation(self, intent):
         if intent == "confirm_no":
             self.pending_confirmation = None
-            return "Action annulee."
+            return {
+                "intent": "confirm_no",
+                "target": "",
+                "response": "Action annulee.",
+            }
         if intent == "confirm_yes":
             if not self.pending_confirmation:
-                return "Aucune action en attente de confirmation."
+                return {
+                    "intent": "confirm_yes",
+                    "target": "",
+                    "response": "Aucune action en attente de confirmation.",
+                }
             intent_data = self.pending_confirmation
             self.pending_confirmation = None
-            return self._execute_intent(intent_data, skip_confirmation=True)
+            return {
+                "intent": intent_data["intent"],
+                "target": intent_data.get("target", ""),
+                "response": self._execute_intent(intent_data, skip_confirmation=True),
+            }
         return None
 
     def _execute_intent(self, intent_data, skip_confirmation=False):
@@ -196,8 +208,12 @@ class AssistantCore:
 
         confirmation_result = self._resolve_confirmation(intent)
         if confirmation_result is not None:
-            self._remember(intent, target, confirmation_result)
-            return confirmation_result
+            self._remember(
+                confirmation_result["intent"],
+                confirmation_result.get("target", ""),
+                confirmation_result["response"],
+            )
+            return confirmation_result["response"]
 
         response = self._execute_intent(intent_data)
         self._remember(intent, target, response)

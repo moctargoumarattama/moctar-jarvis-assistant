@@ -115,6 +115,7 @@ class AssistantCorePhase2Tests(unittest.TestCase):
             result = self.assistant.handle_intent({"intent": "confirm_yes", "target": "", "slots": {}})
             self.assertEqual("Application fermee.", result)
             close_app.assert_called_once_with("edge")
+            self.assertEqual("close_app", self.assistant.session_memory.last_turn()["intent"])
 
 
 if __name__ == "__main__":
