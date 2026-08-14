@@ -290,6 +290,12 @@ WAKE_WORD_SETTINGS = {
 GIT_TIMEOUT_SECONDS = 20
 DEFAULT_SITE_SEARCH_QUERY = "playlist musique populaire"
 
+# --------------------------------------------------------------------------- #
+#  Scheduler settings                                                          #
+# --------------------------------------------------------------------------- #
+
+SCHEDULER_SETTINGS: dict = {}
+
 
 def ensure_runtime_directories():
     for directory in [LOGS_DIR, NOTES_DIR, SCREENSHOTS_DIR, DATA_DIR]:

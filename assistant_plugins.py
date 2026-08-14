@@ -78,6 +78,8 @@ def build_default_registry(assistant):
     registry.register("inverter_sizing", "energy", assistant._handle_energy_plugin)
     registry.register("energy_audit_template", "energy", assistant._handle_energy_plugin)
 
+    registry.register("open_scheduler", "personal", assistant._handle_open_scheduler)
+
     registry.register("iot_status", "iot", assistant._handle_iot_status)
     registry.register("iot_temperature", "iot", assistant._handle_iot_temperature)
     registry.register("iot_relay_on", "iot", assistant._handle_iot_relay_on)

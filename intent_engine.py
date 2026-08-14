@@ -521,6 +521,20 @@ def detect_intent(raw_text):
     ):
         return {"intent": "assistant_capabilities", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
 
+    if any(
+        token in text
+        for token in [
+            "planificateur",
+            "ouvre le planificateur",
+            "taches automatiques",
+            "taches planifiees",
+            "programmer une publication",
+            "publication automatique",
+            "planifier une tache",
+        ]
+    ):
+        return {"intent": "open_scheduler", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
     if text.startswith("resume le fichier ") or text.startswith("resume fichier "):
         target = extract_after_prefix(text, ["resume le fichier ", "resume fichier "])
         return {"intent": "summarize_file", "target": target, "confidence": 95, "raw": raw_text, "slots": {}}

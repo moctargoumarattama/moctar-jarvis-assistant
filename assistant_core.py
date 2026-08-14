@@ -14,6 +14,8 @@ from actions import (
 from assistant_memory import SessionMemory, UserMemoryStore
 from assistant_plugins import build_default_registry
 from assistant_security import SecurityPolicy
+from scheduler import scheduler_store as sched_store
+from scheduler import scheduler_core as sched_core
 
 
 logger = logging.getLogger("jarvis")
@@ -45,7 +47,16 @@ class AssistantCore:
         return LOCAL_RECOMMENDATIONS[index]
 
     def poll_background_messages(self):
-        return self.personal_assistant.poll_due_reminders()
+        messages = self.personal_assistant.poll_due_reminders()
+        # Also surface scheduler tasks that need confirmation
+        pending = sched_core.get_pending_tasks()
+        for task in pending:
+            platform = task["platform"].capitalize()
+            messages.append(
+                f"⏳ Tâche planifiée prête : [{platform}] {task['title']} — "
+                "Confirmez dans le Planificateur."
+            )
+        return messages
 
     @staticmethod
     def _format_number(value, decimals=2):
@@ -426,3 +437,7 @@ class AssistantCore:
             insights=context["insights"],
             session_turn=context["session_turn"],
         )
+
+    def _handle_open_scheduler(self, _intent_data):
+        """Voice command handler — signals UI to open the scheduler window."""
+        return "__OPEN_SCHEDULER__"
