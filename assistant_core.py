@@ -358,26 +358,56 @@ class AssistantCore:
         }
 
     def _handle_daily_brief(self, _intent_data):
-        return self.local_brain.generate_daily_brief(**self._local_brain_context())
+        context = self._local_brain_context()
+        return self.local_brain.generate_daily_brief(
+            todos=context["todos"],
+            reminders=context["reminders"],
+            history=context["history"],
+            preferences=context["preferences"],
+            insights=context["insights"],
+        )
 
     def _handle_next_action(self, _intent_data):
-        return self.local_brain.suggest_next_action(**self._local_brain_context())
+        context = self._local_brain_context()
+        return self.local_brain.suggest_next_action(
+            todos=context["todos"],
+            reminders=context["reminders"],
+            history=context["history"],
+            insights=context["insights"],
+        )
 
     def _handle_prioritize_tasks(self, _intent_data):
-        return self.local_brain.summarize_priorities(**self._local_brain_context())
+        context = self._local_brain_context()
+        return self.local_brain.summarize_priorities(
+            todos=context["todos"],
+            insights=context["insights"],
+        )
 
     def _handle_focus_mode(self, intent_data):
+        context = self._local_brain_context()
         project_hint = intent_data.get("target", "")
         return self.local_brain.project_focus_mode(
+            todos=context["todos"],
+            history=context["history"],
+            insights=context["insights"],
             project_hint=project_hint,
-            **self._local_brain_context(),
         )
 
     def _handle_routine_morning(self, _intent_data):
-        return self.local_brain.build_auto_routine(mode="morning", **self._local_brain_context())
+        context = self._local_brain_context()
+        return self.local_brain.build_auto_routine(
+            todos=context["todos"],
+            reminders=context["reminders"],
+            mode="morning",
+        )
 
     def _handle_routine_evening(self, _intent_data):
-        return self.local_brain.build_auto_routine(mode="evening", **self._local_brain_context())
+        context = self._local_brain_context()
+        return self.local_brain.build_auto_routine(
+            todos=context["todos"],
+            reminders=context["reminders"],
+            mode="evening",
+        )
 
     def _handle_capabilities(self, _intent_data):
         return self.local_brain.explain_capabilities()
@@ -386,7 +416,13 @@ class AssistantCore:
         target = (intent_data.get("target", "") or "").strip()
         if target.startswith("mets ") or target.startswith("joue "):
             return "Je peux lancer la musique localement. Dis par exemple: mets du ninho."
+        context = self._local_brain_context()
         return self.local_brain.answer(
             target,
-            **self._local_brain_context(),
+            todos=context["todos"],
+            reminders=context["reminders"],
+            history=context["history"],
+            preferences=context["preferences"],
+            insights=context["insights"],
+            session_turn=context["session_turn"],
         )

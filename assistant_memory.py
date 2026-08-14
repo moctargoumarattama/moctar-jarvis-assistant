@@ -29,6 +29,8 @@ class SessionMemory:
 
 
 class UserMemoryStore:
+    MAX_RESPONSE_CHARS = 220
+
     def __init__(self, path=None):
         self.path = Path(path or config.USER_MEMORY_FILE)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -71,8 +73,9 @@ class UserMemoryStore:
             return self._cache
 
     def _save(self, payload):
+        serialized = json.dumps(payload, indent=2, ensure_ascii=False)
+        self.path.write_text(serialized, encoding="utf-8")
         self._cache = payload
-        self.path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def set_preference(self, key, value):
         payload = self._load()
@@ -92,17 +95,22 @@ class UserMemoryStore:
         history = payload.setdefault("history", [])
         insights = payload.setdefault("insights", {})
         top_intents = insights.setdefault("top_intents", {})
+        response_text = str(response or "")
+        response_preview = response_text[: self.MAX_RESPONSE_CHARS]
+        if len(response_text) > self.MAX_RESPONSE_CHARS:
+            response_preview += "..."
         history.append(
             {
                 "intent": intent,
                 "target": target,
-                "response": response,
+                "response": response_preview,
                 "at": datetime.now().isoformat(timespec="seconds"),
             }
         )
         payload["history"] = history[-100:]
 
-        top_intents[intent] = int(top_intents.get(intent, 0)) + 1
+        if intent not in {"confirm_yes", "confirm_no", "empty"}:
+            top_intents[intent] = int(top_intents.get(intent, 0)) + 1
         normalized_target = (target or "").strip()
         if normalized_target:
             if intent in {"open_project", "launch_project_server"}:
