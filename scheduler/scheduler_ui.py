@@ -101,11 +101,10 @@ QScrollArea {{ border: none; }}
 """
 
 WEEKDAYS_FR = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-PLATFORMS = ["whatsapp", "facebook", "tiktok"]
+PLATFORMS = ["whatsapp", "facebook"]
 PLATFORM_HINTS = {
     "whatsapp": "Ex: +2236XXXXXXXX  (numéro avec indicatif)",
     "facebook": "Ex: page_id ou group_id (trouvé dans l'URL Facebook)",
-    "tiktok": "Laissez vide — TikTok s'ouvre dans le navigateur",
 }
 
 STATUS_LABELS = {
@@ -152,7 +151,7 @@ if PYQT_AVAILABLE:
             title_lbl.setStyleSheet("font-size:15px; color:#00eaff;")
             title_row.addWidget(title_lbl)
 
-            platform_icon = {"whatsapp": "📱", "facebook": "📘", "tiktok": "🎵"}.get(
+            platform_icon = {"whatsapp": "📱", "facebook": "📘"}.get(
                 task["platform"], "📡"
             )
             plat_lbl = QLabel(f"{platform_icon} {task['platform'].capitalize()}")
@@ -255,7 +254,7 @@ if PYQT_AVAILABLE:
             root.addWidget(header)
 
             sub = QLabel(
-                "Planifiez des publications WhatsApp • Facebook • TikTok — "
+                "Planifiez des publications WhatsApp • Facebook — "
                 "avec messages améliorés par l'IA"
             )
             sub.setStyleSheet("font-size:12px; color:#607d8b;")
@@ -273,7 +272,7 @@ if PYQT_AVAILABLE:
 
             self._f_platform = QComboBox()
             for p in PLATFORMS:
-                icon = {"whatsapp": "📱", "facebook": "📘", "tiktok": "🎵"}[p]
+                icon = {"whatsapp": "📱", "facebook": "📘"}[p]
                 self._f_platform.addItem(f"{icon} {p.capitalize()}", p)
             self._f_platform.currentIndexChanged.connect(self._on_platform_change)
             form_layout.addRow("Plateforme :", self._f_platform)
@@ -386,7 +385,7 @@ if PYQT_AVAILABLE:
             if not message:
                 QMessageBox.warning(self, "Champ manquant", "Veuillez entrer un message.")
                 return
-            if platform != "tiktok" and not target:
+            if not target:
                 QMessageBox.warning(
                     self, "Champ manquant",
                     f"Veuillez entrer le destinataire {platform}."

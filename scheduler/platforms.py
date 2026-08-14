@@ -3,12 +3,10 @@ Platform connectors for the scheduler.
 
 WhatsApp  — pywhatkit.sendwhatmsg_instantly  (free, uses WhatsApp Web)
 Facebook  — Graph API (free token, post to page/group)
-TikTok    — deep-link + clipboard (semi-manual confirmation)
 """
 
 import logging
 import os
-import webbrowser
 from urllib.parse import quote
 
 import config
@@ -95,49 +93,17 @@ def send_facebook(target: str, message: str) -> tuple[bool, str]:
 
 
 # --------------------------------------------------------------------------- #
-#  TikTok  (semi-manuel — deep link + clipboard)                               #
-# --------------------------------------------------------------------------- #
-
-def send_tiktok(target: str, message: str) -> tuple[bool, str]:
-    """
-    TikTok does not allow direct text posting via free API.
-    We open the TikTok upload page in the browser and copy the message
-    to the clipboard so the user just has to paste & confirm.
-    Returns (True, info_message) since this is always user-confirmed.
-    """
-    try:
-        import pyperclip  # optional, best-effort
-        pyperclip.copy(message)
-        clipboard_ok = True
-    except Exception:
-        clipboard_ok = False
-
-    tiktok_url = "https://www.tiktok.com/upload"
-    webbrowser.open(tiktok_url)
-
-    detail = (
-        "TikTok ouvert dans le navigateur. "
-        + ("Message copie dans le presse-papier — collez-le dans la description." if clipboard_ok
-           else "Copiez votre message manuellement dans la description TikTok.")
-    )
-    logger.info("TikTok deep-link opened for target=%s", target)
-    return True, detail
-
-
-# --------------------------------------------------------------------------- #
 #  Dispatcher                                                                  #
 # --------------------------------------------------------------------------- #
 
 PLATFORM_HANDLERS = {
     "whatsapp": send_whatsapp,
     "facebook": send_facebook,
-    "tiktok": send_tiktok,
 }
 
 PLATFORM_LABELS = {
     "whatsapp": "WhatsApp",
     "facebook": "Facebook",
-    "tiktok": "TikTok",
 }
 
 
