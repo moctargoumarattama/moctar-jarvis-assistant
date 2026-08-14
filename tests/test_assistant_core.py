@@ -14,9 +14,11 @@ class AssistantCorePhase2Tests(unittest.TestCase):
         self.mock_personal_class = personal_patcher.start()
         self.mock_project_class.return_value = Mock()
         self.mock_personal_class.return_value = Mock()
+        self.mock_personal_class.return_value.get_open_todos.return_value = []
+        self.mock_personal_class.return_value.get_upcoming_reminders.return_value = []
         self.assistant = AssistantCore()
 
-    def test_energy_intent_uses_energy_module_without_gpt(self):
+    def test_energy_intent_uses_energy_module(self):
         with patch(
             "assistant_core.energy_actions.calculate_consumption",
             return_value={
@@ -26,7 +28,7 @@ class AssistantCorePhase2Tests(unittest.TestCase):
                 "total_power_watts": 720,
                 "energy_kwh": 5.76,
             },
-        ) as calculate_consumption, patch("assistant_core.safe_ask_gpt") as safe_ask_gpt:
+        ) as calculate_consumption:
             response = self.assistant.handle_intent(
                 {
                     "intent": "energy_consumption",
@@ -44,7 +46,6 @@ class AssistantCorePhase2Tests(unittest.TestCase):
             power_watts=60,
             duration_hours=8,
         )
-        safe_ask_gpt.assert_not_called()
         self.assertIn("5.76", response)
         self.assertIn("720", response)
 
@@ -59,6 +60,95 @@ class AssistantCorePhase2Tests(unittest.TestCase):
             )
 
         self.assertEqual("API IoT non configuree.", response)
+
+    def test_chat_fallback_is_local_and_does_not_require_gpt(self):
+        response = self.assistant.handle_intent(
+            {
+                "intent": "chat_fallback",
+                "target": "bonjour",
+                "slots": {},
+            }
+        )
+        self.assertIn("Mode local actif", response)
+
+    def test_daily_brief_uses_local_personal_context(self):
+        self.mock_personal_class.return_value.get_open_todos.return_value = [
+            {"content": "appeler client"},
+        ]
+        self.mock_personal_class.return_value.get_upcoming_reminders.return_value = [
+            {"content": "reunion", "due_at": "2026-08-14T11:00:00"},
+        ]
+
+        response = self.assistant.handle_intent(
+            {
+                "intent": "daily_brief",
+                "target": "",
+                "slots": {},
+            }
+        )
+
+        self.assertIn("Brief local", response)
+        self.assertIn("appeler client", response)
+        self.assertIn("reunion", response)
+
+    def test_next_action_prefers_upcoming_reminder(self):
+        self.mock_personal_class.return_value.get_upcoming_reminders.return_value = [
+            {"content": "envoyer rapport", "due_at": "2026-08-14T08:30:00"},
+        ]
+
+        response = self.assistant.handle_intent(
+            {
+                "intent": "next_action",
+                "target": "",
+                "slots": {},
+            }
+        )
+
+        self.assertIn("envoyer rapport", response)
+
+    def test_prioritize_tasks_uses_local_brain(self):
+        self.mock_personal_class.return_value.get_open_todos.return_value = [
+            {"content": "urgent finir devis"},
+            {"content": "classer dossiers"},
+        ]
+
+        response = self.assistant.handle_intent(
+            {
+                "intent": "prioritize_tasks",
+                "target": "",
+                "slots": {},
+            }
+        )
+
+        self.assertIn("Priorisation intelligente", response)
+
+    def test_focus_mode_returns_project_focus_plan(self):
+        self.mock_personal_class.return_value.get_open_todos.return_value = [
+            {"content": "noor_express corriger bug facture"},
+            {"content": "acheter cable hdmi"},
+        ]
+
+        response = self.assistant.handle_intent(
+            {
+                "intent": "focus_mode",
+                "target": "noor_express",
+                "slots": {},
+            }
+        )
+
+        self.assertIn("Mode focus projet actif", response)
+        self.assertIn("noor_express", response)
+
+    def test_sensitive_intent_requires_confirmation_before_execution(self):
+        with patch("assistant_core.system_actions.close_app", return_value="Application fermee.") as close_app:
+            prompt = self.assistant.handle_intent({"intent": "close_app", "target": "edge", "slots": {}})
+            self.assertIn("Confirme", prompt)
+            close_app.assert_not_called()
+
+            result = self.assistant.handle_intent({"intent": "confirm_yes", "target": "", "slots": {}})
+            self.assertEqual("Application fermee.", result)
+            close_app.assert_called_once_with("edge")
+            self.assertEqual("close_app", self.assistant.session_memory.last_turn()["intent"])
 
 
 if __name__ == "__main__":

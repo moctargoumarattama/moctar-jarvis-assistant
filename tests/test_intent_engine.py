@@ -57,6 +57,42 @@ class IntentEngineTests(unittest.TestCase):
 
         self.assertEqual("list_todos", intent["intent"])
 
+    def test_detects_daily_brief(self):
+        intent = detect_intent("resume ma journee")
+
+        self.assertEqual("daily_brief", intent["intent"])
+
+    def test_detects_next_action(self):
+        intent = detect_intent("quoi faire maintenant")
+
+        self.assertEqual("next_action", intent["intent"])
+
+    def test_detects_task_prioritization(self):
+        intent = detect_intent("priorise mes taches")
+
+        self.assertEqual("prioritize_tasks", intent["intent"])
+
+    def test_detects_focus_mode(self):
+        intent = detect_intent("mode focus projet noor express")
+
+        self.assertEqual("focus_mode", intent["intent"])
+        self.assertEqual("noor_express", intent["target"])
+
+    def test_detects_morning_routine(self):
+        intent = detect_intent("routine du matin")
+
+        self.assertEqual("routine_morning", intent["intent"])
+
+    def test_detects_evening_routine(self):
+        intent = detect_intent("routine du soir")
+
+        self.assertEqual("routine_evening", intent["intent"])
+
+    def test_detects_capabilities_request(self):
+        intent = detect_intent("que peux tu faire")
+
+        self.assertEqual("assistant_capabilities", intent["intent"])
+
     def test_detects_summarize_file(self):
         intent = detect_intent("resume le fichier notes/audit.txt")
 
@@ -139,6 +175,14 @@ class IntentEngineTests(unittest.TestCase):
 
         self.assertEqual("iot_relay_off", intent["intent"])
         self.assertEqual(1, intent["slots"]["relay_id"])
+
+    def test_detects_confirmation_yes(self):
+        intent = detect_intent("oui")
+        self.assertEqual("confirm_yes", intent["intent"])
+
+    def test_detects_confirmation_no(self):
+        intent = detect_intent("annule")
+        self.assertEqual("confirm_no", intent["intent"])
 
 
 if __name__ == "__main__":

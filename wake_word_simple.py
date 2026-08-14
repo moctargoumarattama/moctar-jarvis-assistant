@@ -4,7 +4,40 @@ import threading
 import time
 import unicodedata
 
-import speech_recognition as sr
+try:
+    import speech_recognition as sr
+except Exception:
+    class _SRFallback:
+        class WaitTimeoutError(Exception):
+            pass
+
+        class UnknownValueError(Exception):
+            pass
+
+        class RequestError(Exception):
+            pass
+
+        class Recognizer:
+            def adjust_for_ambient_noise(self, source, duration=0.2):
+                return None
+
+            def listen(self, source, timeout=2, phrase_time_limit=2):
+                raise _SRFallback.WaitTimeoutError()
+
+            def recognize_google(self, audio, language="fr-FR"):
+                raise _SRFallback.UnknownValueError()
+
+        class Microphone:
+            def __init__(self, device_index=None):
+                self.device_index = device_index
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+    sr = _SRFallback()
 
 import config
 

@@ -10,7 +10,11 @@ import struct
 import threading
 import time
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except Exception:
+    def load_dotenv():
+        return False
 
 import config
 

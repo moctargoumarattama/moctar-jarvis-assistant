@@ -2,7 +2,34 @@ import re
 import unicodedata
 
 import config
-from rapidfuzz import fuzz, process
+try:
+    from rapidfuzz import fuzz, process
+except Exception:
+    class _FallbackFuzz:
+        @staticmethod
+        def partial_ratio(left, right):
+            left = left or ""
+            right = right or ""
+            if not left or not right:
+                return 0
+            left_tokens = set(left.split())
+            right_tokens = set(right.split())
+            overlap = len(left_tokens.intersection(right_tokens))
+            score = int(100 * overlap / max(len(right_tokens), 1))
+            return min(100, max(score, 0))
+
+    class _FallbackProcess:
+        @staticmethod
+        def extractOne(text, choices, scorer=None):
+            scorer = scorer or _FallbackFuzz.partial_ratio
+            ranked = [(choice, scorer(text, choice), index) for index, choice in enumerate(choices)]
+            if not ranked:
+                return None
+            ranked.sort(key=lambda item: item[1], reverse=True)
+            return ranked[0]
+
+    fuzz = _FallbackFuzz()
+    process = _FallbackProcess()
 
 
 NUMBER_PATTERN = r"(\d+(?:[.,]\d+)?)"
@@ -278,11 +305,27 @@ def extract_relay_id(text):
     return int(relay_value)
 
 
+def parse_focus_target(text):
+    project_key, _score = find_alias(text, config.PROJECT_ALIASES)
+    if project_key:
+        return project_key
+    match = re.search(r"(?:focus projet|mode focus(?: projet)?)\s+(?:sur\s+)?(.+)$", text)
+    if not match:
+        return ""
+    return (match.group(1) or "").strip()
+
+
 def detect_intent(raw_text):
     text = normalize(raw_text)
 
     if not text:
         return {"intent": "empty", "target": "", "confidence": 0, "raw": raw_text, "slots": {}}
+
+    if text in {"oui", "ok", "vas y", "go", "confirme", "confirmer"}:
+        return {"intent": "confirm_yes", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
+
+    if text in {"non", "annule", "annuler", "laisse tomber"}:
+        return {"intent": "confirm_no", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
 
     if any(token in text for token in ["stop", "quitte", "arrete", "ferme moctar", "stop listening"]):
         return {"intent": "stop", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
@@ -418,6 +461,65 @@ def detect_intent(raw_text):
 
     if any(token in text for token in ["liste mes todos", "liste les todos", "mes todos", "liste todo"]):
         return {"intent": "list_todos", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
+    if any(
+        token in text
+        for token in [
+            "brief du jour",
+            "resume ma journee",
+            "organise ma journee",
+            "rappelle mes priorites",
+        ]
+    ):
+        return {"intent": "daily_brief", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
+    if any(
+        token in text
+        for token in [
+            "quoi faire maintenant",
+            "quelle est ma prochaine tache",
+            "quelle est ma prochaine action",
+            "prochaine priorite",
+        ]
+    ):
+        return {"intent": "next_action", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
+    if any(
+        token in text
+        for token in [
+            "priorise mes taches",
+            "priorise mes todos",
+            "priorisation des taches",
+            "classe mes priorites",
+        ]
+    ):
+        return {"intent": "prioritize_tasks", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
+    if any(token in text for token in ["routine matin", "routine du matin", "brief matin"]):
+        return {"intent": "routine_morning", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
+    if any(token in text for token in ["routine soir", "routine du soir", "brief soir"]):
+        return {"intent": "routine_evening", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
+    if any(token in text for token in ["mode focus", "focus projet", "mode projet"]):
+        return {
+            "intent": "focus_mode",
+            "target": parse_focus_target(text),
+            "confidence": 92,
+            "raw": raw_text,
+            "slots": {},
+        }
+
+    if any(
+        token in text
+        for token in [
+            "que peux tu faire",
+            "qu est ce que tu peux faire",
+            "aide moi",
+            "montre tes capacites",
+        ]
+    ):
+        return {"intent": "assistant_capabilities", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
 
     if text.startswith("resume le fichier ") or text.startswith("resume fichier "):
         target = extract_after_prefix(text, ["resume le fichier ", "resume fichier "])

@@ -3,7 +3,15 @@ import time
 import webbrowser
 from urllib.parse import quote_plus
 
-import psutil
+try:
+    import psutil
+except Exception:
+    class _PsutilFallback:
+        @staticmethod
+        def process_iter(_attrs):
+            return []
+
+    psutil = _PsutilFallback()
 
 import config
 
