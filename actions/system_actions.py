@@ -2,8 +2,29 @@ import os
 import subprocess
 from datetime import datetime
 
-import psutil
-import pyautogui
+try:
+    import psutil
+except Exception:
+    class _PsutilFallback:
+        @staticmethod
+        def sensors_battery():
+            return None
+
+    psutil = _PsutilFallback()
+
+try:
+    import pyautogui
+except Exception:
+    class _PyAutoGuiFallback:
+        @staticmethod
+        def screenshot():
+            raise RuntimeError("pyautogui indisponible")
+
+        @staticmethod
+        def press(_key):
+            raise RuntimeError("pyautogui indisponible")
+
+    pyautogui = _PyAutoGuiFallback()
 
 import config
 

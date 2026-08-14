@@ -140,6 +140,14 @@ class IntentEngineTests(unittest.TestCase):
         self.assertEqual("iot_relay_off", intent["intent"])
         self.assertEqual(1, intent["slots"]["relay_id"])
 
+    def test_detects_confirmation_yes(self):
+        intent = detect_intent("oui")
+        self.assertEqual("confirm_yes", intent["intent"])
+
+    def test_detects_confirmation_no(self):
+        intent = detect_intent("annule")
+        self.assertEqual("confirm_no", intent["intent"])
+
 
 if __name__ == "__main__":
     unittest.main()

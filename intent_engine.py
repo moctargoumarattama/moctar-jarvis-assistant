@@ -2,7 +2,34 @@ import re
 import unicodedata
 
 import config
-from rapidfuzz import fuzz, process
+try:
+    from rapidfuzz import fuzz, process
+except Exception:
+    class _FallbackFuzz:
+        @staticmethod
+        def partial_ratio(left, right):
+            left = left or ""
+            right = right or ""
+            if not left or not right:
+                return 0
+            left_tokens = set(left.split())
+            right_tokens = set(right.split())
+            overlap = len(left_tokens.intersection(right_tokens))
+            score = int(100 * overlap / max(len(right_tokens), 1))
+            return min(100, max(score, 0))
+
+    class _FallbackProcess:
+        @staticmethod
+        def extractOne(text, choices, scorer=None):
+            scorer = scorer or _FallbackFuzz.partial_ratio
+            ranked = [(choice, scorer(text, choice), index) for index, choice in enumerate(choices)]
+            if not ranked:
+                return None
+            ranked.sort(key=lambda item: item[1], reverse=True)
+            return ranked[0]
+
+    fuzz = _FallbackFuzz()
+    process = _FallbackProcess()
 
 
 NUMBER_PATTERN = r"(\d+(?:[.,]\d+)?)"
@@ -283,6 +310,12 @@ def detect_intent(raw_text):
 
     if not text:
         return {"intent": "empty", "target": "", "confidence": 0, "raw": raw_text, "slots": {}}
+
+    if text in {"oui", "ok", "vas y", "go", "confirme", "confirmer"}:
+        return {"intent": "confirm_yes", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
+
+    if text in {"non", "annule", "annuler", "laisse tomber"}:
+        return {"intent": "confirm_no", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
 
     if any(token in text for token in ["stop", "quitte", "arrete", "ferme moctar", "stop listening"]):
         return {"intent": "stop", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}

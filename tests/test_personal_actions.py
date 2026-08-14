@@ -68,6 +68,12 @@ class PersonalAssistantTests(unittest.TestCase):
         self.assertIn("Audit solaire site A", summary)
         self.assertIn("Priorite: changer vers LED", summary)
 
+    def test_search_returns_semantic_results_when_exact_match_absent(self):
+        self.assistant.add_todo("verifier audit lampes entrepot")
+
+        response = self.assistant.search("audit entrepot energie")
+        self.assertIn("Todos", response)
+
 
 if __name__ == "__main__":
     unittest.main()

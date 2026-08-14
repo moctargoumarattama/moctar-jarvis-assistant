@@ -1,8 +1,15 @@
 import os
 from functools import lru_cache
 
-from dotenv import load_dotenv
-from openai import OpenAI
+try:
+    from dotenv import load_dotenv
+except Exception:
+    def load_dotenv():
+        return False
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
 
 
 DEFAULT_MODEL = "gpt-4o-mini"
@@ -20,6 +27,8 @@ def get_openai_api_key():
 
 @lru_cache(maxsize=1)
 def get_openai_client():
+    if OpenAI is None:
+        raise RuntimeError("openai package is missing")
     return OpenAI(api_key=get_openai_api_key())
 
 

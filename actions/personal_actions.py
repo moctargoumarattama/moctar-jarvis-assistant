@@ -74,24 +74,48 @@ class PersonalAssistant:
 
     def search(self, query):
         query_lower = query.lower().strip()
+        query_tokens = {token for token in re.findall(r"\w+", query_lower) if token}
         todos = self._load_json(self.todos_file)
-        todo_hits = [todo["content"] for todo in todos if query_lower in todo.get("content", "").lower()]
+        todo_hits = []
+        scored_todo_hits = []
+        for todo in todos:
+            content = todo.get("content", "")
+            content_lower = content.lower()
+            if query_lower in content_lower:
+                todo_hits.append(content)
+                continue
+            overlap = len(query_tokens.intersection(set(re.findall(r"\w+", content_lower))))
+            if overlap > 0:
+                scored_todo_hits.append((overlap, content))
         note_hits = []
+        scored_note_hits = []
         for note_path in self.notes_dir.glob("*.txt"):
             content = note_path.read_text(encoding="utf-8", errors="ignore")
             if query_lower in content.lower() or query_lower in note_path.name.lower():
                 note_hits.append(note_path.name)
+                continue
+            overlap = len(query_tokens.intersection(set(re.findall(r"\w+", content.lower()))))
+            if overlap > 0:
+                scored_note_hits.append((overlap, note_path.name))
 
-        if not todo_hits and not note_hits:
+        if not todo_hits and not note_hits and not scored_todo_hits and not scored_note_hits:
             return "Aucun resultat dans notes et todos."
 
         lines = []
         if todo_hits:
             lines.append("Todos trouves :")
             lines.extend(f"- {item}" for item in todo_hits[:5])
+        elif scored_todo_hits:
+            lines.append("Todos pertinents :")
+            scored_todo_hits.sort(key=lambda item: item[0], reverse=True)
+            lines.extend(f"- {item}" for _score, item in scored_todo_hits[:5])
         if note_hits:
             lines.append("Notes trouvees :")
             lines.extend(f"- {item}" for item in note_hits[:5])
+        elif scored_note_hits:
+            lines.append("Notes pertinentes :")
+            scored_note_hits.sort(key=lambda item: item[0], reverse=True)
+            lines.extend(f"- {item}" for _score, item in scored_note_hits[:5])
         return "\n".join(lines)
 
     def _parse_reminder_time(self, when_text, now=None):

@@ -8,7 +8,22 @@ import text2speech as t2s
 from assistant_core import AssistantCore
 from interface import run_ui
 from intent_engine import detect_intent
-import pyttsx3
+try:
+    import pyttsx3
+except Exception:
+    class _DummyEngine:
+        def say(self, _text):
+            return None
+
+        def runAndWait(self):
+            return None
+
+    class _PyttsxFallback:
+        @staticmethod
+        def init():
+            return _DummyEngine()
+
+    pyttsx3 = _PyttsxFallback()
 from wake_word_simple import (
     acquire_command_microphone,
     consume_voice_activation,

@@ -10,10 +10,18 @@ from actions import (
     system_actions,
     web_actions,
 )
-from ai_brain import safe_ask_gpt
+from assistant_memory import SessionMemory, UserMemoryStore
+from assistant_plugins import build_default_registry
+from assistant_security import SecurityPolicy
 
 
 logger = logging.getLogger("jarvis")
+LOCAL_RECOMMENDATIONS = [
+    "Ninho - Lettre a une femme",
+    "Aya Nakamura - Djadja",
+    "Wizkid - Essence",
+    "Burna Boy - Last Last",
+]
 
 
 class AssistantCore:
@@ -21,14 +29,18 @@ class AssistantCore:
         config.ensure_runtime_directories()
         self.project_assistant = project_actions.ProjectAssistant()
         self.personal_assistant = personal_actions.PersonalAssistant()
+        self.registry = build_default_registry(self)
+        self.security = SecurityPolicy()
+        self.session_memory = SessionMemory()
+        self.user_memory = UserMemoryStore()
+        self.pending_confirmation = None
 
     def recommend_music(self, mood="musique populaire du moment"):
-        prompt = (
-            "Propose une seule musique a ecouter maintenant. "
-            f"Contexte ou humeur: {mood}. "
-            "Reponds uniquement avec: titre - artiste."
-        )
-        return safe_ask_gpt(prompt, fallback="Ninho - Lettre a une femme")
+        preferred = self.user_memory.get_preference("favorite_music")
+        if preferred:
+            return preferred
+        index = abs(hash(mood)) % len(LOCAL_RECOMMENDATIONS)
+        return LOCAL_RECOMMENDATIONS[index]
 
     def poll_background_messages(self):
         return self.personal_assistant.poll_due_reminders()
@@ -136,96 +148,179 @@ class AssistantCore:
 
         return "Je n'ai pas compris cette demande energie."
 
+    def _remember(self, intent, target, response):
+        self.session_memory.add_turn(intent, target, response)
+        self.user_memory.record_interaction(intent, target, response)
+
+    def _resolve_confirmation(self, intent):
+        if intent == "confirm_no":
+            self.pending_confirmation = None
+            return "Action annulee."
+        if intent == "confirm_yes":
+            if not self.pending_confirmation:
+                return "Aucune action en attente de confirmation."
+            intent_data = self.pending_confirmation
+            self.pending_confirmation = None
+            return self._execute_intent(intent_data, skip_confirmation=True)
+        return None
+
+    def _execute_intent(self, intent_data, skip_confirmation=False):
+        intent = intent_data["intent"]
+        route = self.registry.get(intent)
+        if route is None:
+            return self._handle_local_chat_fallback(intent_data)
+
+        if not self.security.is_domain_allowed(route.domain):
+            return f"Permission refusee pour le domaine {route.domain}."
+
+        if not skip_confirmation and self.security.requires_confirmation(intent):
+            self.pending_confirmation = intent_data
+            return self.security.confirmation_prompt(intent)
+
+        return route.handler(intent_data)
+
     def handle_intent(self, intent_data):
         intent = intent_data["intent"]
         target = intent_data.get("target", "")
-        slots = intent_data.get("slots", {})
 
         logger.info("Intent detected: %s", intent_data)
 
         if intent == "empty":
-            return "Je n'ai rien entendu."
+            response = "Je n'ai rien entendu."
+            self._remember(intent, target, response)
+            return response
         if intent == "stop":
             return "__STOP__"
-        if intent == "open_app":
-            return system_actions.open_app(target)
-        if intent == "close_app":
-            return system_actions.close_app(target)
-        if intent == "open_site":
-            return web_actions.open_site(target)
-        if intent == "open_folder":
-            return system_actions.open_folder(target)
-        if intent == "play_music":
-            return music_actions.play_music(target, recommender=self.recommend_music)
-        if intent == "playlist":
-            return music_actions.open_playlist(target)
-        if intent == "search_google":
-            return web_actions.search_google(target)
-        if intent == "search_youtube":
-            return web_actions.search_youtube(target)
-        if intent == "time":
-            return system_actions.get_time_response()
-        if intent == "battery":
-            return system_actions.get_battery_response()
-        if intent == "screenshot":
-            return system_actions.capture_screenshot()
-        if intent == "volume_up":
-            return system_actions.change_volume("volume_up")
-        if intent == "volume_down":
-            return system_actions.change_volume("volume_down")
-        if intent == "mute":
-            return system_actions.change_volume("mute")
-        if intent == "open_project":
-            open_in_vscode = slots.get("editor") == "vscode"
-            return self.project_assistant.open_project(target, open_in_vscode=open_in_vscode)
-        if intent == "launch_project_server":
-            return self.project_assistant.launch_project_server(target or None)
-        if intent == "git_status":
-            return self.project_assistant.git_status()
-        if intent == "git_pull":
-            return self.project_assistant.git_pull()
-        if intent == "git_log":
-            return self.project_assistant.git_log()
-        if intent == "git_commit_prepare":
-            return self.project_assistant.prepare_commit()
-        if intent == "git_push_prepare":
-            return self.project_assistant.prepare_push()
-        if intent == "create_note":
-            return self.personal_assistant.create_note(target)
-        if intent == "add_todo":
-            return self.personal_assistant.add_todo(target)
-        if intent == "list_todos":
-            return self.personal_assistant.list_todos()
-        if intent == "remind_me":
-            return self.personal_assistant.schedule_reminder(
-                slots.get("message", target),
-                slots.get("when_text", ""),
-            )
-        if intent == "summarize_file":
-            lower = target.lower()
-            if lower.endswith(".csv") or lower.endswith(".xlsx"):
-                return self.project_assistant.summarize_tabular_file(target)
-            return self.personal_assistant.summarize_file(target)
-        if intent == "search_personal":
-            return self.personal_assistant.search(target)
-        if intent in {
-            "energy_consumption",
-            "energy_cost",
-            "solar_sizing",
-            "battery_sizing",
-            "inverter_sizing",
-            "energy_audit_template",
-        }:
-            return self._handle_energy_intent(intent, target, slots)
-        if intent == "iot_status":
-            return iot_actions.get_iot_status()
-        if intent == "iot_temperature":
-            return iot_actions.get_iot_temperature()
-        if intent == "iot_relay_on":
-            return iot_actions.set_relay_state(slots.get("relay_id", 1), True)
-        if intent == "iot_relay_off":
-            return iot_actions.set_relay_state(slots.get("relay_id", 1), False)
-        if intent == "chat_fallback":
-            return safe_ask_gpt(target, fallback=config.AI_SETTINGS["chat_fallback"])
 
-        return "Je n'ai pas compris cette commande."
+        confirmation_result = self._resolve_confirmation(intent)
+        if confirmation_result is not None:
+            self._remember(intent, target, confirmation_result)
+            return confirmation_result
+
+        response = self._execute_intent(intent_data)
+        self._remember(intent, target, response)
+        return response
+
+    def _handle_open_app(self, intent_data):
+        return system_actions.open_app(intent_data.get("target", ""))
+
+    def _handle_close_app(self, intent_data):
+        return system_actions.close_app(intent_data.get("target", ""))
+
+    def _handle_open_folder(self, intent_data):
+        return system_actions.open_folder(intent_data.get("target", ""))
+
+    def _handle_time(self, _intent_data):
+        return system_actions.get_time_response()
+
+    def _handle_battery(self, _intent_data):
+        return system_actions.get_battery_response()
+
+    def _handle_screenshot(self, _intent_data):
+        return system_actions.capture_screenshot()
+
+    def _handle_volume_up(self, _intent_data):
+        return system_actions.change_volume("volume_up")
+
+    def _handle_volume_down(self, _intent_data):
+        return system_actions.change_volume("volume_down")
+
+    def _handle_mute(self, _intent_data):
+        return system_actions.change_volume("mute")
+
+    def _handle_open_site(self, intent_data):
+        return web_actions.open_site(intent_data.get("target", ""))
+
+    def _handle_search_google(self, intent_data):
+        return web_actions.search_google(intent_data.get("target", ""))
+
+    def _handle_search_youtube(self, intent_data):
+        return web_actions.search_youtube(intent_data.get("target", ""))
+
+    def _handle_playlist(self, intent_data):
+        return music_actions.open_playlist(intent_data.get("target", ""))
+
+    def _handle_play_music(self, intent_data):
+        return music_actions.play_music(
+            intent_data.get("target", ""),
+            recommender=self.recommend_music,
+        )
+
+    def _handle_open_project(self, intent_data):
+        slots = intent_data.get("slots", {})
+        open_in_vscode = slots.get("editor") == "vscode"
+        return self.project_assistant.open_project(intent_data.get("target", ""), open_in_vscode=open_in_vscode)
+
+    def _handle_launch_project_server(self, intent_data):
+        return self.project_assistant.launch_project_server(intent_data.get("target", "") or None)
+
+    def _handle_git_status(self, _intent_data):
+        return self.project_assistant.git_status()
+
+    def _handle_git_pull(self, _intent_data):
+        return self.project_assistant.git_pull()
+
+    def _handle_git_log(self, _intent_data):
+        return self.project_assistant.git_log()
+
+    def _handle_git_commit_prepare(self, _intent_data):
+        return self.project_assistant.prepare_commit()
+
+    def _handle_git_push_prepare(self, _intent_data):
+        return self.project_assistant.prepare_push()
+
+    def _handle_create_note(self, intent_data):
+        return self.personal_assistant.create_note(intent_data.get("target", ""))
+
+    def _handle_add_todo(self, intent_data):
+        return self.personal_assistant.add_todo(intent_data.get("target", ""))
+
+    def _handle_list_todos(self, _intent_data):
+        return self.personal_assistant.list_todos()
+
+    def _handle_remind_me(self, intent_data):
+        slots = intent_data.get("slots", {})
+        return self.personal_assistant.schedule_reminder(
+            slots.get("message", intent_data.get("target", "")),
+            slots.get("when_text", ""),
+        )
+
+    def _handle_summarize_file(self, intent_data):
+        target = intent_data.get("target", "")
+        lower = target.lower()
+        if lower.endswith(".csv") or lower.endswith(".xlsx"):
+            return self.project_assistant.summarize_tabular_file(target)
+        return self.personal_assistant.summarize_file(target)
+
+    def _handle_search_personal(self, intent_data):
+        return self.personal_assistant.search(intent_data.get("target", ""))
+
+    def _handle_energy_plugin(self, intent_data):
+        return self._handle_energy_intent(
+            intent_data["intent"],
+            intent_data.get("target", ""),
+            intent_data.get("slots", {}),
+        )
+
+    def _handle_iot_status(self, _intent_data):
+        return iot_actions.get_iot_status()
+
+    def _handle_iot_temperature(self, _intent_data):
+        return iot_actions.get_iot_temperature()
+
+    def _handle_iot_relay_on(self, intent_data):
+        slots = intent_data.get("slots", {})
+        return iot_actions.set_relay_state(slots.get("relay_id", 1), True)
+
+    def _handle_iot_relay_off(self, intent_data):
+        slots = intent_data.get("slots", {})
+        return iot_actions.set_relay_state(slots.get("relay_id", 1), False)
+
+    def _handle_local_chat_fallback(self, intent_data):
+        target = (intent_data.get("target", "") or "").strip()
+        if target.startswith("mets ") or target.startswith("joue "):
+            return "Je peux lancer la musique localement. Dis par exemple: mets du ninho."
+        return (
+            "Mode local actif. Je ne depens pas d'un service externe pour cette commande. "
+            "Essaie une commande systeme, web, projet, personnelle, energie ou iot."
+        )

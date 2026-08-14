@@ -26,6 +26,7 @@ DATA_DIR = APP_ROOT / "data"
 
 TODOS_FILE = DATA_DIR / "todos.json"
 REMINDERS_FILE = DATA_DIR / "reminders.json"
+USER_MEMORY_FILE = DATA_DIR / "user_memory.json"
 
 IMPORTANT_URLS = {
     "youtube": "https://www.youtube.com",
@@ -160,6 +161,13 @@ def _optional_int_env(name, default=None):
 
     return int(raw_value)
 
+
+def _optional_bool_env(name, default):
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() not in {"0", "false", "no", "off"}
+
 PROJECTS = {
     "noor_express": ProjectConfig(
         key="noor_express",
@@ -240,6 +248,23 @@ SOFT_WAKE_MIN_CONFIDENCE = float(os.getenv("SOFT_WAKE_MIN_CONFIDENCE", "0.88"))
 AI_SETTINGS = {
     "default_model": os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini",
     "chat_fallback": "Je ne peux pas utiliser l'IA pour le moment.",
+}
+
+SECURITY_SETTINGS = {
+    "require_confirmation_for_sensitive": _optional_bool_env(
+        "MOCTAR_REQUIRE_CONFIRMATION",
+        True,
+    ),
+    "domain_permissions": {
+        "system": _optional_bool_env("MOCTAR_ALLOW_SYSTEM_ACTIONS", True),
+        "web": _optional_bool_env("MOCTAR_ALLOW_WEB_ACTIONS", True),
+        "music": _optional_bool_env("MOCTAR_ALLOW_MUSIC_ACTIONS", True),
+        "project": _optional_bool_env("MOCTAR_ALLOW_PROJECT_ACTIONS", True),
+        "personal": _optional_bool_env("MOCTAR_ALLOW_PERSONAL_ACTIONS", True),
+        "energy": _optional_bool_env("MOCTAR_ALLOW_ENERGY_ACTIONS", True),
+        "iot": _optional_bool_env("MOCTAR_ALLOW_IOT_ACTIONS", True),
+        "local_ai": _optional_bool_env("MOCTAR_ALLOW_LOCAL_AI", True),
+    },
 }
 
 WEB_SETTINGS = {
