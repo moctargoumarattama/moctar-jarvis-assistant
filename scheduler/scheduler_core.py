@@ -71,7 +71,7 @@ def _check_and_queue():
 
 
 def _scheduler_loop():
-    """Runs in background thread, ticks every 30 s."""
+    """Runs in background thread, ticks every 60 s."""
     logger.info("Scheduler thread started.")
     while not _stop_event.is_set():
         try:

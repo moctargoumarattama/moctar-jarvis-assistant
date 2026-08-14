@@ -2,7 +2,7 @@
 SQLite-backed persistent store for scheduled tasks.
 Each task has: id, title, platform, target (group/page/number),
 message, frequency (daily/weekly), weekday (0=Mon..6=Sun),
-send_time (HH:MM), status (pending/confirmed/sent/error),
+send_time (HH:MM), status (active/pending_confirmation/error/paused),
 ai_enhanced, created_at, last_sent.
 """
 

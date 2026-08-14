@@ -8,9 +8,10 @@ TikTok    — deep-link + clipboard (semi-manual confirmation)
 
 import logging
 import os
-import time
 import webbrowser
 from urllib.parse import quote
+
+import config
 
 logger = logging.getLogger("jarvis.scheduler.platforms")
 
@@ -35,10 +36,11 @@ def send_whatsapp(target: str, message: str) -> tuple[bool, str]:
 
     try:
         # sendwhatmsg_instantly opens WhatsApp Web and sends without waiting
+        wait_time = config.SCHEDULER_SETTINGS.get("whatsapp_wait_time", 15)
         pywhatkit.sendwhatmsg_instantly(
             target,
             message,
-            wait_time=15,       # seconds to wait for WhatsApp Web to load
+            wait_time=wait_time,
             tab_close=True,
             close_time=5,
         )

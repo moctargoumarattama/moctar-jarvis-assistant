@@ -13,7 +13,6 @@ import logging
 
 try:
     from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-    from PyQt5.QtGui import QColor, QFont
     from PyQt5.QtWidgets import (
         QApplication,
         QComboBox,
@@ -174,7 +173,11 @@ if PYQT_AVAILABLE:
             freq_str = (
                 f"Quotidien à {task['send_time']}"
                 if task["frequency"] == "daily"
-                else f"{WEEKDAYS_FR[int(task['weekday'])]} à {task['send_time']}"
+                else (
+                    f"{WEEKDAYS_FR[int(task['weekday'])]} à {task['send_time']}"
+                    if task.get("weekday") is not None
+                    else f"Hebdomadaire à {task['send_time']} (jour non défini)"
+                )
             )
             if task.get("target"):
                 freq_str += f"  |  Destinataire: {task['target']}"
