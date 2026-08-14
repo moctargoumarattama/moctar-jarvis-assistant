@@ -67,6 +67,27 @@ class IntentEngineTests(unittest.TestCase):
 
         self.assertEqual("next_action", intent["intent"])
 
+    def test_detects_task_prioritization(self):
+        intent = detect_intent("priorise mes taches")
+
+        self.assertEqual("prioritize_tasks", intent["intent"])
+
+    def test_detects_focus_mode(self):
+        intent = detect_intent("mode focus projet noor express")
+
+        self.assertEqual("focus_mode", intent["intent"])
+        self.assertEqual("noor_express", intent["target"])
+
+    def test_detects_morning_routine(self):
+        intent = detect_intent("routine du matin")
+
+        self.assertEqual("routine_morning", intent["intent"])
+
+    def test_detects_evening_routine(self):
+        intent = detect_intent("routine du soir")
+
+        self.assertEqual("routine_evening", intent["intent"])
+
     def test_detects_capabilities_request(self):
         intent = detect_intent("que peux tu faire")
 

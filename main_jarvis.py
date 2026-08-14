@@ -78,7 +78,10 @@ COMMAND_ONLY_SAFE_INTENTS = {
     "open_site",
     "play_music",
     "playlist",
+    "prioritize_tasks",
     "remind_me",
+    "routine_evening",
+    "routine_morning",
     "screenshot",
     "search_google",
     "search_personal",
@@ -88,6 +91,7 @@ COMMAND_ONLY_SAFE_INTENTS = {
     "time",
     "volume_down",
     "volume_up",
+    "focus_mode",
 }
 
 

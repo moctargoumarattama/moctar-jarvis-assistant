@@ -82,7 +82,7 @@ class PersonalAssistantTests(unittest.TestCase):
 
         summary = self.assistant.summarize_file(str(source))
 
-        self.assertIn("Audit solaire site A", summary)
+        self.assertIn("Resume intelligent local", summary)
         self.assertIn("Priorite: changer vers LED", summary)
 
     def test_search_returns_semantic_results_when_exact_match_absent(self):

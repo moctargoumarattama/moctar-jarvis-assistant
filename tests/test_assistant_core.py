@@ -106,6 +106,39 @@ class AssistantCorePhase2Tests(unittest.TestCase):
 
         self.assertIn("envoyer rapport", response)
 
+    def test_prioritize_tasks_uses_local_brain(self):
+        self.mock_personal_class.return_value.get_open_todos.return_value = [
+            {"content": "urgent finir devis"},
+            {"content": "classer dossiers"},
+        ]
+
+        response = self.assistant.handle_intent(
+            {
+                "intent": "prioritize_tasks",
+                "target": "",
+                "slots": {},
+            }
+        )
+
+        self.assertIn("Priorisation intelligente", response)
+
+    def test_focus_mode_returns_project_focus_plan(self):
+        self.mock_personal_class.return_value.get_open_todos.return_value = [
+            {"content": "noor_express corriger bug facture"},
+            {"content": "acheter cable hdmi"},
+        ]
+
+        response = self.assistant.handle_intent(
+            {
+                "intent": "focus_mode",
+                "target": "noor_express",
+                "slots": {},
+            }
+        )
+
+        self.assertIn("Mode focus projet actif", response)
+        self.assertIn("noor_express", response)
+
     def test_sensitive_intent_requires_confirmation_before_execution(self):
         with patch("assistant_core.system_actions.close_app", return_value="Application fermee.") as close_app:
             prompt = self.assistant.handle_intent({"intent": "close_app", "target": "edge", "slots": {}})

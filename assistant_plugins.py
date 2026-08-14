@@ -65,6 +65,10 @@ def build_default_registry(assistant):
     registry.register("search_personal", "personal", assistant._handle_search_personal)
     registry.register("daily_brief", "local_ai", assistant._handle_daily_brief)
     registry.register("next_action", "local_ai", assistant._handle_next_action)
+    registry.register("prioritize_tasks", "local_ai", assistant._handle_prioritize_tasks)
+    registry.register("focus_mode", "local_ai", assistant._handle_focus_mode)
+    registry.register("routine_morning", "local_ai", assistant._handle_routine_morning)
+    registry.register("routine_evening", "local_ai", assistant._handle_routine_evening)
     registry.register("assistant_capabilities", "local_ai", assistant._handle_capabilities)
 
     registry.register("energy_consumption", "energy", assistant._handle_energy_plugin)

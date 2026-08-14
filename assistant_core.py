@@ -353,6 +353,7 @@ class AssistantCore:
             "reminders": reminders,
             "history": self.user_memory.get_history(limit=12),
             "preferences": self.user_memory.get_preferences(),
+            "insights": self.user_memory.get_insights(),
             "session_turn": self.session_memory.last_turn(),
         }
 
@@ -361,6 +362,22 @@ class AssistantCore:
 
     def _handle_next_action(self, _intent_data):
         return self.local_brain.suggest_next_action(**self._local_brain_context())
+
+    def _handle_prioritize_tasks(self, _intent_data):
+        return self.local_brain.summarize_priorities(**self._local_brain_context())
+
+    def _handle_focus_mode(self, intent_data):
+        project_hint = intent_data.get("target", "")
+        return self.local_brain.project_focus_mode(
+            project_hint=project_hint,
+            **self._local_brain_context(),
+        )
+
+    def _handle_routine_morning(self, _intent_data):
+        return self.local_brain.build_auto_routine(mode="morning", **self._local_brain_context())
+
+    def _handle_routine_evening(self, _intent_data):
+        return self.local_brain.build_auto_routine(mode="evening", **self._local_brain_context())
 
     def _handle_capabilities(self, _intent_data):
         return self.local_brain.explain_capabilities()

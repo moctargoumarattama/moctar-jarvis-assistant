@@ -207,5 +207,44 @@ class PersonalAssistant:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         if not lines:
             return "Le fichier est vide."
+        highlights = self._build_smart_highlights(lines)
+        preview = "\n".join(f"- {line}" for line in highlights[:4])
+        return (
+            f"Resume intelligent local ({path.name}) :\n"
+            f"- Lignes utiles analysees : {len(lines)}\n"
+            f"{preview}"
+        )
 
-        return "\n".join(lines[:3])
+    def _build_smart_highlights(self, lines):
+        if not lines:
+            return []
+
+        keywords = {
+            "priorite": 5,
+            "urgent": 5,
+            "todo": 4,
+            "action": 4,
+            "deadline": 4,
+            "prochaine": 3,
+            "bloquant": 4,
+            "decision": 3,
+            "risque": 4,
+            "important": 3,
+            "focus": 3,
+            "projet": 2,
+        }
+        scored = []
+        for index, line in enumerate(lines):
+            lower = line.lower()
+            score = 1
+            score += sum(weight for token, weight in keywords.items() if token in lower)
+            if re.search(r"\d{1,2}[:h]\d{2}", lower):
+                score += 2
+            if len(line) > 130:
+                score -= 1
+            score += max(0, 3 - min(index, 3))
+            scored.append((score, index, line))
+
+        scored.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+        selected = sorted(scored[:4], key=lambda item: item[1])
+        return [line for _score, _index, line in selected]

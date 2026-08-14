@@ -41,11 +41,129 @@ def _format_due_label(due_at_raw):
 
 
 class LocalBrain:
+    @staticmethod
+    def _todo_priority_score(todo, *, focus_project=""):
+        content = (todo.get("content", "") or "").lower()
+        score = 0
+        if any(marker in content for marker in ["urgent", "critique", "asap", "immediat", "important", "priorite"]):
+            score += 50
+        if any(marker in content for marker in ["aujourd", "ce matin", "ce soir", "maintenant", "deadline"]):
+            score += 25
+        if "demain" in content:
+            score += 10
+        if any(marker in content for marker in ["plus tard", "quand possible"]):
+            score -= 10
+        if focus_project and focus_project.lower() in content:
+            score += 20
+
+        created_at = todo.get("created_at", "")
+        if created_at:
+            try:
+                created = datetime.fromisoformat(created_at)
+                score += min(max((datetime.now() - created).days, 0), 14)
+            except Exception:
+                pass
+        return score
+
+    def prioritize_tasks(self, *, todos=None, insights=None, top_k=5, **_):
+        todos = todos or []
+        insights = insights or {}
+        focus_project = (insights.get("active_project", "") or "").strip()
+        ranked = sorted(
+            todos,
+            key=lambda todo: self._todo_priority_score(todo, focus_project=focus_project),
+            reverse=True,
+        )
+        return ranked[:top_k]
+
+    def _routine_window(self, now=None):
+        now = now or datetime.now()
+        if now.hour < 12:
+            return "morning"
+        if now.hour >= 18:
+            return "evening"
+        return "day"
+
+    def build_auto_routine(self, *, todos=None, reminders=None, now=None, mode="auto", **_):
+        todos = todos or []
+        reminders = reminders or []
+        window = self._routine_window(now=now)
+        if mode == "morning":
+            window = "morning"
+        if mode == "evening":
+            window = "evening"
+
+        prioritized = self.prioritize_tasks(todos=todos, top_k=3)
+        lines = []
+        if window == "morning":
+            lines.append("Routine matin auto :")
+            lines.append("- Verifie tes 3 priorites et bloque ton premier sprint focus.")
+            lines.append("- Traite le rappel le plus proche avant midi.")
+        elif window == "evening":
+            lines.append("Routine soir auto :")
+            lines.append("- Termine une tache impactante et ferme les actions ouvertes.")
+            lines.append("- Prepare les priorites de demain et planifie les rappels.")
+        else:
+            lines.append("Routine auto :")
+            lines.append("- Lance un sprint focus de 25 minutes sur la tache la plus utile.")
+            lines.append("- Clarifie la prochaine action concrete avant de changer de sujet.")
+
+        if reminders:
+            reminder = reminders[0]
+            lines.append(
+                f"- Point de vigilance : {reminder.get('content', '')} avant {_format_due_label(reminder.get('due_at', ''))}."
+            )
+        if prioritized:
+            lines.append("- Priorites conseillees :")
+            for todo in prioritized:
+                lines.append(f"  - {todo.get('content', '')}")
+        return "\n".join(lines)
+
+    def summarize_priorities(self, *, todos=None, insights=None, **_):
+        prioritized = self.prioritize_tasks(todos=todos or [], insights=insights or {}, top_k=5)
+        if not prioritized:
+            return "Aucune tache a prioriser pour le moment."
+        lines = ["Priorisation intelligente :"]
+        for index, todo in enumerate(prioritized, start=1):
+            lines.append(f"{index}. {todo.get('content', '')}")
+        return "\n".join(lines)
+
+    def project_focus_mode(self, *, todos=None, insights=None, history=None, project_hint="", **_):
+        todos = todos or []
+        insights = insights or {}
+        history = history or []
+
+        active_project = (project_hint or insights.get("active_project", "")).strip()
+        if not active_project:
+            for item in reversed(history):
+                if item.get("intent") in {"open_project", "launch_project_server"} and item.get("target"):
+                    active_project = item["target"]
+                    break
+
+        if not active_project:
+            return "Mode focus projet: aucun projet actif detecte. Dis par exemple 'mode focus projet noor_express'."
+
+        matching = [
+            todo for todo in todos if active_project.lower() in (todo.get("content", "") or "").lower()
+        ]
+        if not matching:
+            matching = self.prioritize_tasks(todos=todos, insights=insights, top_k=3)
+
+        lines = [f"Mode focus projet actif : {active_project}"]
+        if matching:
+            lines.append("- Sprint conseille (top taches) :")
+            for todo in matching[:3]:
+                lines.append(f"  - {todo.get('content', '')}")
+        else:
+            lines.append("- Aucune tache ouverte. Tu peux ajouter des todos lies au projet.")
+        lines.append("- Prochaine etape : bloque 25 minutes sans interruption sur la premiere action.")
+        return "\n".join(lines)
+
     def explain_capabilities(self):
         return (
-            "Mode local actif. Intelligence locale active. Je peux prioriser tes todos, resumer ta journee, "
-            "te rappeler les actions proches, guider tes recherches YouTube/Google et piloter "
-            "les actions systeme, projets, energie et IoT sans GPT ni cloud."
+            "Mode local actif. Intelligence locale active. Je peux prioriser tes todos, declencher des routines matin/soir, "
+            "activer un mode focus projet, resumer tes notes/fichiers locaux intelligemment, te rappeler les actions proches, "
+            "guider tes recherches YouTube/Google et piloter les actions systeme, projets, energie et IoT sans GPT ni cloud."
         )
 
     def _focus_summary(self, history):
@@ -65,11 +183,24 @@ class LocalBrain:
             return ""
         return f"Focus recent detecte : {intent}."
 
-    def generate_daily_brief(self, *, todos=None, reminders=None, history=None, preferences=None, **_):
+    def generate_daily_brief(
+        self,
+        *,
+        todos=None,
+        reminders=None,
+        history=None,
+        preferences=None,
+        insights=None,
+        now=None,
+        **_,
+    ):
         todos = todos or []
         reminders = reminders or []
         history = history or []
         preferences = preferences or {}
+        insights = insights or {}
+        now = now or datetime.now()
+        prioritized = self.prioritize_tasks(todos=todos, insights=insights, top_k=3)
 
         lines = ["Brief local :"]
         if reminders:
@@ -80,9 +211,9 @@ class LocalBrain:
         else:
             lines.append("- Aucun rappel urgent detecte.")
 
-        if todos:
+        if prioritized:
             lines.append("- Priorites ouvertes :")
-            for todo in todos[:3]:
+            for todo in prioritized:
                 lines.append(f"  - {todo.get('content', '')}")
         else:
             lines.append("- Aucun todo actif pour le moment.")
@@ -95,12 +226,22 @@ class LocalBrain:
         if focus_summary:
             lines.append(f"- {focus_summary}")
 
+        active_project = insights.get("active_project", "")
+        if active_project:
+            lines.append(f"- Projet focus detecte : {active_project}.")
+
+        routine_window = self._routine_window(now=now)
+        if routine_window in {"morning", "evening"}:
+            label = "matin" if routine_window == "morning" else "soir"
+            lines.append(f"- Routine {label} auto disponible.")
+
         return "\n".join(lines)
 
-    def suggest_next_action(self, *, todos=None, reminders=None, history=None, **_):
+    def suggest_next_action(self, *, todos=None, reminders=None, history=None, insights=None, **_):
         todos = todos or []
         reminders = reminders or []
         history = history or []
+        insights = insights or {}
 
         if reminders:
             reminder = reminders[0]
@@ -109,8 +250,9 @@ class LocalBrain:
                 f"avant {_format_due_label(reminder.get('due_at', ''))}."
             )
 
-        if todos:
-            return f"Prochaine action recommandee : commence par '{todos[0].get('content', '')}'."
+        prioritized = self.prioritize_tasks(todos=todos, insights=insights, top_k=1)
+        if prioritized:
+            return f"Prochaine action recommandee : commence par '{prioritized[0].get('content', '')}'."
 
         if history:
             last_target = history[-1].get("target", "").strip()
@@ -132,7 +274,17 @@ class LocalBrain:
             "Dis par exemple : cherche sur youtube energie solaire, playlist afrobeat ou mets du ninho."
         )
 
-    def answer(self, prompt, *, todos=None, reminders=None, history=None, preferences=None, session_turn=None):
+    def answer(
+        self,
+        prompt,
+        *,
+        todos=None,
+        reminders=None,
+        history=None,
+        preferences=None,
+        session_turn=None,
+        insights=None,
+    ):
         normalized = normalize_prompt(prompt)
 
         if not normalized:
@@ -150,6 +302,7 @@ class LocalBrain:
                 reminders=reminders,
                 history=history,
                 preferences=preferences,
+                insights=insights,
             )
 
         if any(token in normalized for token in ["quoi faire", "prochaine action", "prochaine tache", "maintenant"]):
@@ -157,7 +310,20 @@ class LocalBrain:
                 todos=todos,
                 reminders=reminders,
                 history=history,
+                insights=insights,
             )
+
+        if any(token in normalized for token in ["priorise", "prioriser", "priorisation", "priorites"]):
+            return self.summarize_priorities(todos=todos, insights=insights)
+
+        if any(token in normalized for token in ["routine matin", "routine du matin"]):
+            return self.build_auto_routine(todos=todos, reminders=reminders, mode="morning")
+
+        if any(token in normalized for token in ["routine soir", "routine du soir"]):
+            return self.build_auto_routine(todos=todos, reminders=reminders, mode="evening")
+
+        if any(token in normalized for token in ["mode focus", "focus projet", "mode projet"]):
+            return self.project_focus_mode(todos=todos, history=history, insights=insights)
 
         if session_turn and session_turn.get("target"):
             return (

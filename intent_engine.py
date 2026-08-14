@@ -305,6 +305,16 @@ def extract_relay_id(text):
     return int(relay_value)
 
 
+def parse_focus_target(text):
+    project_key, _score = find_alias(text, config.PROJECT_ALIASES)
+    if project_key:
+        return project_key
+    match = re.search(r"(?:focus projet|mode focus(?: projet)?)\s+(?:sur\s+)?(.+)$", text)
+    if not match:
+        return ""
+    return (match.group(1) or "").strip()
+
+
 def detect_intent(raw_text):
     text = normalize(raw_text)
 
@@ -473,6 +483,32 @@ def detect_intent(raw_text):
         ]
     ):
         return {"intent": "next_action", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
+    if any(
+        token in text
+        for token in [
+            "priorise mes taches",
+            "priorise mes todos",
+            "priorisation des taches",
+            "classe mes priorites",
+        ]
+    ):
+        return {"intent": "prioritize_tasks", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
+    if any(token in text for token in ["routine matin", "routine du matin", "brief matin"]):
+        return {"intent": "routine_morning", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
+    if any(token in text for token in ["routine soir", "routine du soir", "brief soir"]):
+        return {"intent": "routine_evening", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
+    if any(token in text for token in ["mode focus", "focus projet", "mode projet"]):
+        return {
+            "intent": "focus_mode",
+            "target": parse_focus_target(text),
+            "confidence": 92,
+            "raw": raw_text,
+            "slots": {},
+        }
 
     if any(
         token in text

@@ -56,6 +56,39 @@ class LocalBrainTests(unittest.TestCase):
 
         self.assertIn("envoyer rapport", response)
 
+    def test_prioritization_pushes_urgent_task_first(self):
+        ranked = self.brain.prioritize_tasks(
+            todos=[
+                {"content": "verifier archive"},
+                {"content": "urgent appeler client"},
+            ]
+        )
+
+        self.assertEqual("urgent appeler client", ranked[0]["content"])
+
+    def test_project_focus_mode_uses_active_project(self):
+        response = self.brain.project_focus_mode(
+            todos=[
+                {"content": "noor_express corriger endpoint"},
+                {"content": "faire menage boite mail"},
+            ],
+            insights={"active_project": "noor_express"},
+            history=[],
+        )
+
+        self.assertIn("noor_express", response)
+        self.assertIn("corriger endpoint", response)
+
+    def test_build_auto_routine_evening_label(self):
+        response = self.brain.build_auto_routine(
+            todos=[{"content": "urgent finir rapport"}],
+            reminders=[],
+            now=ai_brain.datetime(2026, 8, 14, 20, 0, 0),
+            mode="auto",
+        )
+
+        self.assertIn("Routine soir auto", response)
+
 
 if __name__ == "__main__":
     unittest.main()

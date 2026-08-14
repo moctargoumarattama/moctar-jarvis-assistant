@@ -35,7 +35,19 @@ class UserMemoryStore:
         self._cache = None
         if not self.path.exists():
             self.path.write_text(
-                json.dumps({"preferences": {}, "history": []}, indent=2),
+                json.dumps(
+                    {
+                        "preferences": {},
+                        "history": [],
+                        "insights": {
+                            "top_intents": {},
+                            "active_project": "",
+                            "recent_files": [],
+                            "last_focus_topic": "",
+                        },
+                    },
+                    indent=2,
+                ),
                 encoding="utf-8",
             )
 
@@ -46,7 +58,16 @@ class UserMemoryStore:
             self._cache = json.loads(self.path.read_text(encoding="utf-8"))
             return self._cache
         except Exception:
-            self._cache = {"preferences": {}, "history": []}
+            self._cache = {
+                "preferences": {},
+                "history": [],
+                "insights": {
+                    "top_intents": {},
+                    "active_project": "",
+                    "recent_files": [],
+                    "last_focus_topic": "",
+                },
+            }
             return self._cache
 
     def _save(self, payload):
@@ -69,6 +90,8 @@ class UserMemoryStore:
     def record_interaction(self, intent, target, response):
         payload = self._load()
         history = payload.setdefault("history", [])
+        insights = payload.setdefault("insights", {})
+        top_intents = insights.setdefault("top_intents", {})
         history.append(
             {
                 "intent": intent,
@@ -78,6 +101,19 @@ class UserMemoryStore:
             }
         )
         payload["history"] = history[-100:]
+
+        top_intents[intent] = int(top_intents.get(intent, 0)) + 1
+        normalized_target = (target or "").strip()
+        if normalized_target:
+            if intent in {"open_project", "launch_project_server"}:
+                insights["active_project"] = normalized_target
+            if intent in {"summarize_file", "search_personal", "create_note"}:
+                recent_files = insights.setdefault("recent_files", [])
+                recent_files.append(normalized_target)
+                insights["recent_files"] = recent_files[-6:]
+            if intent in {"next_action", "daily_brief", "search_personal", "summarize_file"}:
+                insights["last_focus_topic"] = normalized_target
+
         self._save(payload)
 
     def get_history(self, limit=None):
@@ -86,3 +122,13 @@ class UserMemoryStore:
         if limit is None:
             return history
         return history[-limit:]
+
+    def get_insights(self):
+        payload = self._load()
+        insights = payload.get("insights", {})
+        return {
+            "top_intents": dict(insights.get("top_intents", {})),
+            "active_project": insights.get("active_project", ""),
+            "recent_files": list(insights.get("recent_files", [])),
+            "last_focus_topic": insights.get("last_focus_topic", ""),
+        }
