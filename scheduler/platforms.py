@@ -1,95 +1,210 @@
 """
 Platform connectors for the scheduler.
 
-WhatsApp  — pywhatkit.sendwhatmsg_instantly  (free, uses WhatsApp Web)
-Facebook  — Graph API (free token, post to page/group)
+WhatsApp  — Playwright (WhatsApp Web, session persistante, aucune API tierce)
+Facebook  — Playwright (Facebook Web, session persistante, aucune API tierce)
+
+Aucune API de réseau social n'est utilisée.  Les deux connecteurs ouvrent le
+navigateur local de l'utilisateur avec un profil persistant (les cookies de
+connexion sont conservés entre les sessions) et préparent la publication.
+L'utilisateur doit être connecté à chaque service dans ce profil.
 """
 
 import logging
-import os
+import sys
+from pathlib import Path
 from urllib.parse import quote
 
 import config
 
 logger = logging.getLogger("jarvis.scheduler.platforms")
 
+# Répertoire de données utilisateur Playwright (cookies persistants)
+_BROWSER_DATA_DIR = config.DATA_DIR / "browser_profiles"
+
+
+def _get_playwright_context(profile_name: str):
+    """
+    Return a (playwright, browser_context) tuple using a persistent profile
+    so the user's login session is preserved between JARVIS runs.
+    Raises ImportError if playwright is not installed.
+    Raises RuntimeError if the browser cannot be launched.
+    """
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: PLC0415
+    except ImportError as exc:
+        raise ImportError(
+            "playwright non installe. Lancez : pip install playwright && "
+            "playwright install chromium"
+        ) from exc
+
+    user_data_dir = str(_BROWSER_DATA_DIR / profile_name)
+    Path(user_data_dir).mkdir(parents=True, exist_ok=True)
+
+    pw = sync_playwright().start()
+    context = pw.chromium.launch_persistent_context(
+        user_data_dir,
+        headless=False,
+        args=["--start-maximized"],
+        no_viewport=True,
+    )
+    return pw, context
+
+
 # --------------------------------------------------------------------------- #
-#  WhatsApp                                                                    #
+#  WhatsApp Web                                                                #
 # --------------------------------------------------------------------------- #
 
 def send_whatsapp(target: str, message: str) -> tuple[bool, str]:
     """
-    Send a WhatsApp message via pywhatkit.
-    target: phone number (+2236XXXXXXXX) or group invite link/name.
-    Returns (success, detail_message).
+    Envoie un message WhatsApp via WhatsApp Web (Playwright, sans API tierce).
+    target : numéro de téléphone international (+2236XXXXXXXX).
+    Le navigateur utilise un profil persistant — l'utilisateur doit être
+    connecté à WhatsApp Web dans ce profil.
     """
-    try:
-        import pywhatkit  # already in requirements.txt
-    except ImportError:
-        return False, "pywhatkit non installe. Lancez: pip install pywhatkit"
-
     target = target.strip()
     if not target:
-        return False, "Numero ou lien de groupe WhatsApp manquant."
+        return False, "Numéro de téléphone WhatsApp manquant (ex: +2236XXXXXXXX)."
+
+    # Normalise le numéro : retire espaces et tirets
+    phone = target.replace(" ", "").replace("-", "")
+    # URL de démarrage direct d'une conversation avec pré-remplissage du texte
+    url = f"https://web.whatsapp.com/send?phone={quote(phone)}&text={quote(message)}"
 
     try:
-        # sendwhatmsg_instantly opens WhatsApp Web and sends without waiting
-        wait_time = config.SCHEDULER_SETTINGS.get("whatsapp_wait_time", 15)
-        pywhatkit.sendwhatmsg_instantly(
-            target,
-            message,
-            wait_time=wait_time,
-            tab_close=True,
-            close_time=5,
-        )
-        logger.info("WhatsApp message sent to %s", target)
-        return True, f"Message WhatsApp envoye a {target}"
+        pw, context = _get_playwright_context("whatsapp")
+    except ImportError as exc:
+        return False, str(exc)
     except Exception as exc:
-        logger.error("WhatsApp send error: %s", exc)
-        return False, f"Erreur WhatsApp : {exc}"
+        logger.error("Playwright launch error (WhatsApp): %s", exc)
+        return False, f"Impossible de lancer le navigateur : {exc}"
+
+    try:
+        page = context.new_page() if not context.pages else context.pages[0]
+        page.goto(url, timeout=30_000)
+        # Attend que la zone de saisie du message soit disponible
+        send_box = page.locator(
+            "div[data-tab='10'][contenteditable='true'], "
+            "footer div[contenteditable='true']"
+        ).first
+        send_box.wait_for(state="visible", timeout=30_000)
+        # Le texte est déjà pré-rempli via l'URL ; on appuie sur Entrée pour envoyer.
+        send_box.press("Enter")
+        logger.info("WhatsApp message sent to %s via WhatsApp Web", phone)
+        return True, f"Message WhatsApp envoyé à {phone} via WhatsApp Web."
+    except Exception as exc:
+        logger.error("WhatsApp Web send error: %s", exc)
+        return False, (
+            f"Erreur WhatsApp Web : {exc}. "
+            "Vérifiez que vous êtes connecté à WhatsApp Web dans le profil JARVIS."
+        )
+    finally:
+        try:
+            context.close()
+            pw.stop()
+        except Exception:
+            pass
 
 
 # --------------------------------------------------------------------------- #
-#  Facebook                                                                    #
+#  Facebook Web                                                                #
 # --------------------------------------------------------------------------- #
 
 def send_facebook(target: str, message: str) -> tuple[bool, str]:
     """
-    Post a message to a Facebook page or group via the free Graph API.
-    target: page_id or group_id.
-    Requires FB_ACCESS_TOKEN env var.
+    Prépare une publication Facebook via Facebook Web (Playwright, sans API tierce).
+    target : identifiant ou slug de la page/groupe (ex: 'mon.groupe' ou
+             'groups/123456789'), ou URL complète.
+    Le navigateur utilise un profil persistant — l'utilisateur doit être
+    connecté à Facebook dans ce profil.
+    Le texte est pré-rempli dans le compositeur ; l'utilisateur clique
+    « Publier » pour confirmer l'envoi final.
     """
-    try:
-        import requests
-    except ImportError:
-        return False, "requests non disponible."
-
-    access_token = os.getenv("FB_ACCESS_TOKEN", "").strip()
-    if not access_token:
-        return False, (
-            "Token Facebook manquant. "
-            "Ajoutez FB_ACCESS_TOKEN dans votre .env "
-            "(token gratuit depuis developers.facebook.com)."
-        )
-
     target = target.strip()
     if not target:
-        return False, "ID de page/groupe Facebook manquant."
+        return False, "Identifiant de page/groupe Facebook manquant."
 
-    url = f"https://graph.facebook.com/v19.0/{target}/feed"
-    payload = {"message": message, "access_token": access_token}
+    # Construit l'URL de destination
+    if target.startswith("http://") or target.startswith("https://"):
+        fb_url = target
+    else:
+        fb_url = f"https://www.facebook.com/{target}"
+
     try:
-        resp = requests.post(url, data=payload, timeout=15)
-        data = resp.json()
-        if "id" in data:
-            logger.info("Facebook post published to %s: %s", target, data["id"])
-            return True, f"Publication Facebook envoyee (id: {data['id']})"
-        error_msg = data.get("error", {}).get("message", str(data))
-        logger.error("Facebook API error: %s", error_msg)
-        return False, f"Erreur Facebook API : {error_msg}"
+        pw, context = _get_playwright_context("facebook")
+    except ImportError as exc:
+        return False, str(exc)
     except Exception as exc:
-        logger.error("Facebook send error: %s", exc)
-        return False, f"Erreur Facebook : {exc}"
+        logger.error("Playwright launch error (Facebook): %s", exc)
+        return False, f"Impossible de lancer le navigateur : {exc}"
+
+    try:
+        page = context.new_page() if not context.pages else context.pages[0]
+        page.goto(fb_url, timeout=30_000)
+
+        # Ouvre le compositeur de publication (zone "Qu'avez-vous en tête ?")
+        composer_triggers = [
+            "[data-pagelet='GroupComposer'] [role='button']",
+            "[data-pagelet='FeedComposer'] [role='button']",
+            "div[aria-label*='publication']",
+            "div[aria-label*='post']",
+            "div[aria-placeholder*='en tête']",
+            "div[aria-placeholder*='mind']",
+        ]
+        opened = False
+        for selector in composer_triggers:
+            try:
+                trigger = page.locator(selector).first
+                trigger.wait_for(state="visible", timeout=5_000)
+                trigger.click()
+                opened = True
+                break
+            except Exception:
+                continue
+
+        if not opened:
+            logger.warning("Facebook composer trigger not found for %s", target)
+
+        # Cherche la zone de saisie du compositeur et y écrit le message
+        text_selectors = [
+            "div[aria-label*='publication'][contenteditable='true']",
+            "div[aria-label*='post'][contenteditable='true']",
+            "div[contenteditable='true'][role='textbox']",
+        ]
+        typed = False
+        for sel in text_selectors:
+            try:
+                box = page.locator(sel).first
+                box.wait_for(state="visible", timeout=8_000)
+                box.click()
+                box.type(message, delay=30)
+                typed = True
+                break
+            except Exception:
+                continue
+
+        if typed:
+            logger.info("Facebook post prepared for %s — waiting user confirmation", target)
+            return True, (
+                "Publication Facebook préparée dans le navigateur. "
+                "Vérifiez le texte puis cliquez « Publier » pour confirmer."
+            )
+        else:
+            logger.warning("Facebook composer text box not found for %s", target)
+            return True, (
+                "Facebook ouvert dans le navigateur. "
+                "Le compositeur de publication n'a pas pu être rempli automatiquement — "
+                "copiez votre message manuellement, puis cliquez « Publier »."
+            )
+    except Exception as exc:
+        logger.error("Facebook Web error: %s", exc)
+        return False, (
+            f"Erreur Facebook Web : {exc}. "
+            "Vérifiez que vous êtes connecté à Facebook dans le profil JARVIS."
+        )
+    # Ne ferme PAS le contexte ni le processus Playwright : le navigateur doit
+    # rester ouvert pour que l'utilisateur puisse cliquer « Publier ».
+
 
 
 # --------------------------------------------------------------------------- #

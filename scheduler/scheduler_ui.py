@@ -103,8 +103,8 @@ QScrollArea {{ border: none; }}
 WEEKDAYS_FR = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
 PLATFORMS = ["whatsapp", "facebook"]
 PLATFORM_HINTS = {
-    "whatsapp": "Ex: +2236XXXXXXXX  (numéro avec indicatif)",
-    "facebook": "Ex: page_id ou group_id (trouvé dans l'URL Facebook)",
+    "whatsapp": "Ex: +2236XXXXXXXX  (numéro avec indicatif international)",
+    "facebook": "Ex: mon.groupe  ou  groups/123456789  (slug ou chemin de l'URL Facebook)",
 }
 
 STATUS_LABELS = {
