@@ -8,6 +8,7 @@ import text2speech as t2s
 from assistant_core import AssistantCore
 from interface import run_ui
 from intent_engine import detect_intent
+from scheduler import scheduler_core as sched_core
 try:
     import pyttsx3
 except Exception:
@@ -146,6 +147,15 @@ def setup_runtime():
         activate_listen("ui")
 
     ui.listen_requested.connect(activate_from_ui)
+
+    def open_scheduler_from_ui():
+        try:
+            from scheduler.scheduler_ui import open_scheduler
+            open_scheduler(parent=None)
+        except Exception as exc:
+            logger.exception("Failed to open scheduler UI from button")
+
+    ui.scheduler_requested.connect(open_scheduler_from_ui)
     state["activate_listen"] = activate_listen
     ui.set_mode("idle")
     if config.ENABLE_SOFT_WAKE_WORD:
@@ -260,6 +270,18 @@ def run_loop(app, ui, engine, assistant, state):
             speak(engine, ui, app, "D'accord. J'arrete.")
             break
 
+        if result == "__OPEN_SCHEDULER__":
+            speak(engine, ui, app, "J'ouvre le planificateur de tâches.")
+            try:
+                from scheduler.scheduler_ui import open_scheduler
+                open_scheduler(parent=None)
+            except Exception as exc:
+                logger.exception("Failed to open scheduler UI")
+                speak(engine, ui, app, f"Impossible d'ouvrir le planificateur : {exc}")
+            ui.set_mode("idle")
+            app.processEvents()
+            continue
+
         speak(engine, ui, app, result)
         ui.update_text(result)
         ui.set_mode("idle")
@@ -269,12 +291,14 @@ def run_loop(app, ui, engine, assistant, state):
 def shutdown_runtime(state):
     pause_soft_wake_listener()
     stop_soft_wake_listener()
+    sched_core.stop()
 
 
 def main():
     configure_logging()
     logger.info("Jarvis starting")
     app, ui, engine, assistant, state = setup_runtime()
+    sched_core.start()
     try:
         run_loop(app, ui, engine, assistant, state)
     finally:

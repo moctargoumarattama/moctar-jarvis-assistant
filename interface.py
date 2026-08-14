@@ -4,7 +4,7 @@ import sys
 try:
     from PyQt5.QtCore import Qt, QTimer, pyqtSignal
     from PyQt5.QtGui import QColor, QFont, QPainter, QPen
-    from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
     PYQT_AVAILABLE = True
 except Exception:
     PYQT_AVAILABLE = False
@@ -99,12 +99,13 @@ if PYQT_AVAILABLE:
 
     class JarvisUI(QWidget):
         listen_requested = pyqtSignal()
+        scheduler_requested = pyqtSignal()
 
         def __init__(self):
             super().__init__()
 
             self.setWindowTitle("M.O.C.T.A.R - Iron Mode")
-            self.resize(620, 720)
+            self.resize(620, 760)
             self.setStyleSheet("""
                 QWidget {
                     background-color: #02070d;
@@ -138,10 +139,30 @@ if PYQT_AVAILABLE:
                 background-color: rgba(0, 200, 255, 0.08);
             """)
 
+            self.scheduler_btn = QPushButton("📅 Planificateur de tâches")
+            self.scheduler_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #003a4a;
+                    color: #00eaff;
+                    border: 1px solid #00eaff;
+                    border-radius: 10px;
+                    padding: 10px 22px;
+                    font-size: 15px;
+                    font-weight: bold;
+                    letter-spacing: 1px;
+                }
+                QPushButton:hover {
+                    background-color: #005a6e;
+                    color: #ffffff;
+                }
+            """)
+            self.scheduler_btn.clicked.connect(self.scheduler_requested.emit)
+
             layout = QVBoxLayout()
             layout.addWidget(self.title)
             layout.addWidget(self.core)
             layout.addWidget(self.label)
+            layout.addWidget(self.scheduler_btn)
             self.setLayout(layout)
 
         def update_text(self, text):
@@ -168,6 +189,7 @@ else:
     class _DummyUI:
         def __init__(self):
             self.listen_requested = _DummySignal()
+            self.scheduler_requested = _DummySignal()
 
         def update_text(self, _text):
             return None

@@ -290,6 +290,17 @@ WAKE_WORD_SETTINGS = {
 GIT_TIMEOUT_SECONDS = 20
 DEFAULT_SITE_SEARCH_QUERY = "playlist musique populaire"
 
+# --------------------------------------------------------------------------- #
+#  Scheduler settings                                                          #
+# --------------------------------------------------------------------------- #
+
+SCHEDULER_SETTINGS = {
+    # Facebook Graph API token (free — https://developers.facebook.com/tools/explorer/)
+    "fb_access_token": os.getenv("FB_ACCESS_TOKEN", "").strip(),
+    # WhatsApp wait time in seconds for pywhatkit to open WhatsApp Web
+    "whatsapp_wait_time": int(os.getenv("WHATSAPP_WAIT_TIME", "15")),
+}
+
 
 def ensure_runtime_directories():
     for directory in [LOGS_DIR, NOTES_DIR, SCREENSHOTS_DIR, DATA_DIR]:
