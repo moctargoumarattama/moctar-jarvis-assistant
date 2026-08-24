@@ -1,3 +1,4 @@
+import logging
 import time
 
 try:
@@ -43,42 +44,72 @@ TIMEOUT = config.MIC_SETTINGS["timeout"]
 PHRASE_LIMIT = config.MIC_SETTINGS["phrase_limit"]
 AMBIENT_DURATION = config.MIC_SETTINGS["ambient_duration"]
 MIC_INDEX = config.MIC_SETTINGS["device_index"]
+ATTEMPTS = max(1, config.MIC_SETTINGS["attempts"])
+CALIBRATION_INTERVAL = max(0, config.MIC_SETTINGS["calibration_interval"])
 
 recognizer = sr.Recognizer()
+recognizer.dynamic_energy_threshold = True
+recognizer.pause_threshold = config.MIC_SETTINGS["pause_threshold"]
+recognizer.phrase_threshold = config.MIC_SETTINGS["phrase_threshold"]
+recognizer.non_speaking_duration = config.MIC_SETTINGS["non_speaking_duration"]
+_last_calibration_at = 0.0
+logger = logging.getLogger("jarvis.speech")
+
+
+def _calibrate_if_needed(source):
+    global _last_calibration_at
+
+    now = time.monotonic()
+    if now - _last_calibration_at < CALIBRATION_INTERVAL:
+        return
+
+    recognizer.adjust_for_ambient_noise(source, duration=config.MIC_SETTINGS["ambient_duration"])
+    recognizer.energy_threshold *= config.MIC_SETTINGS["energy_threshold_ratio"]
+    _last_calibration_at = now
+
+
+def _recognize_once(language):
+    with sr.Microphone(device_index=MIC_INDEX) as source:
+        _calibrate_if_needed(source)
+        print("Parle maintenant...")
+        audio = recognizer.listen(
+            source,
+            timeout=config.MIC_SETTINGS["timeout"],
+            phrase_time_limit=config.MIC_SETTINGS["phrase_limit"],
+        )
+
+    print("Transcription...")
+    text = recognizer.recognize_google(audio, language=language)
+    return text.strip().lower()
 
 
 def speech_to_text(language=DEFAULT_LANGUAGE):
-    try:
-        with sr.Microphone(device_index=MIC_INDEX) as source:
-            print("Parle maintenant...")
-            recognizer.adjust_for_ambient_noise(source, duration=AMBIENT_DURATION)
-            audio = recognizer.listen(
-                source,
-                timeout=TIMEOUT,
-                phrase_time_limit=PHRASE_LIMIT,
-            )
-    except sr.WaitTimeoutError:
-        print("Aucun son detecte")
-        time.sleep(1)
-        return ""
-    except Exception as exc:
-        print(f"Erreur micro : {exc}")
-        time.sleep(2)
-        return ""
+    last_reason = "aucun son"
+    for attempt in range(ATTEMPTS):
+        try:
+            text = _recognize_once(language)
+            if text:
+                print("Tu as dit :", text)
+                return text
+            last_reason = "transcription vide"
+        except sr.WaitTimeoutError:
+            last_reason = "aucun son dans le delai"
+        except sr.UnknownValueError:
+            last_reason = "parole incomprehensible"
+        except sr.RequestError as exc:
+            last_reason = f"service de transcription indisponible: {exc}"
+            logger.warning(last_reason)
+            break
+        except Exception as exc:
+            last_reason = f"micro indisponible: {exc}"
+            logger.exception("Erreur pendant la capture audio")
+            break
 
-    try:
-        print("Transcription...")
-        text = recognizer.recognize_google(audio, language=language)
-        print("Tu as dit :", text)
-        return text.lower()
-    except sr.UnknownValueError:
-        print("Je n'ai pas compris")
-        time.sleep(1)
-        return ""
-    except sr.RequestError as exc:
-        print(f"Erreur API Google : {exc}")
-        time.sleep(2)
-        return ""
+        if attempt + 1 < ATTEMPTS:
+            print("Je n'ai pas bien entendu, essaie encore...")
+
+    print(f"Ecoute echouee: {last_reason}")
+    return ""
 
 
 def french_speech_to_text():

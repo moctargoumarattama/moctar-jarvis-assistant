@@ -190,6 +190,11 @@ def _score_command_only_activation(normalized_text):
     if not _looks_like_inline_command(normalized_text):
         return 0.0
 
+    # Music playing in the room often produces transcripts beginning with
+    # "mets" or "joue". Require an explicit wake word for those commands.
+    if normalized_text.split()[0] in {"mets", "met", "joue", "play"}:
+        return 0.0
+
     penalty = min(max(len(normalized_text.split()) - 2, 0) * 0.01, 0.04)
     return max(config.SOFT_WAKE_MIN_CONFIDENCE, 0.89 - penalty)
 
@@ -427,6 +432,7 @@ def _listen_loop():
                 "wake_word": activation["wake_word"],
                 "command": activation["command"],
                 "confidence": activation["confidence"],
+                "command_only": activation.get("command_only", False),
                 "raw": text,
                 "normalized": normalized,
             }
