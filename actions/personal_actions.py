@@ -3,7 +3,10 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from dateutil import parser as date_parser
+try:
+    from dateutil import parser as date_parser
+except Exception:
+    date_parser = None
 
 import config
 
@@ -139,7 +142,22 @@ class PersonalAssistant:
         if re.fullmatch(r"\d{1,2}", cleaned):
             cleaned = f"{cleaned}:00"
 
-        return date_parser.parse(cleaned, default=reference)
+        if date_parser is not None:
+            return date_parser.parse(cleaned, default=reference)
+
+        if re.fullmatch(r"\d{1,2}:\d{2}", cleaned):
+            hour, minute = map(int, cleaned.split(":"))
+            return reference.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:[ T]\d{1,2}:\d{2})?", cleaned):
+            normalized = cleaned.replace(" ", "T")
+            try:
+                parsed = datetime.fromisoformat(normalized)
+                return parsed
+            except ValueError:
+                pass
+
+        raise ValueError(f"Impossible de parser l'heure du rappel: {when_text!r}")
 
     def schedule_reminder(self, content, when_text, now=None):
         if not content.strip():

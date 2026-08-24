@@ -67,6 +67,11 @@ class IntentEngineTests(unittest.TestCase):
 
         self.assertEqual("next_action", intent["intent"])
 
+    def test_detects_date_question(self):
+        intent = detect_intent("on est quel jour aujourd'hui")
+
+        self.assertEqual("date", intent["intent"])
+
     def test_detects_task_prioritization(self):
         intent = detect_intent("priorise mes taches")
 
@@ -104,6 +109,44 @@ class IntentEngineTests(unittest.TestCase):
 
         self.assertEqual("play_music", intent["intent"])
         self.assertEqual("", intent["target"])
+
+    def test_bare_music_request_asks_for_a_title(self):
+        intent = detect_intent("musique")
+
+        self.assertEqual("play_music", intent["intent"])
+        self.assertEqual("", intent["target"])
+
+    def test_alarm_request_is_routed_to_reminder_intent(self):
+        intent = detect_intent("mets-moi l'alarme à 11")
+
+        self.assertEqual("remind_me", intent["intent"])
+        self.assertEqual("alarme", intent["target"])
+        self.assertEqual("11", intent["slots"]["when_text"])
+
+    def test_alarm_phrase_without_a_verb_is_still_a_reminder(self):
+        intent = detect_intent("l'alarme à 11h")
+
+        self.assertEqual("remind_me", intent["intent"])
+        self.assertEqual("alarme", intent["target"])
+        self.assertEqual("11h", intent["slots"]["when_text"])
+
+    def test_programmed_reminder_is_routed_to_reminder_intent(self):
+        intent = detect_intent("programme-moi une sortie à 11")
+
+        self.assertEqual("remind_me", intent["intent"])
+        self.assertEqual("une sortie", intent["target"])
+        self.assertEqual("11", intent["slots"]["when_text"])
+
+    def test_hyphenated_music_command_preserves_artist(self):
+        intent = detect_intent("mets-moi du ninho")
+
+        self.assertEqual("play_music", intent["intent"])
+        self.assertEqual("ninho", intent["target"])
+
+    def test_sound_on_command_does_not_start_music(self):
+        intent = detect_intent("mets le son")
+
+        self.assertEqual("volume_up", intent["intent"])
 
     def test_detects_energy_consumption(self):
         intent = detect_intent("calcule la consommation de 12 lampes de 60 watts pendant 8 heures")
@@ -170,6 +213,12 @@ class IntentEngineTests(unittest.TestCase):
         self.assertEqual("iot_relay_on", intent["intent"])
         self.assertEqual(2, intent["slots"]["relay_id"])
 
+    def test_detects_iot_relay_on_with_active(self):
+        intent = detect_intent("active le relais 2")
+
+        self.assertEqual("iot_relay_on", intent["intent"])
+        self.assertEqual(2, intent["slots"]["relay_id"])
+
     def test_detects_iot_relay_off_with_default_id(self):
         intent = detect_intent("eteins le relais")
 
@@ -183,6 +232,41 @@ class IntentEngineTests(unittest.TestCase):
     def test_detects_confirmation_no(self):
         intent = detect_intent("annule")
         self.assertEqual("confirm_no", intent["intent"])
+
+    def test_alarm_request_wins_over_music_request(self):
+        intent = detect_intent("mets-moi le reveil a 11h")
+
+        self.assertEqual("remind_me", intent["intent"])
+        self.assertEqual("11h", intent["slots"]["when_text"])
+
+    def test_battery_question_is_not_device_battery_status(self):
+        intent = detect_intent("comment fonctionne une batterie solaire")
+
+        self.assertEqual("chat_fallback", intent["intent"])
+
+    def test_music_stop_does_not_stop_assistant(self):
+        intent = detect_intent("arrete la musique")
+
+        self.assertEqual("music_pause", intent["intent"])
+
+    def test_plain_stop_stops_assistant(self):
+        intent = detect_intent("arrete")
+
+        self.assertEqual("stop", intent["intent"])
+
+    def test_youtube_music_is_a_site_not_a_song_request(self):
+        intent = detect_intent("ouvre youtube music")
+        self.assertEqual("open_site", intent["intent"])
+        self.assertEqual("youtube_music", intent["target"])
+
+    def test_sentence_about_code_does_not_open_vscode(self):
+        self.assertEqual("chat_fallback", detect_intent("je fais du code")['intent'])
+        self.assertEqual("chat_fallback", detect_intent("ouvre mon code source")['intent'])
+
+    def test_music_command_preserves_artist(self):
+        intent = detect_intent("mets du ninho")
+        self.assertEqual("play_music", intent["intent"])
+        self.assertEqual("ninho", intent["target"])
 
 
 if __name__ == "__main__":

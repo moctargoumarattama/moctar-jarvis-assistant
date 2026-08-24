@@ -1,6 +1,7 @@
 import os
 import subprocess
 from datetime import datetime
+import locale
 
 try:
     import psutil
@@ -32,6 +33,16 @@ import config
 def get_time_response(now=None):
     current = now or datetime.now()
     return f"Il est {current.strftime('%H:%M')}."
+
+
+def get_date_response(now=None):
+    current = now or datetime.now()
+    try:
+        locale.setlocale(locale.LC_TIME, "")
+    except Exception:
+        pass
+    formatted = current.strftime("%A %d %B %Y")
+    return f"Nous sommes le {formatted}."
 
 
 def get_battery_response(battery_provider=psutil.sensors_battery):

@@ -1,8 +1,10 @@
 import logging
 import time
+import threading
 from logging.handlers import RotatingFileHandler
 
 import config
+import ai_brain
 import speech2text as s2t
 import text2speech as t2s
 from assistant_core import AssistantCore
@@ -43,6 +45,7 @@ COMMAND_ONLY_ALLOWED_PREFIXES = {
     "ajoute",
     "augmente",
     "baisse",
+    "alarme",
     "cherche",
     "combien",
     "coupe",
@@ -51,19 +54,29 @@ COMMAND_ONLY_ALLOWED_PREFIXES = {
     "joue",
     "lance",
     "met",
+    "met-moi",
     "mets",
+    "mets-moi",
+    "planifie",
+    "planifie-moi",
+    "programme",
+    "programme-moi",
     "open",
     "ouvre",
     "play",
     "quel",
     "quelle",
+    "rappel",
+    "rappel-moi",
     "rappelle",
+    "rappelle-moi",
     "resume",
 }
 COMMAND_ONLY_SAFE_INTENTS = {
     "add_todo",
     "battery",
     "create_note",
+    "date",
     "energy_audit_template",
     "energy_consumption",
     "energy_cost",
@@ -96,6 +109,13 @@ COMMAND_ONLY_SAFE_INTENTS = {
 }
 
 
+def format_assistant_message(text):
+    text = (text or "").strip()
+    if not text:
+        return "Je n'ai pas de reponse pour le moment."
+    return text
+
+
 def configure_logging():
     if logger.handlers:
         return
@@ -123,6 +143,8 @@ def setup_runtime():
     app, ui = run_ui()
     engine = pyttsx3.init()
     assistant = AssistantCore()
+    status = ai_brain.get_ai_status()
+    ui.set_ai_status(status["model"], status["base_url"], status["online"])
     startup_message = start_soft_wake_listener()
     logger.info(startup_message)
     state = {
@@ -148,6 +170,12 @@ def setup_runtime():
 
     ui.listen_requested.connect(activate_from_ui)
 
+    def show_ai_status():
+        ui.update_text(ui.ai_status_message)
+        app.processEvents()
+
+    ui.ai_status_requested.connect(show_ai_status)
+
     def open_scheduler_from_ui():
         try:
             from scheduler.scheduler_ui import open_scheduler
@@ -166,6 +194,7 @@ def setup_runtime():
 
 
 def speak(engine, ui, app, text):
+    text = format_assistant_message(text)
     logger.info("Assistant response: %s", text)
     print("M.O.C.T.A.R:", text)
     ui.set_mode("speaking")
@@ -179,12 +208,9 @@ def speak(engine, ui, app, text):
         app.processEvents()
 
 
-def listen_for_command(app, ui):
-    acquire_command_microphone(app=app)
+def listen_for_command(_app=None, _ui=None):
+    acquire_command_microphone()
     try:
-        ui.set_mode("listening")
-        ui.update_text("🎤 J'écoute...")
-        app.processEvents()
         return s2t.voice2text("fr")
     finally:
         release_command_microphone()
@@ -194,6 +220,77 @@ def handle_command(command, assistant):
     logger.info("User command: %s", command)
     intent_data = detect_intent(command)
     return assistant.handle_intent(intent_data)
+
+
+def start_command_job(command, assistant, music_was_paused, state):
+    def _worker():
+        try:
+            result = handle_command(command, assistant)
+        except Exception as exc:
+            logger.exception("Intent handling failed")
+            result = f"Erreur interne : {exc}"
+        state["command_job"]["result"] = result
+        state["command_job"]["done"] = True
+
+    job = {
+        "command": command,
+        "music_was_paused": music_was_paused,
+        "result": None,
+        "done": False,
+    }
+    thread = threading.Thread(target=_worker, daemon=True)
+    job["thread"] = thread
+    state["command_job"] = job
+    thread.start()
+
+
+def get_finished_command_job(state):
+    job = state.get("command_job")
+    if not job:
+        return None
+    thread = job.get("thread")
+    if thread and thread.is_alive():
+        return None
+    state["command_job"] = None
+    return job
+
+
+def start_listen_job(app, ui, state):
+    def _worker():
+        try:
+            command = listen_for_command()
+        except Exception as exc:
+            logger.exception("Voice capture failed")
+            command = ""
+            state["listen_job_error"] = str(exc)
+        state["listen_job"]["result"] = command
+        state["listen_job"]["done"] = True
+
+    job = {
+        "result": None,
+        "done": False,
+    }
+    thread = threading.Thread(target=_worker, daemon=True)
+    job["thread"] = thread
+    state["listen_job"] = job
+    thread.start()
+
+
+def get_finished_listen_job(state):
+    job = state.get("listen_job")
+    if not job:
+        return None
+    thread = job.get("thread")
+    if thread and thread.is_alive():
+        return None
+    state["listen_job"] = None
+    return job
+
+
+def _set_listening_popup(ui, visible):
+    method = getattr(ui, "show_listening_popup" if visible else "hide_listening_popup", None)
+    if method:
+        method()
 
 
 def is_safe_command_only_activation(command):
@@ -210,6 +307,13 @@ def is_safe_command_only_activation(command):
 
 
 def resolve_next_command(app, ui, state):
+    if state["should_listen"]:
+        # The button owns the microphone session. A wake transcript captured
+        # during that session must not be replayed after the UI capture fails.
+        consume_voice_activation()
+        state["should_listen"] = False
+        return listen_for_command(app, ui)
+
     activation = consume_voice_activation()
     inline_command = ""
 
@@ -219,22 +323,96 @@ def resolve_next_command(app, ui, state):
         if inline_command:
             if activation.get("command_only") and not is_safe_command_only_activation(inline_command):
                 state["should_listen"] = False
+                state["feedback"] = (
+                    f"J'ai entendu « {inline_command} », mais je ne l'exécute pas sans activation claire. "
+                    "Dis « Hey Moctar » puis répète la commande."
+                )
                 logger.info("Rejected ambiguous command-only wake payload: %s", inline_command)
                 return ""
             state["should_listen"] = False
             logger.info("Using inline voice command from wake word: %s", inline_command)
             return inline_command
 
-    if not state["should_listen"]:
-        return ""
-
-    state["should_listen"] = False
-    return listen_for_command(app, ui)
+    return ""
 
 
 def run_loop(app, ui, engine, assistant, state):
     while True:
         app.processEvents()
+
+        listen_job = get_finished_listen_job(state)
+        if listen_job is not None:
+            command = (listen_job.get("result") or "").strip()
+            if not command:
+                error_message = state.pop("listen_job_error", "")
+                _set_listening_popup(ui, False)
+                ui.set_mode("idle")
+                if state.pop("listen_job_music_was_paused", False) and not assistant.pending_music_request:
+                    assistant.resume_music_after_command()
+                feedback = format_assistant_message(
+                    state.pop(
+                        "feedback",
+                        "Je n'ai pas compris. Essaie encore ou utilise le bouton d'écoute.",
+                    )
+                )
+                if error_message:
+                    feedback = format_assistant_message("Je n'ai pas pu écouter correctement. Réessaie.")
+                ui.update_text(feedback)
+                app.processEvents()
+                logger.info("No command understood: %s", feedback)
+                continue
+
+            music_was_paused = state.pop("listen_job_music_was_paused", False)
+            ui.update_text("Je reflechis...")
+            app.processEvents()
+            _set_listening_popup(ui, False)
+            start_command_job(command, assistant, music_was_paused, state)
+            continue
+
+        job = get_finished_command_job(state)
+        if job:
+            result = job.get("result") or "Erreur interne : aucune reponse."
+            music_was_paused = job.get("music_was_paused", False)
+
+            if result == "__STOP__":
+                speak(engine, ui, app, "D'accord. J'arrete.")
+                _set_listening_popup(ui, False)
+                break
+
+            if result == "__OPEN_SCHEDULER__":
+                speak(engine, ui, app, "J'ouvre le planificateur de tâches.")
+                try:
+                    from scheduler.scheduler_ui import open_scheduler
+                    open_scheduler(parent=None)
+                except Exception as exc:
+                    logger.exception("Failed to open scheduler UI")
+                    speak(engine, ui, app, f"Impossible d'ouvrir le planificateur : {exc}")
+                ui.set_mode("idle")
+                app.processEvents()
+                _set_listening_popup(ui, False)
+                if music_was_paused:
+                    assistant.resume_music_after_command()
+                continue
+
+            spoken_result = format_assistant_message(result)
+            speak(engine, ui, app, spoken_result)
+            _set_listening_popup(ui, False)
+            if music_was_paused and not assistant.pending_music_request:
+                assistant.resume_music_after_command()
+            ui.update_text(spoken_result)
+            ui.set_mode("idle")
+            if assistant.pending_music_request:
+                state["should_listen"] = True
+            app.processEvents()
+            continue
+
+        if state.get("command_job"):
+            time.sleep(IDLE_SLEEP_SECONDS)
+            continue
+
+        if state.get("listen_job"):
+            time.sleep(IDLE_SLEEP_SECONDS)
+            continue
 
         try:
             pending_messages = assistant.poll_background_messages()
@@ -249,43 +427,39 @@ def run_loop(app, ui, engine, assistant, state):
             time.sleep(IDLE_SLEEP_SECONDS)
             continue
 
+        _set_listening_popup(ui, True)
+        music_was_paused = assistant.pause_music_for_command()
+        if state["should_listen"]:
+            state["listen_job_music_was_paused"] = music_was_paused
+            consume_voice_activation()
+            state["should_listen"] = False
+            ui.set_mode("listening")
+            ui.update_text("Je t'ecoute...")
+            app.processEvents()
+            start_listen_job(app, ui, state)
+            continue
+
         command = resolve_next_command(app, ui, state)
         if not command:
+            _set_listening_popup(ui, False)
+            if music_was_paused and not assistant.pending_music_request:
+                assistant.resume_music_after_command()
+            if assistant.pending_music_request:
+                state["should_listen"] = True
             ui.set_mode("idle")
-            ui.update_text("Je n'ai pas compris.")
+            feedback = format_assistant_message(
+                state.pop("feedback", "Je n'ai pas compris. Essaie encore ou utilise le bouton d'écoute.")
+            )
+            ui.update_text(feedback)
             app.processEvents()
-            logger.info("No command understood")
+            logger.info("No command understood: %s", feedback)
             continue
 
-        ui.update_text(command)
+        ui.update_text("Je reflechis...")
         app.processEvents()
-
-        try:
-            result = handle_command(command, assistant)
-        except Exception as exc:
-            logger.exception("Intent handling failed")
-            result = f"Erreur interne : {exc}"
-
-        if result == "__STOP__":
-            speak(engine, ui, app, "D'accord. J'arrete.")
-            break
-
-        if result == "__OPEN_SCHEDULER__":
-            speak(engine, ui, app, "J'ouvre le planificateur de tâches.")
-            try:
-                from scheduler.scheduler_ui import open_scheduler
-                open_scheduler(parent=None)
-            except Exception as exc:
-                logger.exception("Failed to open scheduler UI")
-                speak(engine, ui, app, f"Impossible d'ouvrir le planificateur : {exc}")
-            ui.set_mode("idle")
-            app.processEvents()
-            continue
-
-        speak(engine, ui, app, result)
-        ui.update_text(result)
-        ui.set_mode("idle")
-        app.processEvents()
+        _set_listening_popup(ui, False)
+        state["should_listen"] = False
+        start_command_job(command, assistant, music_was_paused, state)
 
 
 def shutdown_runtime(state):

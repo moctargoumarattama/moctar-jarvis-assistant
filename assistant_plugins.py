@@ -37,6 +37,7 @@ def build_default_registry(assistant):
     registry.register("close_app", "system", assistant._handle_close_app)
     registry.register("open_folder", "system", assistant._handle_open_folder)
     registry.register("time", "system", assistant._handle_time)
+    registry.register("date", "system", assistant._handle_date)
     registry.register("battery", "system", assistant._handle_battery)
     registry.register("screenshot", "system", assistant._handle_screenshot)
     registry.register("volume_up", "system", assistant._handle_volume_up)
@@ -48,6 +49,10 @@ def build_default_registry(assistant):
     registry.register("search_youtube", "web", assistant._handle_search_youtube)
     registry.register("playlist", "music", assistant._handle_playlist)
     registry.register("play_music", "music", assistant._handle_play_music)
+    registry.register("music_pause", "music", assistant._handle_music_control)
+    registry.register("music_resume", "music", assistant._handle_music_control)
+    registry.register("music_next", "music", assistant._handle_music_control)
+    registry.register("music_previous", "music", assistant._handle_music_control)
 
     registry.register("open_project", "project", assistant._handle_open_project)
     registry.register("launch_project_server", "project", assistant._handle_launch_project_server)

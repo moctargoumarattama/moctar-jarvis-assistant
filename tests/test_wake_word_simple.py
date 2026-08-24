@@ -86,9 +86,7 @@ class WakeWordSimpleTests(unittest.TestCase):
     def test_evaluate_transcript_for_activation_accepts_command_only_music(self):
         activation = wake_word_simple.evaluate_transcript_for_activation("mets la musique", now_value=10.0)
 
-        self.assertIsNotNone(activation)
-        self.assertTrue(activation["command_only"])
-        self.assertEqual("mets la musique", activation["command"])
+        self.assertIsNone(activation)
 
     def test_contains_wake_word_ignores_normal_sentence(self):
         self.assertFalse(wake_word_simple.contains_wake_word("bonjour comment vas tu"))

@@ -1,6 +1,8 @@
 import math
 import sys
 
+import config
+
 try:
     from PyQt5.QtCore import Qt, QTimer, pyqtSignal
     from PyQt5.QtGui import QColor, QFont, QPainter, QPen
@@ -97,9 +99,31 @@ if PYQT_AVAILABLE:
             painter.drawText(self.rect(), Qt.AlignCenter, center_text)
 
 
+    class ListeningPopup(QWidget):
+        """Small always-on-top listening indicator with animated wave rings."""
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+            self.setFixedSize(210, 210)
+            self.setStyleSheet("background: #02070d; border: 2px solid #00ffb4; border-radius: 105px;")
+            self.core = JarvisCore()
+            self.core.setMinimumSize(200, 200)
+            self.core.set_mode("listening")
+            layout = QVBoxLayout(self)
+            layout.setContentsMargins(4, 4, 4, 4)
+            layout.addWidget(self.core)
+
+        def show_for(self, parent):
+            center = parent.frameGeometry().center()
+            self.move(center.x() - self.width() // 2, center.y() - self.height() // 2)
+            self.show()
+            self.raise_()
+
+
     class JarvisUI(QWidget):
         listen_requested = pyqtSignal()
         scheduler_requested = pyqtSignal()
+        ai_status_requested = pyqtSignal()
 
         def __init__(self):
             super().__init__()
@@ -127,6 +151,7 @@ if PYQT_AVAILABLE:
 
             self.core = JarvisCore()
             self.core.clicked.connect(self.listen_requested.emit)
+            self.listening_popup = ListeningPopup()
 
             self.label = QLabel("Clique sur le cœur pour parler")
             self.label.setAlignment(Qt.AlignCenter)
@@ -158,18 +183,51 @@ if PYQT_AVAILABLE:
             """)
             self.scheduler_btn.clicked.connect(self.scheduler_requested.emit)
 
+            self.ai_status_btn = QPushButton()
+            self.ai_status_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #06232b;
+                    color: #7fffd4;
+                    border: 1px solid #00eaff;
+                    border-radius: 10px;
+                    padding: 10px 22px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    letter-spacing: 0.5px;
+                }
+                QPushButton:hover {
+                    background-color: #0a3a45;
+                    color: #ffffff;
+                }
+            """)
+            self.ai_status_btn.clicked.connect(self.ai_status_requested.emit)
+            self.ai_status_message = ""
+            self.set_ai_status(config.AI_SETTINGS.get("default_model", "qwen3:8b"), config.AI_SETTINGS.get("base_url", "http://localhost:11434"), online=True)
+
             layout = QVBoxLayout()
             layout.addWidget(self.title)
             layout.addWidget(self.core)
             layout.addWidget(self.label)
+            layout.addWidget(self.ai_status_btn)
             layout.addWidget(self.scheduler_btn)
             self.setLayout(layout)
 
         def update_text(self, text):
             self.label.setText(text)
 
+        def set_ai_status(self, model, base_url, online=True):
+            engine = "Ollama" if online else "Local"
+            self.ai_status_message = f"Etat IA: {engine} | modele {model} | {base_url}"
+            self.ai_status_btn.setText(f"IA: {engine} | {model}")
+
         def set_mode(self, mode):
             self.core.set_mode(mode)
+
+        def show_listening_popup(self):
+            self.listening_popup.show_for(self)
+
+        def hide_listening_popup(self):
+            self.listening_popup.hide()
 
 
     def run_ui():
@@ -190,11 +248,22 @@ else:
         def __init__(self):
             self.listen_requested = _DummySignal()
             self.scheduler_requested = _DummySignal()
+            self.ai_status_requested = _DummySignal()
+            self.ai_status_message = ""
 
         def update_text(self, _text):
             return None
 
+        def set_ai_status(self, *_args, **_kwargs):
+            return None
+
         def set_mode(self, _mode):
+            return None
+
+        def show_listening_popup(self):
+            return None
+
+        def hide_listening_popup(self):
             return None
 
     def run_ui():

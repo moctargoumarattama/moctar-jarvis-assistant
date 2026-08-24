@@ -225,10 +225,16 @@ PROJECTS = {
 
 MIC_SETTINGS = {
     "default_language": "fr-FR",
-    "timeout": int(os.getenv("JARVIS_MIC_TIMEOUT", "5")),
-    "phrase_limit": int(os.getenv("JARVIS_MIC_PHRASE_LIMIT", "6")),
-    "ambient_duration": float(os.getenv("JARVIS_MIC_AMBIENT_DURATION", "1")),
+    "timeout": int(os.getenv("JARVIS_MIC_TIMEOUT", "7")),
+    "phrase_limit": int(os.getenv("JARVIS_MIC_PHRASE_LIMIT", "10")),
+    "ambient_duration": float(os.getenv("JARVIS_MIC_AMBIENT_DURATION", "0.6")),
     "device_index": _optional_int_env("JARVIS_MIC_INDEX", 2),
+    "attempts": int(os.getenv("JARVIS_MIC_ATTEMPTS", "2")),
+    "calibration_interval": float(os.getenv("JARVIS_MIC_CALIBRATION_INTERVAL", "45")),
+    "energy_threshold_ratio": float(os.getenv("JARVIS_MIC_ENERGY_RATIO", "1.15")),
+    "pause_threshold": float(os.getenv("JARVIS_MIC_PAUSE_THRESHOLD", "0.8")),
+    "phrase_threshold": float(os.getenv("JARVIS_MIC_PHRASE_THRESHOLD", "0.15")),
+    "non_speaking_duration": float(os.getenv("JARVIS_MIC_NON_SPEAKING_DURATION", "0.3")),
 }
 
 MIC_INDEX = MIC_SETTINGS["device_index"]
@@ -246,7 +252,9 @@ SOFT_WAKE_COOLDOWN_SECONDS = float(os.getenv("SOFT_WAKE_COOLDOWN_SECONDS", "1.5"
 SOFT_WAKE_MIN_CONFIDENCE = float(os.getenv("SOFT_WAKE_MIN_CONFIDENCE", "0.88"))
 
 AI_SETTINGS = {
-    "default_model": os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini",
+    "default_model": os.getenv("OLLAMA_MODEL", "qwen3:8b").strip() or "qwen3:8b",
+    "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip() or "http://localhost:11434",
+    "enable_general_ai": _optional_bool_env("MOCTAR_ENABLE_GENERAL_AI", True),
     "chat_fallback": "Je ne peux pas utiliser l'IA pour le moment.",
 }
 
@@ -272,6 +280,11 @@ WEB_SETTINGS = {
     "duplicate_cooldown_seconds": float(os.getenv("JARVIS_BROWSER_DUPLICATE_COOLDOWN", "4")),
 }
 
+KNOWLEDGE_SETTINGS = {
+    "enable_wikipedia": _optional_bool_env("MOCTAR_ENABLE_WIKIPEDIA", True),
+    "timeout_seconds": float(os.getenv("MOCTAR_KNOWLEDGE_TIMEOUT", "4")),
+}
+
 IOT_SETTINGS = {
     "base_url": os.getenv("MOCTAR_IOT_BASE_URL", "").strip(),
     "status_endpoint": os.getenv("MOCTAR_IOT_STATUS_ENDPOINT", "/api/status").strip() or "/api/status",
@@ -294,7 +307,9 @@ DEFAULT_SITE_SEARCH_QUERY = "playlist musique populaire"
 #  Scheduler settings                                                          #
 # --------------------------------------------------------------------------- #
 
-SCHEDULER_SETTINGS: dict = {}
+SCHEDULER_SETTINGS = {
+    "poll_seconds": max(int(os.getenv("JARVIS_SCHEDULER_POLL_SECONDS", "60")), 5),
+}
 
 
 def ensure_runtime_directories():

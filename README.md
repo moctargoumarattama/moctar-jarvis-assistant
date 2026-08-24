@@ -55,13 +55,14 @@ pip install -r requirements.txt
 
 ## Configuration
 
-1. Cree un fichier `.env` a partir de `.env.example`.
-2. `OPENAI_API_KEY` est optionnel et n'est pas requis pour le runtime principal local.
+1. Edite le fichier `.env`.
+2. `OLLAMA_MODEL`, `OLLAMA_VISION_MODEL` et `OLLAMA_BASE_URL` pilotent le moteur local.
 3. Ajuste les chemins projets et dossiers dans [config.py](config.py) si besoin.
 
 Variables utiles :
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
+- `OLLAMA_MODEL`
+- `OLLAMA_VISION_MODEL`
+- `OLLAMA_BASE_URL`
 - `ENABLE_SOFT_WAKE_WORD`
 - `SOFT_WAKE_LANGUAGE`
 - `SOFT_WAKE_TIMEOUT`
@@ -69,6 +70,15 @@ Variables utiles :
 - `SOFT_WAKE_COOLDOWN_SECONDS`
 - `SOFT_WAKE_MIN_CONFIDENCE`
 - `JARVIS_MIC_INDEX`
+- `JARVIS_MIC_TIMEOUT`
+- `JARVIS_MIC_PHRASE_LIMIT`
+- `JARVIS_MIC_ATTEMPTS`
+- `JARVIS_MIC_AMBIENT_DURATION`
+- `JARVIS_MIC_CALIBRATION_INTERVAL`
+- `JARVIS_MIC_ENERGY_RATIO`
+- `JARVIS_MIC_PAUSE_THRESHOLD`
+- `JARVIS_MIC_PHRASE_THRESHOLD`
+- `JARVIS_MIC_NON_SPEAKING_DURATION`
 - `MOCTAR_IOT_BASE_URL`
 - `MOCTAR_IOT_TIMEOUT`
 - `MOCTAR_IOT_TEMP_THRESHOLD`
@@ -101,6 +111,10 @@ Modes d'activation disponibles :
 Si l'activation vocale echoue ou si le micro est indisponible, le clic continue de fonctionner normalement.
 Tu peux aussi enchaîner directement wake word + commande, par exemple `hey moctar ouvre youtube` ou `yo mets ninho`.
 Si la transcription courte mange le wake word mais capte une commande claire comme `active youtube` ou `mets la musique`, M.O.C.T.A.R peut maintenant la traiter directement sans clic.
+
+La capture de commande utilise le microphone `2` par defaut sur cette installation. Elle calibre le bruit periodiquement, retente une transcription une fois et distingue les erreurs de micro, de delai et de transcription. Les reglages `JARVIS_MIC_ENERGY_RATIO`, `JARVIS_MIC_PAUSE_THRESHOLD` et `JARVIS_MIC_PHRASE_THRESHOLD` permettent d'ajuster la sensibilite lorsque de la musique joue dans la piece. Pour forcer un autre peripherique, definis `JARVIS_MIC_INDEX` dans `.env`.
+
+Le coeur reste autonome : les commandes, la memoire, les briefs, les priorites et les reponses conversationnelles courantes ne necessitent aucune API d'IA externe. Le chemin IA local passe par Ollama.
 
 ## Commandes vocales supportees
 
@@ -164,7 +178,7 @@ Le module `energy_actions.py` est deja pret et teste. Les integrations vocales e
 
 ## Securite
 
-- Aucune cle OpenAI en dur dans le code.
+- Aucune cle IA externe en dur dans le code.
 - `.env` est ignore par Git.
 - Les mots de passe GUI restent hashes via `auth_security.py`.
 - Les commandes Git sensibles ne sont pas executees automatiquement.

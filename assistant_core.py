@@ -1,4 +1,5 @@
 import logging
+import re
 
 import ai_brain
 import config
@@ -38,13 +39,27 @@ class AssistantCore:
         self.user_memory = UserMemoryStore()
         self.local_brain = ai_brain.LocalBrain()
         self.pending_confirmation = None
+        self.pending_music_request = False
+        self.music_playing = False
+        self.music_paused_for_command = False
+        self._announced_scheduler_task_ids = set()
+
+    @staticmethod
+    def _format_user_facing_response(response):
+        if response in {"__STOP__", "__OPEN_SCHEDULER__"}:
+            return response
+
+        text = (response or "").strip()
+        if not text:
+            return "Je n'ai pas de reponse pour le moment."
+        return text
 
     def recommend_music(self, mood="musique populaire du moment"):
         preferred = self.user_memory.get_preference("favorite_music")
         if preferred:
             return preferred
-        index = abs(hash(mood)) % len(LOCAL_RECOMMENDATIONS)
-        return LOCAL_RECOMMENDATIONS[index]
+        # A deterministic fallback is less surprising than Python's salted hash.
+        return LOCAL_RECOMMENDATIONS[0]
 
     def poll_background_messages(self):
         messages = self.personal_assistant.poll_due_reminders()
@@ -66,6 +81,22 @@ class AssistantCore:
             return str(int(value))
         formatted = f"{value:.{decimals}f}"
         return formatted.rstrip("0").rstrip(".")
+
+    def poll_background_messages(self):
+        messages = list(self.personal_assistant.poll_due_reminders())
+        pending = sched_core.get_pending_tasks()
+        pending_ids = {task["id"] for task in pending}
+        self._announced_scheduler_task_ids.intersection_update(pending_ids)
+        for task in pending:
+            if task["id"] in self._announced_scheduler_task_ids:
+                continue
+            platform = task["platform"].capitalize()
+            messages.append(
+                f"Une tache planifiee est prete : [{platform}] {task['title']}. "
+                "Confirmez dans le planificateur."
+            )
+            self._announced_scheduler_task_ids.add(task["id"])
+        return messages
 
     def _missing_energy_data_response(self, intro):
         return f"{intro} {energy_actions.describe_formulae()}"
@@ -211,14 +242,26 @@ class AssistantCore:
         logger.info("Intent detected: %s", intent_data)
 
         if intent == "empty":
-            response = "Je n'ai rien entendu."
+            response = self._format_user_facing_response("Je n'ai rien entendu.")
             self._remember(intent, target, response)
             return response
         if intent == "stop":
             return "__STOP__"
 
+        if self.pending_music_request and intent == "chat_fallback" and target.strip():
+            music_target = re.sub(
+                r"^(?:je veux|je voudrais|mets|met|joue|ecoute)(?:\s+(?:la )?musique)?\s+",
+                "",
+                target.strip(),
+            )
+            music_target = re.sub(r"^(?:musique|chanson|son)\s+", "", music_target).strip()
+            intent_data = {"intent": "play_music", "target": music_target or target.strip(), "slots": {}}
+            intent = "play_music"
+            target = intent_data["target"]
+
         confirmation_result = self._resolve_confirmation(intent)
         if confirmation_result is not None:
+            confirmation_result["response"] = self._format_user_facing_response(confirmation_result["response"])
             self._remember(
                 confirmation_result["intent"],
                 confirmation_result.get("target", ""),
@@ -226,7 +269,7 @@ class AssistantCore:
             )
             return confirmation_result["response"]
 
-        response = self._execute_intent(intent_data)
+        response = self._format_user_facing_response(self._execute_intent(intent_data))
         self._remember(intent, target, response)
         return response
 
@@ -241,6 +284,9 @@ class AssistantCore:
 
     def _handle_time(self, _intent_data):
         return system_actions.get_time_response()
+
+    def _handle_date(self, _intent_data):
+        return system_actions.get_date_response()
 
     def _handle_battery(self, _intent_data):
         return system_actions.get_battery_response()
@@ -270,10 +316,53 @@ class AssistantCore:
         return music_actions.open_playlist(intent_data.get("target", ""))
 
     def _handle_play_music(self, intent_data):
-        return music_actions.play_music(
-            intent_data.get("target", ""),
-            recommender=self.recommend_music,
-        )
+        target = intent_data.get("target", "").strip()
+        if not target:
+            self.pending_music_request = True
+            return "Quelle musique veux-tu que je lance ?"
+
+        self.pending_music_request = False
+        response = music_actions.play_music(target)
+        if response.startswith("J'ouvre"):
+            self.music_playing = True
+            self.music_paused_for_command = False
+        return response
+
+    def _handle_music_control(self, intent_data):
+        action = intent_data["intent"]
+        if action == "music_pause" and self.music_paused_for_command:
+            self.music_paused_for_command = False
+            self.music_playing = False
+            return "Je mets la musique en pause."
+        response = music_actions.control_music(action)
+        if action == "music_pause":
+            self.music_playing = False
+            self.music_paused_for_command = False
+        elif action == "music_resume":
+            self.music_playing = True
+            self.music_paused_for_command = False
+        return response
+
+    def pause_music_for_command(self):
+        """Pause only music started by the assistant, never toggle unknown media."""
+        if not self.music_playing:
+            return False
+        response = music_actions.control_music("music_pause")
+        if response.startswith("Je mets"):
+            self.music_playing = False
+            self.music_paused_for_command = True
+            return True
+        return False
+
+    def resume_music_after_command(self):
+        if not self.music_paused_for_command:
+            return False
+        response = music_actions.control_music("music_resume")
+        self.music_paused_for_command = False
+        if response.startswith("Je reprends"):
+            self.music_playing = True
+            return True
+        return False
 
     def _handle_open_project(self, intent_data):
         slots = intent_data.get("slots", {})

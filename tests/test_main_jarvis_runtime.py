@@ -5,6 +5,13 @@ import main_jarvis
 
 
 class MainJarvisRuntimeTests(unittest.TestCase):
+    def test_format_assistant_message_keeps_clean_text(self):
+        self.assertEqual("Bonjour", main_jarvis.format_assistant_message("Bonjour"))
+        self.assertEqual(
+            "Je n'ai pas de reponse pour le moment.",
+            main_jarvis.format_assistant_message(""),
+        )
+
     def test_setup_runtime_keeps_ui_click_and_soft_wake_startup(self):
         fake_app = Mock()
         fake_signal = Mock()
@@ -87,6 +94,24 @@ class MainJarvisRuntimeTests(unittest.TestCase):
         state["activate_listen"].assert_called_once_with("soft_wake")
         listen_for_command.assert_not_called()
         self.assertEqual("", command)
+        self.assertFalse(state["should_listen"])
+
+    def test_button_listening_wins_over_pending_wake_payload(self):
+        fake_app = Mock()
+        fake_ui = Mock()
+        state = {
+            "should_listen": True,
+            "activate_listen": Mock(),
+        }
+
+        with patch(
+            "main_jarvis.consume_voice_activation",
+            return_value={"command": "mets damso"},
+        ), patch("main_jarvis.listen_for_command", return_value="ouvre github") as listen:
+            command = main_jarvis.resolve_next_command(fake_app, fake_ui, state)
+
+        listen.assert_called_once_with(fake_app, fake_ui)
+        self.assertEqual("ouvre github", command)
         self.assertFalse(state["should_listen"])
 
 

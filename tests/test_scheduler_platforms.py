@@ -17,6 +17,7 @@ import importlib
 import inspect
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
@@ -102,8 +103,10 @@ class TestSendWhatsapp(unittest.TestCase):
             "_get_playwright_context",
             return_value=(mock_pw, mock_context),
         ):
-            ok, msg = self.platforms.send_whatsapp("+2236123456", "Test message")
+            result = self.platforms.send_whatsapp("+2236123456", "Test message")
+            ok, msg = result
         self.assertTrue(ok)
+        self.assertEqual("sent", result.state)
         self.assertIn("whatsapp", msg.lower())
 
     def test_browser_nav_error_returns_false(self):
@@ -128,6 +131,32 @@ class TestSendWhatsapp(unittest.TestCase):
         called_url = mock_page.goto.call_args[0][0]
         self.assertIn("2236987654", called_url)
         self.assertIn("web.whatsapp.com", called_url)
+
+    def test_missing_media_returns_error_before_browser_launch(self):
+        ok, msg = self.platforms.send_whatsapp("+2236123456", "Salut", ["C:/introuvable/demo.jpg"])
+        self.assertFalse(ok)
+        self.assertIn("introuvable", msg.lower())
+
+    def test_media_files_are_attached_on_whatsapp(self):
+        mock_pw, mock_context, mock_page = _make_browser_mocks()
+        with patch.object(
+            self.platforms,
+            "_normalize_media_paths",
+            return_value=[Path("C:/demo/photo.jpg"), Path("C:/demo/video.mp4")],
+        ), patch.object(
+            self.platforms,
+            "_get_playwright_context",
+            return_value=(mock_pw, mock_context),
+        ):
+            result = self.platforms.send_whatsapp(
+                "+2236123456",
+                "Caption",
+                ["C:/demo/photo.jpg", "C:/demo/video.mp4"],
+            )
+        self.assertTrue(result.ok)
+        mock_page.locator.return_value.first.set_input_files.assert_called_with(
+            ["C:\\demo\\photo.jpg", "C:\\demo\\video.mp4"]
+        )
 
     def test_context_closed_after_success(self):
         mock_pw, mock_context, mock_page = _make_browser_mocks()
@@ -202,8 +231,10 @@ class TestSendFacebook(unittest.TestCase):
             "_get_playwright_context",
             return_value=(mock_pw, mock_context),
         ):
-            ok, msg = self.platforms.send_facebook("mon.groupe", "Test")
+            result = self.platforms.send_facebook("mon.groupe", "Test")
+            ok, msg = result
         self.assertTrue(ok)
+        self.assertEqual("prepared", result.state)
         self.assertIn("facebook", msg.lower())
 
     def test_browser_nav_error_returns_false(self):
@@ -231,6 +262,27 @@ class TestSendFacebook(unittest.TestCase):
             self.platforms.send_facebook("mon.groupe", "Test")
         mock_context.close.assert_not_called()
 
+    def test_media_files_are_attached_on_facebook(self):
+        mock_pw, mock_context, mock_page = _make_browser_mocks()
+        with patch.object(
+            self.platforms,
+            "_normalize_media_paths",
+            return_value=[Path("C:/demo/post.mp4"), Path("C:/demo/photo.jpg")],
+        ), patch.object(
+            self.platforms,
+            "_get_playwright_context",
+            return_value=(mock_pw, mock_context),
+        ):
+            result = self.platforms.send_facebook(
+                "mon.groupe",
+                "Video",
+                ["C:/demo/post.mp4", "C:/demo/photo.jpg"],
+            )
+        self.assertTrue(result.ok)
+        mock_page.locator.return_value.first.set_input_files.assert_called_with(
+            ["C:\\demo\\post.mp4", "C:\\demo\\photo.jpg"]
+        )
+
 
 # ---------------------------------------------------------------------------
 # dispatch
@@ -243,28 +295,30 @@ class TestDispatch(unittest.TestCase):
         self.platforms = _p
 
     def test_dispatch_unknown_platform(self):
-        ok, msg = self.platforms.dispatch("instagram", "x", "y")
+        result = self.platforms.dispatch("instagram", "x", "y")
+        ok, msg = result
         self.assertFalse(ok)
+        self.assertEqual("error", result.state)
         self.assertIn("inconnue", msg.lower())
 
     def test_dispatch_whatsapp_calls_handler(self):
         mock_h = MagicMock(return_value=(True, "ok"))
         with patch.dict(self.platforms.PLATFORM_HANDLERS, {"whatsapp": mock_h}):
-            ok, msg = self.platforms.dispatch("whatsapp", "+2236", "hi")
-        mock_h.assert_called_once_with("+2236", "hi")
+            ok, msg = self.platforms.dispatch("whatsapp", "+2236", "hi", ["C:/demo.jpg"])
+        mock_h.assert_called_once_with("+2236", "hi", ["C:/demo.jpg"])
         self.assertTrue(ok)
 
     def test_dispatch_facebook_calls_handler(self):
         mock_h = MagicMock(return_value=(True, "ok"))
         with patch.dict(self.platforms.PLATFORM_HANDLERS, {"facebook": mock_h}):
-            ok, msg = self.platforms.dispatch("facebook", "mon.groupe", "hi")
-        mock_h.assert_called_once_with("mon.groupe", "hi")
+            ok, msg = self.platforms.dispatch("facebook", "mon.groupe", "hi", ["C:/demo.mp4"])
+        mock_h.assert_called_once_with("mon.groupe", "hi", ["C:/demo.mp4"])
         self.assertTrue(ok)
 
     def test_dispatch_case_insensitive(self):
         mock_h = MagicMock(return_value=(True, "ok"))
         with patch.dict(self.platforms.PLATFORM_HANDLERS, {"whatsapp": mock_h}):
-            ok, _ = self.platforms.dispatch("WhatsApp", "+2236", "hi")
+            ok, _ = self.platforms.dispatch("WhatsApp", "+2236", "hi", "")
         self.assertTrue(ok)
 
 

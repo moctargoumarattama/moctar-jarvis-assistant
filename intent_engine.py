@@ -50,6 +50,26 @@ DEVICE_WORDS = (
     "prises",
 )
 
+REMINDER_PREFIXES = (
+    "rappelle moi ",
+    "rappelle-moi ",
+    "rappel moi ",
+    "rappel-moi ",
+    "programme moi ",
+    "programme-moi ",
+    "planifie moi ",
+    "planifie-moi ",
+)
+
+ALARM_PREFIXES = (
+    "mets moi ",
+    "mets-moi ",
+    "met moi ",
+    "met-moi ",
+)
+
+REMINDER_NOUNS = ("alarme", "rappel", "alerte", "reveil")
+
 
 def normalize(text):
     if not text:
@@ -65,10 +85,6 @@ def normalize(text):
         "s il te plait": "",
         "s'il te plait": "",
         "jarvis": "",
-        "active": "ouvre",
-        "activate": "ouvre",
-        "lance": "ouvre",
-        "demarre": "ouvre",
         "bloc notes": "bloc-notes",
         "telechargement": "telechargements",
     }
@@ -81,23 +97,30 @@ def normalize(text):
     return text.strip()
 
 
-def find_alias(text, aliases, threshold=75):
-    choices = []
-    mapping = {}
+def find_alias(text, aliases, threshold=75, exact=False):
+    """Return an explicit alias match, never a loose partial fuzzy match.
 
+    Matching an alias such as ``code`` anywhere in a sentence used to open VS
+    Code for phrases like "je fais du code".  For voice commands, a missed
+    command is preferable to launching the wrong application.
+    """
+    normalized = normalize(text)
+    matches = []
     for key, alias_list in aliases.items():
         for alias in alias_list:
-            choices.append(alias)
-            mapping[alias] = key
+            candidate = normalize(alias)
+            matched = normalized == candidate if exact else bool(
+                re.search(rf"(?<!\w){re.escape(candidate)}(?!\w)", normalized)
+            )
+            if candidate and matched:
+                matches.append((len(candidate), key))
 
-    match = process.extractOne(text, choices, scorer=fuzz.partial_ratio)
-    if not match:
+    if not matches:
         return None, 0
 
-    alias, score, _ = match
-    if score < threshold:
-        return None, score
-    return mapping[alias], score
+    # Prefer the most specific alias: "youtube music" before "youtube".
+    matches.sort(reverse=True)
+    return matches[0][1], 100
 
 
 def extract_after_prefix(text, prefixes):
@@ -107,22 +130,73 @@ def extract_after_prefix(text, prefixes):
     return ""
 
 
+def _contains_time_hint(text):
+    return bool(
+        re.search(
+            r"\b(?:a|pour|demain|le)\b|\b\d{1,2}(?:[:h]\d{0,2})?\b",
+            text,
+        )
+    )
+
+
+def looks_like_reminder_request(text):
+    if not text:
+        return False
+
+    if text.startswith(REMINDER_PREFIXES):
+        return True
+
+    has_reminder_noun = any(noun in text for noun in REMINDER_NOUNS)
+    if text.startswith(ALARM_PREFIXES):
+        return has_reminder_noun
+
+    return has_reminder_noun and _contains_time_hint(text)
+
+
 def parse_reminder_slots(text):
-    body = extract_after_prefix(text, ["rappelle moi ", "rappel moi "]).strip()
+    body = (text or "").strip()
     if not body:
         return {"message": "", "when_text": ""}
+
+    stripped_body = extract_after_prefix(body, REMINDER_PREFIXES + ALARM_PREFIXES)
+    if any(body.startswith(prefix) for prefix in REMINDER_PREFIXES + ALARM_PREFIXES):
+        body = stripped_body
+
+    default_message = ""
+    noun_match = re.match(
+        r"^(?:l[' ]?|la\s+|le\s+|les\s+|un\s+|une\s+)?(?P<noun>alarme|rappel|alerte|reveil)\b(?:\s+de\s+)?",
+        body,
+    )
+    if noun_match:
+        noun = noun_match.group("noun")
+        default_message = noun if noun != "rappel" else ""
+        body = body[noun_match.end():].strip()
+
+    if not body:
+        return {"message": default_message, "when_text": ""}
 
     match = re.match(
         r"(?P<message>.+?)\s+(?:a|pour|demain|le)\s+(?P<when>(?:demain\s+)?[\w:\-/ ]+)$",
         body,
     )
     if match:
+        message = match.group("message").strip()
         return {
-            "message": match.group("message").strip(),
+            "message": message or default_message,
             "when_text": match.group("when").strip(),
         }
 
-    return {"message": body, "when_text": ""}
+    when_match = re.match(
+        r"^(?:a|pour|demain|le)\s+(?P<when>(?:demain\s+)?[\w:\-/ ]+)$",
+        body,
+    )
+    if when_match:
+        return {
+            "message": default_message,
+            "when_text": when_match.group("when").strip(),
+        }
+
+    return {"message": body or default_message, "when_text": ""}
 
 
 def remove_music_words(text):
@@ -152,6 +226,27 @@ def remove_music_words(text):
         query = re.sub(rf"\b{re.escape(word)}\b", " ", query)
 
     return re.sub(r"\s+", " ", query).strip()
+
+
+def extract_music_query(text):
+    """Keep the title/artist intact while removing only a leading request."""
+    match = re.match(r"^(?:mets|met|joue|ecoute|lance)(?:[- ]?moi)?\s+(.+)$", text)
+    body = match.group(1).strip() if match else text.strip()
+    body = re.sub(r"^(?:moi\s+)?(?:une?\s+)?(?:de la\s+|du\s+|des\s+)?", "", body)
+    body = re.sub(r"^(?:musique|music|chanson|son)\b", "", body).strip()
+    body = re.sub(r"^(?:de\s+|du\s+|des\s+|la\s+|le\s+|les\s+)", "", body).strip()
+    return "" if body in {"", "musique", "music", "chanson", "son"} else body
+
+
+def extract_action_target(text, verbs):
+    match = re.match(rf"^(?:{'|'.join(verbs)})\s+(.+)$", text)
+    if not match:
+        return text
+    return re.sub(
+        r"^(?:le |la |les |un |une |mon |ma |l |application |app |logiciel |programme |site |navigateur )+",
+        "",
+        match.group(1).strip(),
+    )
 
 
 def parse_number(raw_value):
@@ -327,7 +422,43 @@ def detect_intent(raw_text):
     if text in {"non", "annule", "annuler", "laisse tomber"}:
         return {"intent": "confirm_no", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
 
-    if any(token in text for token in ["stop", "quitte", "arrete", "ferme moctar", "stop listening"]):
+    if looks_like_reminder_request(text):
+        slots = parse_reminder_slots(text)
+        return {
+            "intent": "remind_me",
+            "target": slots.get("message", ""),
+            "confidence": 92,
+            "raw": raw_text,
+            "slots": slots,
+        }
+
+    if text.startswith(("comment ", "pourquoi ", "explique ", "explique-moi ")):
+        return {"intent": "chat_fallback", "target": text, "confidence": 90, "raw": raw_text, "slots": {}}
+
+    if any(
+        phrase in text
+        for phrase in [
+            "arrete la musique",
+            "stop la musique",
+            "stop musique",
+            "mets la musique en pause",
+            "met la musique en pause",
+        ]
+    ):
+        return {"intent": "music_pause", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
+
+    if text in {"reprends la musique", "continue la musique", "relance la musique"}:
+        return {"intent": "music_resume", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
+
+    if text in {"suivant", "piste suivante", "chanson suivante", "musique suivante"}:
+        return {"intent": "music_next", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
+
+    if text in {"precedent", "piste precedente", "chanson precedente", "musique precedente"}:
+        return {"intent": "music_previous", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
+
+    if text in {"stop", "arrete", "quitte", "stop listening"} or any(
+        phrase in text for phrase in ["arrete toi", "arrete moctar", "ferme moctar"]
+    ):
         return {"intent": "stop", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
 
     if any(token in text for token in ["consommation", "consommation energie", "energie consommee"]):
@@ -413,6 +544,22 @@ def detect_intent(raw_text):
     if any(token in text for token in ["heure", "quelle heure", "donne l heure"]):
         return {"intent": "time", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
 
+    if any(
+        token in text
+        for token in [
+            "quel jour",
+            "quelle date",
+            "date d aujourd hui",
+            "date du jour",
+            "jour d aujourd hui",
+            "quel jour sommes nous",
+            "on est quel jour",
+            "on est quelle date",
+            "quelle est la date d aujourd hui",
+        ]
+    ):
+        return {"intent": "date", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
+
     if any(token in text for token in ["batterie", "niveau batterie", "battery"]):
         return {"intent": "battery", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
 
@@ -424,6 +571,9 @@ def detect_intent(raw_text):
 
     if any(token in text for token in ["baisse volume", "diminue volume", "volume down"]):
         return {"intent": "volume_down", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
+
+    if text in {"mets le son", "met le son", "remets le son", "remet le son", "retablis le son"}:
+        return {"intent": "volume_up", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
 
     if any(token in text for token in ["coupe le son", "coupe son", "mute", "silence"]):
         return {"intent": "mute", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
@@ -578,35 +728,37 @@ def detect_intent(raw_text):
                 slots["editor"] = "vscode"
             return {"intent": "open_project", "target": project_key, "confidence": score, "raw": raw_text, "slots": slots}
 
-    music_markers = ["musique", "music", "chanson", "son", "mets", "joue"]
-    if any(marker in text for marker in music_markers):
-        target = remove_music_words(text)
-        return {"intent": "play_music", "target": target, "confidence": 90, "raw": raw_text, "slots": {}}
-
-    if any(token in text for token in ["ouvre", "ouvrir", "active"]):
-        folder_key, folder_score = find_alias(text, config.FOLDER_ALIASES)
+    open_verbs = ["ouvre", "ouvrir", "active", "activate", "lance", "demarre"]
+    if any(token in text for token in open_verbs):
+        action_target = extract_action_target(text, open_verbs)
+        folder_key, folder_score = find_alias(action_target, config.FOLDER_ALIASES, exact=True)
         if folder_key:
             return {"intent": "open_folder", "target": folder_key, "confidence": folder_score, "raw": raw_text, "slots": {}}
 
-        site_key, site_score = find_alias(text, config.SITE_ALIASES)
+        site_key, site_score = find_alias(action_target, config.SITE_ALIASES, exact=True)
         if site_key:
             return {"intent": "open_site", "target": site_key, "confidence": site_score, "raw": raw_text, "slots": {}}
 
-        app_key, app_score = find_alias(text, config.APP_ALIASES)
+        app_key, app_score = find_alias(action_target, config.APP_ALIASES, exact=True)
         if app_key:
             return {"intent": "open_app", "target": app_key, "confidence": app_score, "raw": raw_text, "slots": {}}
 
-    if any(token in text for token in ["ferme", "close"]):
-        app_key, score = find_alias(text, config.APP_ALIASES)
+    close_verbs = ["ferme", "close"]
+    if any(token in text for token in close_verbs):
+        action_target = extract_action_target(text, close_verbs)
+        app_key, score = find_alias(action_target, config.APP_ALIASES, exact=True)
         if app_key:
             return {"intent": "close_app", "target": app_key, "confidence": score, "raw": raw_text, "slots": {}}
 
-    app_key, app_score = find_alias(text, config.APP_ALIASES, threshold=90)
-    if app_key:
-        return {"intent": "open_app", "target": app_key, "confidence": app_score, "raw": raw_text, "slots": {}}
+    # A music request must start as a request.  This avoids interpreting
+    # ordinary sentences such as "je joue au foot" as a song title.
+    if text in {"musique", "music"}:
+        return {"intent": "play_music", "target": "", "confidence": 90, "raw": raw_text, "slots": {}}
 
-    site_key, site_score = find_alias(text, config.SITE_ALIASES, threshold=90)
-    if site_key:
-        return {"intent": "open_site", "target": site_key, "confidence": site_score, "raw": raw_text, "slots": {}}
+    if re.match(r"^(?:mets|met|joue|ecoute)\b", text) or (
+        text.startswith("lance") and any(word in text for word in ["musique", "music", "chanson", "son"])
+    ):
+        target = extract_music_query(text)
+        return {"intent": "play_music", "target": target, "confidence": 90, "raw": raw_text, "slots": {}}
 
     return {"intent": "chat_fallback", "target": text, "confidence": 50, "raw": raw_text, "slots": {}}
