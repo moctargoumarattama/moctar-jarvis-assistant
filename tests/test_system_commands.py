@@ -158,14 +158,18 @@ class InfrastructureStatusTests(unittest.TestCase):
         runtime.collector.collect.assert_not_called()
         run.assert_not_called()
 
-    def test_missing_metrics_are_unavailable_not_zero(self):
+    def test_standalone_realtime_metrics_never_unavailable(self):
         text = system_manager.get_full_infrastructure_status()
-        self.assertIn("CPU : indisponible", text)
-        self.assertIn("RAM : indisponible/indisponible", text)
-        self.assertIn("Température : indisponible", text)
-        self.assertIn("systemd inconnu ; HTTP indisponible", text)
-        self.assertNotIn("0.0 %", text)
-        self.assertNotIn("0.0/", text)
+        self.assertNotIn("CPU : indisponible", text)
+        self.assertNotIn("RAM : indisponible", text)
+        self.assertNotIn("Disque système : indisponible", text)
+        self.assertIn("CPU : ", text)
+        self.assertIn("RAM : ", text)
+        self.assertIn("Disque système : ", text)
+        self.assertIn("lecture directe temps réel", text)
+        self.assertIn("M.O.C.T.A.R — État de l'infrastructure", text)
+        for service in SERVICES:
+            self.assertIn(service.label, text)
 
     def test_stale_hardware_is_explicit_even_after_snapshot_republish(self):
         runtime = self.runtime(age=300)

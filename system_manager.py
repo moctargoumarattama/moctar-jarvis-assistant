@@ -5,12 +5,30 @@ Aucune commande, sonde réseau ou inférence n'est exécutée pour lire le statu
 """
 from __future__ import annotations
 
+import json
 import math
+import os
+from pathlib import Path
 import re
+import socket
 import subprocess
+import sys
+import time
 from datetime import datetime, timezone
 from typing import Any
 
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+try:
+    import psutil
+except Exception:
+    psutil = None
+
+import config
 from config import SERVICES
 
 
@@ -18,6 +36,106 @@ SERVICES_ALLOWLIST = ("merca-market", "klasora", "babamarket", "moc-mal", "jarvi
 SYSTEMCTL = "/usr/bin/systemctl"
 COMMAND_TIMEOUT = 15
 VERIFY_TIMEOUT = 5
+
+
+def _collect_live_hardware() -> dict[str, Any]:
+    """Collecte immédiate des métriques système réelles via psutil."""
+    if psutil is None:
+        return {}
+
+    cpu_pct = 0.0
+    try:
+        cpu_pct = psutil.cpu_percent(interval=0.1)
+    except Exception:
+        cpu_pct = 0.0
+
+    mem_used, mem_total, mem_pct = 0, 0, 0.0
+    try:
+        mem = psutil.virtual_memory()
+        mem_used = mem.total - mem.available
+        mem_total = mem.total
+        mem_pct = mem.percent
+    except Exception:
+        pass
+
+    disk_used, disk_total, disk_pct = 0, 0, 0.0
+    try:
+        root_path = os.path.abspath(os.sep) if os.name == "nt" else "/"
+        usage = psutil.disk_usage(root_path)
+        disk_used = usage.used
+        disk_total = usage.total
+        disk_pct = usage.percent
+    except Exception:
+        pass
+
+    temperature = None
+    try:
+        if hasattr(psutil, "sensors_temperatures"):
+            sensors = psutil.sensors_temperatures() or {}
+            readings = [
+                reading.current
+                for name, entries in sensors.items()
+                if any(part in name.lower() for part in ("coretemp", "k10temp", "cpu", "zenpower", "cpu_thermal"))
+                for reading in entries
+                if reading.current is not None and -20 <= reading.current <= 150
+            ]
+            if readings:
+                temperature = round(max(readings), 1)
+    except Exception:
+        pass
+
+    return {
+        "cpu": {"percent": cpu_pct},
+        "memory": {"used": mem_used, "total": mem_total, "percent": mem_pct},
+        "disks": {"root": {"used": disk_used, "total": disk_total, "percent": disk_pct}},
+        "temperature_c": temperature,
+    }
+
+
+def _probe_service_live(service_name: str, port: int) -> dict[str, Any]:
+    """Sonde directe d'un service système via systemctl et port TCP local."""
+    unit = f"{service_name}.service"
+    systemd_state = "inactif"
+    try:
+        res = _run([SYSTEMCTL, "is-active", unit], timeout=0.5)
+        raw = res.stdout.strip().lower()
+        if raw in {"active", "inactive", "failed", "activating", "deactivating", "reloading"}:
+            systemd_state = raw
+    except Exception:
+        systemd_state = "inactif"
+
+    http_status = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.3)
+        res = sock.connect_ex(("127.0.0.1", port))
+        sock.close()
+        if res == 0:
+            http_status = 200
+    except Exception:
+        pass
+
+    return {
+        "name": service_name,
+        "systemd": systemd_state,
+        "http_status": http_status,
+    }
+
+
+def _get_live_vps_count(settings: Any = None) -> int:
+    """Compte le nombre de VPS déclarés dans le registre local."""
+    try:
+        state_path = getattr(settings, "vps_state_path", None) or str(config.DATA_DIR / "vps-registry.json")
+        reg_file = Path(state_path)
+        if reg_file.is_file():
+            with open(reg_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                servers = data.get("servers", [])
+                if isinstance(servers, list):
+                    return len(servers)
+    except Exception:
+        pass
+    return 0
 
 
 def _result(ok: bool, message: str, service: str | None = None, state: str = "unknown") -> dict[str, Any]:
@@ -121,37 +239,78 @@ class SystemManager:
         self.settings = settings or getattr(runtime, "settings", None)
 
     def get_full_infrastructure_status(self) -> str:
-        """Formate les dernières sondes partagées ; ne déclenche aucune collecte."""
+        """Formate l'état de l'infrastructure depuis le cache ou par lecture directe en temps réel."""
         snapshot = _mapping(getattr(self.runtime, "latest", None))
         hardware = _mapping(snapshot.get("hardware"))
         now = datetime.now(timezone.utc)
         collector = _mapping(snapshot.get("collector"))
         timestamp = collector.get("last_success") or snapshot.get("timestamp")
         age = _timestamp_age(timestamp, now)
-        lines = ["M.O.C.T.A.R — État de l'infrastructure", f"Dell · {_text(snapshot.get('hostname'))}"]
+
+        # Fallback automatique en temps réel si aucune métrique en cache ou appel standalone
+        is_live_fallback = False
+        if not hardware or hardware.get("cpu") is None:
+            is_live_fallback = True
+            hardware = _collect_live_hardware()
+
+        hostname = snapshot.get("hostname")
+        if not hostname or hostname == "indisponible":
+            try:
+                hostname = socket.gethostname()
+            except Exception:
+                hostname = "Dell Precision M4800"
+
+        lines = [
+            "M.O.C.T.A.R — État de l'infrastructure",
+            f"Dell · {_text(hostname)}",
+        ]
         if timestamp:
             freshness = f"âge {age:.0f} s" if age is not None else "âge inconnu"
             lines.append(f"Dernière collecte : {_text(timestamp)} ({freshness}).")
         else:
-            lines.append("Dernière collecte : indisponible ; première collecte en attente.")
+            lines.append(f"Dernière collecte : {datetime.now().strftime('%H:%M:%S')} (lecture directe temps réel).")
+
         interval = getattr(self.settings, "interval", 3)
         stale_after = max(10, 3 * interval) if isinstance(interval, (float, int)) else 10
-        if collector.get("error") or (age is not None and age > stale_after):
+        if not is_live_fallback and (collector.get("error") or (age is not None and age > stale_after)):
             lines.append("ALERTE : mesures anciennes ou collecte indisponible ; état actuel non confirmé.")
+
         lines.extend([
+            "━━━━━━━━━━━━━━━━━━━━",
             f"CPU : {_number(_mapping(hardware.get('cpu')).get('percent'), suffix=' %')}",
             f"RAM : {_capacity(hardware.get('memory'))}",
             f"Disque système : {_capacity(_mapping(hardware.get('disks')).get('root'))}",
-            f"Température : {_number(hardware.get('temperature_c'), suffix=' °C')}",
-            "", "Services web (dernières sondes locales) :",
+        ])
+        temp_val = hardware.get("temperature_c")
+        if temp_val is not None:
+            lines.append(f"Température : {_number(temp_val, suffix=' °C')}")
+
+        lines.extend([
+            "━━━━━━━━━━━━━━━━━━━━",
+            "Services web (dernières sondes locales) :",
         ])
         probes = snapshot.get("services", [])
+        if not probes and is_live_fallback:
+            probes = [_probe_service_live(service.name, service.port) for service in SERVICES]
+
         by_name = {item.get("name"): item for item in probes if isinstance(item, dict)} if isinstance(probes, list) else {}
         for service in SERVICES:
             probe = _mapping(by_name.get(service.name))
-            lines.append(f"• {service.label} : systemd {_text(probe.get('systemd'), 'inconnu')} ; HTTP {_text(probe.get('http_status'))} (127.0.0.1:{service.port}).")
+            raw_sys = probe.get("systemd")
+            sys_state = raw_sys if raw_sys is not None else ("inactif" if is_live_fallback else "inconnu")
+            http_val = probe.get("http_status")
+            if http_val is not None:
+                http_str = str(http_val)
+            else:
+                http_str = "inactif" if is_live_fallback else "indisponible"
+            is_active = (sys_state == "active" or http_val == 200)
+            status_badge = "🟢 ACTIF" if is_active else "🔴 INACTIF/ARRÊTÉ"
+            lines.append(f"• {service.label} : systemd {sys_state} ; HTTP {http_str} (127.0.0.1:{service.port}) — {status_badge}")
 
-        lines.extend(["", "VPS (rapports reçus par le registre) :"])
+        lines.extend([
+            "━━━━━━━━━━━━━━━━━━━━",
+            "VPS (rapports reçus par le registre) :",
+        ])
         servers = snapshot.get("vps", [])
         vps_snapshot = getattr(self.runtime, "vps_snapshot", None)
         if callable(vps_snapshot):
@@ -160,8 +319,16 @@ class SystemManager:
             except (AttributeError, KeyError, TypeError, ValueError, RuntimeError):
                 lines.append("ALERTE : registre indisponible ; derniers rapports affichés.")
         servers = servers if isinstance(servers, list) else []
-        if not servers:
+
+        if not servers and is_live_fallback:
+            vps_count = _get_live_vps_count(self.settings)
+            if vps_count > 0:
+                lines.append(f"Aucun VPS actif en ligne ({vps_count} VPS déclarés dans le registre local).")
+            else:
+                lines.append("Aucun VPS connecté ou rapport disponible (0 VPS dans le registre local).")
+        elif not servers:
             lines.append("Aucun VPS connecté ou rapport disponible.")
+
         displayed = 0
         valid_servers = [server for server in servers if isinstance(server, dict)]
         for server in valid_servers[:10]:
