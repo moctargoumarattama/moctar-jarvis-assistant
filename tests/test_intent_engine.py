@@ -57,6 +57,17 @@ class IntentEngineTests(unittest.TestCase):
 
         self.assertEqual("list_todos", intent["intent"])
 
+    def test_detects_natural_list_todos_question(self):
+        intent = detect_intent("quelles sont mes tâches")
+
+        self.assertEqual("list_todos", intent["intent"])
+
+    def test_recovers_known_voice_confusion_for_tomorrow_task(self):
+        intent = detect_intent("quelle est la page pour demain")
+
+        self.assertEqual("list_todos", intent["intent"])
+        self.assertEqual("tomorrow", intent["slots"]["day"])
+
     def test_detects_daily_brief(self):
         intent = detect_intent("resume ma journee")
 

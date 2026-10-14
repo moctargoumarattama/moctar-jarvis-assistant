@@ -35,6 +35,24 @@ class KnowledgeLibraryTests(unittest.TestCase):
         self.assertEqual("", answer)
         requester.assert_not_called()
 
+    def test_personal_tomorrow_query_skips_wikipedia_lookup(self):
+        requester = Mock()
+        library = KnowledgeLibrary(requester=requester)
+
+        answer = library.lookup("quelle est la page pour demain")
+
+        self.assertEqual("", answer)
+        requester.assert_not_called()
+
+    def test_incomplete_phrase_skips_wikipedia_lookup(self):
+        requester = Mock()
+        library = KnowledgeLibrary(requester=requester)
+
+        answer = library.lookup("il fait quelle")
+
+        self.assertEqual("", answer)
+        requester.assert_not_called()
+
     def test_unknown_question_does_not_repeat_last_subject(self):
         library = Mock()
         library.lookup.return_value = "Reponse encyclopedique."

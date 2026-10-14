@@ -45,6 +45,18 @@ class PersonalAssistantTests(unittest.TestCase):
         self.assertEqual(1, len(todos))
         self.assertEqual("appeler client demain", todos[0]["content"])
 
+    def test_lists_only_todos_and_reminders_for_tomorrow(self):
+        now = datetime(2026, 4, 28, 10, 0, 0)
+        self.assistant.add_todo("appeler client demain")
+        self.assistant.add_todo("classer les archives")
+        self.assistant.schedule_reminder("envoyer le devis", "2026-04-29 09:15", now=now)
+
+        listing = self.assistant.list_todos_for_day("tomorrow", now=now)
+
+        self.assertIn("appeler client demain", listing)
+        self.assertIn("09:15 - envoyer le devis", listing)
+        self.assertNotIn("classer les archives", listing)
+
     def test_schedule_and_poll_reminder(self):
         now = datetime(2026, 4, 28, 10, 0, 0)
         self.assistant.schedule_reminder(

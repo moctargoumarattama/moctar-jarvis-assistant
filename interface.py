@@ -6,7 +6,15 @@ import config
 try:
     from PyQt5.QtCore import Qt, QTimer, pyqtSignal
     from PyQt5.QtGui import QColor, QFont, QPainter, QPen
-    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
+    from PyQt5.QtWidgets import (
+        QApplication,
+        QHBoxLayout,
+        QLabel,
+        QLineEdit,
+        QPushButton,
+        QVBoxLayout,
+        QWidget,
+    )
     PYQT_AVAILABLE = True
 except Exception:
     PYQT_AVAILABLE = False
@@ -124,12 +132,14 @@ if PYQT_AVAILABLE:
         listen_requested = pyqtSignal()
         scheduler_requested = pyqtSignal()
         ai_status_requested = pyqtSignal()
+        manual_command_requested = pyqtSignal(str)
+        reset_requested = pyqtSignal()
 
         def __init__(self):
             super().__init__()
 
             self.setWindowTitle("M.O.C.T.A.R - Iron Mode")
-            self.resize(620, 760)
+            self.resize(660, 790)
             self.setStyleSheet("""
                 QWidget {
                     background-color: #02070d;
@@ -150,6 +160,7 @@ if PYQT_AVAILABLE:
             """)
 
             self.core = JarvisCore()
+            self.core.setMinimumSize(340, 340)
             self.core.clicked.connect(self.listen_requested.emit)
             self.listening_popup = ListeningPopup()
 
@@ -204,13 +215,88 @@ if PYQT_AVAILABLE:
             self.ai_status_message = ""
             self.set_ai_status(config.AI_SETTINGS.get("default_model", "qwen3:8b"), config.AI_SETTINGS.get("base_url", "http://localhost:11434"), online=True)
 
+            self.manual_label = QLabel("Commande manuelle")
+            self.manual_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #7fffd4;")
+
+            self.manual_input = QLineEdit()
+            self.manual_input.setPlaceholderText("Ecris ta demande ici...")
+            self.manual_input.setClearButtonEnabled(True)
+            self.manual_input.setStyleSheet("""
+                QLineEdit {
+                    background-color: #04131b;
+                    color: #ffffff;
+                    border: 1px solid #00eaff;
+                    border-radius: 10px;
+                    padding: 11px 14px;
+                    font-size: 15px;
+                }
+                QLineEdit:focus {
+                    border: 2px solid #00ffb4;
+                }
+            """)
+
+            self.send_btn = QPushButton("Envoyer")
+            self.send_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #007f75;
+                    color: #ffffff;
+                    border: 1px solid #00ffb4;
+                    border-radius: 10px;
+                    padding: 11px 18px;
+                    font-size: 15px;
+                    font-weight: bold;
+                }
+                QPushButton:hover { background-color: #00a894; }
+            """)
+
+            self.reset_btn = QPushButton("Reinitialiser")
+            self.reset_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #4a2415;
+                    color: #ffd7b5;
+                    border: 1px solid #ff9f43;
+                    border-radius: 10px;
+                    padding: 10px 18px;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #71351c;
+                    color: #ffffff;
+                }
+            """)
+
+            self.manual_input.returnPressed.connect(self._submit_manual_command)
+            self.send_btn.clicked.connect(self._submit_manual_command)
+            self.reset_btn.clicked.connect(self._reset_from_ui)
+
+            manual_row = QHBoxLayout()
+            manual_row.addWidget(self.manual_input, 1)
+            manual_row.addWidget(self.send_btn)
+
             layout = QVBoxLayout()
             layout.addWidget(self.title)
-            layout.addWidget(self.core)
+            layout.addWidget(self.core, 1)
             layout.addWidget(self.label)
+            layout.addWidget(self.manual_label)
+            layout.addLayout(manual_row)
+            layout.addWidget(self.reset_btn)
             layout.addWidget(self.ai_status_btn)
             layout.addWidget(self.scheduler_btn)
             self.setLayout(layout)
+
+        def _submit_manual_command(self):
+            command = self.manual_input.text().strip()
+            if not command:
+                self.update_text("Ecris d'abord une commande.")
+                self.manual_input.setFocus()
+                return
+            self.manual_command_requested.emit(command)
+            self.manual_input.clear()
+
+        def _reset_from_ui(self):
+            self.manual_input.clear()
+            self.reset_requested.emit()
 
         def update_text(self, text):
             self.label.setText(text)
@@ -249,6 +335,8 @@ else:
             self.listen_requested = _DummySignal()
             self.scheduler_requested = _DummySignal()
             self.ai_status_requested = _DummySignal()
+            self.manual_command_requested = _DummySignal()
+            self.reset_requested = _DummySignal()
             self.ai_status_message = ""
 
         def update_text(self, _text):

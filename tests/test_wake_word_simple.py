@@ -83,6 +83,26 @@ class WakeWordSimpleTests(unittest.TestCase):
         self.assertTrue(activation["command_only"])
         self.assertEqual("active youtube", activation["command"])
 
+    def test_evaluate_transcript_accepts_natural_todo_question(self):
+        activation = wake_word_simple.evaluate_transcript_for_activation(
+            "quelles sont mes tâches",
+            now_value=10.0,
+        )
+
+        self.assertIsNotNone(activation)
+        self.assertTrue(activation["command_only"])
+        self.assertEqual("quelles sont mes taches", activation["command"])
+
+    def test_evaluate_transcript_accepts_close_app_for_confirmation(self):
+        activation = wake_word_simple.evaluate_transcript_for_activation(
+            "ferme chrome",
+            now_value=10.0,
+        )
+
+        self.assertIsNotNone(activation)
+        self.assertTrue(activation["command_only"])
+        self.assertEqual("ferme chrome", activation["command"])
+
     def test_evaluate_transcript_for_activation_accepts_command_only_music(self):
         activation = wake_word_simple.evaluate_transcript_for_activation("mets la musique", now_value=10.0)
 
@@ -90,6 +110,44 @@ class WakeWordSimpleTests(unittest.TestCase):
 
     def test_contains_wake_word_ignores_normal_sentence(self):
         self.assertFalse(wake_word_simple.contains_wake_word("bonjour comment vas tu"))
+
+    def test_late_transcription_from_invalidated_capture_is_ignored(self):
+        generation = wake_word_simple._current_capture_generation()
+        wake_word_simple.pause_soft_wake_listener()
+        wake_word_simple.resume_soft_wake_listener()
+
+        published = wake_word_simple.publish_soft_wake_transcript(
+            "ouvre chrome",
+            capture_generation=generation,
+            now_value=10.0,
+        )
+
+        self.assertFalse(published)
+        self.assertFalse(wake_word_simple.should_activate_by_voice())
+
+    def test_repeated_soft_wake_command_is_debounced(self):
+        generation = wake_word_simple._current_capture_generation()
+
+        first = wake_word_simple.publish_soft_wake_transcript(
+            "ouvre chrome",
+            capture_generation=generation,
+            now_value=10.0,
+        )
+        wake_word_simple.consume_voice_activation()
+        second = wake_word_simple.publish_soft_wake_transcript(
+            "ouvre chrome",
+            capture_generation=generation,
+            now_value=13.0,
+        )
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        self.assertFalse(wake_word_simple.should_activate_by_voice())
+
+    def test_incomplete_command_only_verb_does_not_self_activate(self):
+        activation = wake_word_simple.evaluate_transcript_for_activation("ouvre", now_value=10.0)
+
+        self.assertIsNone(activation)
 
 
 if __name__ == "__main__":

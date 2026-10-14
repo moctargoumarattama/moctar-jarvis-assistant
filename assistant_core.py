@@ -1,8 +1,10 @@
 import logging
 import re
+from datetime import datetime, timedelta
 
 import ai_brain
 import config
+from agent_core import AgentCore
 from actions import (
     energy_actions,
     iot_actions,
@@ -15,6 +17,7 @@ from actions import (
 from assistant_memory import SessionMemory, UserMemoryStore
 from assistant_plugins import build_default_registry
 from assistant_security import SecurityPolicy
+from intent_engine import detect_intent
 from scheduler import scheduler_store as sched_store
 from scheduler import scheduler_core as sched_core
 
@@ -26,6 +29,62 @@ LOCAL_RECOMMENDATIONS = [
     "Wizkid - Essence",
     "Burna Boy - Last Last",
 ]
+MUSIC_FOLLOWUP_ALIASES = {
+    "dams": "Damso",
+    "damse": "Damso",
+}
+INCOMPLETE_LOCAL_COMMANDS = {
+    "active": {
+        "prefix": "ouvre",
+        "prompt": "Que veux-tu activer ?",
+        "accepted": {"open_app", "open_folder", "open_project", "open_site"},
+    },
+    "cherche": {
+        "prefix": "cherche sur google",
+        "prompt": "Que veux-tu chercher sur Google ?",
+        "accepted": {"search_google"},
+    },
+    "close": {
+        "prefix": "ferme",
+        "prompt": "Quelle application veux-tu fermer ?",
+        "accepted": {"close_app"},
+    },
+    "demarre": {
+        "prefix": "ouvre",
+        "prompt": "Que veux-tu demarrer ?",
+        "accepted": {"open_app", "open_folder", "open_project", "open_site"},
+    },
+    "ferme": {
+        "prefix": "ferme",
+        "prompt": "Quelle application veux-tu fermer ?",
+        "accepted": {"close_app"},
+    },
+    "lance": {
+        "prefix": "ouvre",
+        "prompt": "Que veux-tu lancer ?",
+        "accepted": {"open_app", "open_folder", "open_project", "open_site"},
+    },
+    "open": {
+        "prefix": "ouvre",
+        "prompt": "Que veux-tu ouvrir ?",
+        "accepted": {"open_app", "open_folder", "open_project", "open_site"},
+    },
+    "ouvre": {
+        "prefix": "ouvre",
+        "prompt": "Que veux-tu ouvrir ?",
+        "accepted": {"open_app", "open_folder", "open_project", "open_site"},
+    },
+    "ouvrir": {
+        "prefix": "ouvre",
+        "prompt": "Que veux-tu ouvrir ?",
+        "accepted": {"open_app", "open_folder", "open_project", "open_site"},
+    },
+    "recherche": {
+        "prefix": "cherche sur google",
+        "prompt": "Que veux-tu chercher sur Google ?",
+        "accepted": {"search_google"},
+    },
+}
 
 
 class AssistantCore:
@@ -33,13 +92,15 @@ class AssistantCore:
         config.ensure_runtime_directories()
         self.project_assistant = project_actions.ProjectAssistant()
         self.personal_assistant = personal_actions.PersonalAssistant()
-        self.registry = build_default_registry(self)
         self.security = SecurityPolicy()
         self.session_memory = SessionMemory()
         self.user_memory = UserMemoryStore()
         self.local_brain = ai_brain.LocalBrain()
+        self.registry = build_default_registry(self)
+        self.agent = AgentCore(self.registry, self.security)
         self.pending_confirmation = None
         self.pending_music_request = False
+        self.pending_followup = None
         self.music_playing = False
         self.music_paused_for_command = False
         self._announced_scheduler_task_ids = set()
@@ -196,9 +257,76 @@ class AssistantCore:
         self.session_memory.add_turn(intent, target, response)
         self.user_memory.record_interaction(intent, target, response)
 
+    def expects_followup(self):
+        return bool(self.pending_music_request or self.pending_followup)
+
+    def reset_session(self):
+        """Clear transient conversation state without deleting persisted user data."""
+        self.pending_confirmation = None
+        self.pending_music_request = False
+        self.pending_followup = None
+        self.session_memory.clear()
+
+    def _begin_pending_followup(self, intent_data):
+        raw = intent_data.get("raw") or intent_data.get("target", "")
+        normalized = ai_brain.normalize_prompt(raw)
+        specification = INCOMPLETE_LOCAL_COMMANDS.get(normalized)
+        if specification is None:
+            if intent_data.get("intent") == "search_google" and not intent_data.get("target", "").strip():
+                specification = INCOMPLETE_LOCAL_COMMANDS["cherche"]
+            else:
+                return None
+
+        self.pending_followup = {
+            "prefix": specification["prefix"],
+            "prompt": specification["prompt"],
+            "accepted": set(specification["accepted"]),
+        }
+        return specification["prompt"]
+
+    def _resolve_pending_followup(self, intent_data):
+        pending = self.pending_followup
+        if not pending:
+            return intent_data, None
+
+        intent = intent_data.get("intent", "")
+        target = (intent_data.get("target", "") or "").strip()
+        if intent in {"confirm_no", "stop"}:
+            self.pending_followup = None
+            return intent_data, None
+
+        if intent != "chat_fallback":
+            self.pending_followup = None
+            return intent_data, None
+
+        answer = (intent_data.get("raw") or target).strip()
+        if not answer:
+            return intent_data, pending["prompt"]
+
+        resolved = detect_intent(f"{pending['prefix']} {answer}")
+        if resolved.get("intent") in pending["accepted"] and resolved.get("target", "").strip():
+            self.pending_followup = None
+            return resolved, None
+
+        return (
+            intent_data,
+            f"Je n'ai pas reconnu la cible. {pending['prompt']}",
+        )
+
     def _resolve_confirmation(self, intent):
         if intent == "confirm_no":
+            pending = self.pending_confirmation
             self.pending_confirmation = None
+            if pending and pending.get("agent_pending") is not None:
+                agent_result = self.agent.resume(
+                    pending["agent_pending"],
+                    confirmed=False,
+                )
+                return {
+                    "intent": "confirm_no",
+                    "target": pending.get("target", ""),
+                    "response": agent_result.response,
+                }
             return {
                 "intent": "confirm_no",
                 "target": "",
@@ -213,6 +341,19 @@ class AssistantCore:
                 }
             intent_data = self.pending_confirmation
             self.pending_confirmation = None
+            if intent_data.get("agent_pending") is not None:
+                agent_result = self.agent.resume(
+                    intent_data["agent_pending"],
+                    confirmed=True,
+                    fallback=lambda: "L'action a ete confirmee, mais Ollama est indisponible pour terminer la reponse.",
+                )
+                if agent_result.pending_action is not None:
+                    self.pending_confirmation = self._agent_confirmation_payload(agent_result.pending_action)
+                return {
+                    "intent": intent_data["intent"],
+                    "target": intent_data.get("target", ""),
+                    "response": agent_result.response,
+                }
             return {
                 "intent": intent_data["intent"],
                 "target": intent_data.get("target", ""),
@@ -246,7 +387,22 @@ class AssistantCore:
             self._remember(intent, target, response)
             return response
         if intent == "stop":
+            self.pending_followup = None
             return "__STOP__"
+
+        intent_data, followup_response = self._resolve_pending_followup(intent_data)
+        intent = intent_data["intent"]
+        target = intent_data.get("target", "")
+        if followup_response is not None:
+            response = self._format_user_facing_response(followup_response)
+            self._remember("pending_followup", target, response)
+            return response
+
+        followup_prompt = self._begin_pending_followup(intent_data)
+        if followup_prompt is not None:
+            response = self._format_user_facing_response(followup_prompt)
+            self._remember(intent, target, response)
+            return response
 
         if self.pending_music_request and intent == "chat_fallback" and target.strip():
             music_target = re.sub(
@@ -255,6 +411,10 @@ class AssistantCore:
                 target.strip(),
             )
             music_target = re.sub(r"^(?:musique|chanson|son)\s+", "", music_target).strip()
+            music_target = MUSIC_FOLLOWUP_ALIASES.get(
+                ai_brain.normalize_prompt(music_target),
+                music_target,
+            )
             intent_data = {"intent": "play_music", "target": music_target or target.strip(), "slots": {}}
             intent = "play_music"
             target = intent_data["target"]
@@ -269,7 +429,10 @@ class AssistantCore:
             )
             return confirmation_result["response"]
 
-        response = self._format_user_facing_response(self._execute_intent(intent_data))
+        if self._should_use_agent(intent_data):
+            response = self._format_user_facing_response(self._handle_agent_request(intent_data))
+        else:
+            response = self._format_user_facing_response(self._execute_intent(intent_data))
         self._remember(intent, target, response)
         return response
 
@@ -280,7 +443,10 @@ class AssistantCore:
         return system_actions.close_app(intent_data.get("target", ""))
 
     def _handle_open_folder(self, intent_data):
-        return system_actions.open_folder(intent_data.get("target", ""))
+        target = intent_data.get("target", "")
+        if target in config.PROJECTS:
+            return self.project_assistant.open_project(target)
+        return system_actions.open_folder(target)
 
     def _handle_time(self, _intent_data):
         return system_actions.get_time_response()
@@ -372,14 +538,14 @@ class AssistantCore:
     def _handle_launch_project_server(self, intent_data):
         return self.project_assistant.launch_project_server(intent_data.get("target", "") or None)
 
-    def _handle_git_status(self, _intent_data):
-        return self.project_assistant.git_status()
+    def _handle_git_status(self, intent_data):
+        return self.project_assistant.git_status(intent_data.get("target", "") or None)
 
     def _handle_git_pull(self, _intent_data):
         return self.project_assistant.git_pull()
 
-    def _handle_git_log(self, _intent_data):
-        return self.project_assistant.git_log()
+    def _handle_git_log(self, intent_data):
+        return self.project_assistant.git_log(intent_data.get("target", "") or None)
 
     def _handle_git_commit_prepare(self, _intent_data):
         return self.project_assistant.prepare_commit()
@@ -393,7 +559,42 @@ class AssistantCore:
     def _handle_add_todo(self, intent_data):
         return self.personal_assistant.add_todo(intent_data.get("target", ""))
 
-    def _handle_list_todos(self, _intent_data):
+    @staticmethod
+    def _scheduled_publications_for_day(day="tomorrow", now=None):
+        reference = now or datetime.now()
+        target_date = (reference + timedelta(days=1)).date() if day == "tomorrow" else reference.date()
+        matching = []
+        try:
+            tasks = sched_store.list_tasks(status="active")
+        except Exception:
+            logger.exception("Unable to read scheduled tasks for agenda")
+            return matching
+
+        for task in tasks:
+            frequency = str(task.get("frequency", "daily")).lower()
+            if frequency == "weekly":
+                if task.get("weekday") is None:
+                    continue
+                if int(task["weekday"]) != target_date.weekday():
+                    continue
+            matching.append(task)
+        return matching
+
+    def _handle_list_todos(self, intent_data):
+        if intent_data.get("slots", {}).get("day") == "tomorrow":
+            response = self.personal_assistant.list_todos_for_day("tomorrow")
+            publications = self._scheduled_publications_for_day("tomorrow")
+            if not publications:
+                return response
+
+            publication_lines = [
+                f"- Publication : {task.get('send_time', '')} "
+                f"[{str(task.get('platform', '')).capitalize()}] {task.get('title', '')}"
+                for task in publications[:10]
+            ]
+            if response.startswith("Tu n'as aucune"):
+                return "Pour demain :\n" + "\n".join(publication_lines)
+            return response + "\n" + "\n".join(publication_lines)
         return self.personal_assistant.list_todos()
 
     def _handle_remind_me(self, intent_data):
@@ -457,6 +658,189 @@ class AssistantCore:
             "session_turn": self.session_memory.last_turn(),
         }
 
+    @staticmethod
+    def _agent_tool_names(intent_data):
+        intent = intent_data.get("intent", "")
+        normalized = f" {ai_brain.normalize_prompt(intent_data.get('raw') or '')} "
+        selected = set()
+
+        tools_by_intent = {
+            "battery": {"battery"},
+            "date": {"date"},
+            "git_log": {"git_log"},
+            "git_status": {"git_status"},
+            "iot_status": {"iot_status"},
+            "iot_temperature": {"iot_temperature"},
+            "list_todos": {"list_todos"},
+            "open_app": {"open_app"},
+            "open_folder": {"open_folder"},
+            "open_project": {"open_folder", "git_log", "git_status"},
+            "open_site": {"open_site"},
+            "search_google": {"search_google"},
+            "search_personal": {"search_personal"},
+            "search_youtube": {"search_youtube"},
+            "summarize_file": {"summarize_file"},
+            "time": {"time"},
+        }
+        selected.update(tools_by_intent.get(intent, set()))
+
+        def mentions(*phrases):
+            return any(f" {phrase} " in normalized for phrase in phrases)
+
+        if mentions("ouvre", "ouvrir", "open", "lance", "active"):
+            selected.update({"open_app", "open_folder", "open_site"})
+        if mentions("google"):
+            selected.update({"open_site", "search_google"})
+        if mentions("youtube"):
+            selected.update({"open_site", "search_youtube"})
+        if mentions("cherche", "recherche") and not mentions("youtube"):
+            selected.add("search_google")
+        if mentions("note", "notes", "todo", "todos", "tache", "taches"):
+            selected.update({"list_todos", "search_personal"})
+        if mentions("projet", "git", "depot", "commit"):
+            selected.update({"git_log", "git_status", "open_folder"})
+        if mentions("fichier", "document") and mentions("resume", "resumer", "analyse"):
+            selected.add("summarize_file")
+        if mentions("iot", "capteur", "sonde"):
+            selected.update({"iot_status", "iot_temperature"})
+        if mentions("heure"):
+            selected.add("time")
+        if mentions("date", "jour"):
+            selected.add("date")
+        if mentions("niveau batterie", "batterie du pc", "ma batterie"):
+            selected.add("battery")
+
+        return tuple(sorted(selected))
+
+    def _agent_context(self, prompt, *, tool_names=()):
+        context = self._local_brain_context()
+        knowledge = ""
+        library = getattr(self.local_brain, "knowledge_library", None)
+        if library is not None and hasattr(library, "lookup_local"):
+            knowledge = library.lookup_local(prompt)
+
+        normalized = f" {ai_brain.normalize_prompt(prompt)} "
+        personal_markers = (
+            " demain ",
+            " journee ",
+            " mes ",
+            " mon ",
+            " priorite ",
+            " rappel ",
+            " tache ",
+            " taches ",
+            " todo ",
+            " todos ",
+        )
+        selected = set(tool_names or ())
+        needs_personal_context = bool(
+            selected.intersection({"list_todos", "search_personal"})
+            or any(marker in normalized for marker in personal_markers)
+        )
+        needs_project_context = bool(
+            selected.intersection({"git_log", "git_status", "open_folder"})
+        )
+
+        agent_context = {
+            "session": self.session_memory.recent_turns(limit=2),
+        }
+        if knowledge:
+            agent_context["knowledge"] = knowledge
+        if needs_personal_context:
+            agent_context.update(
+                {
+                    "todos": context["todos"][:5],
+                    "reminders": context["reminders"][:4],
+                    "preferences": context["preferences"],
+                    "insights": context["insights"],
+                    "user_history": context["history"][-3:],
+                }
+            )
+        elif needs_project_context:
+            agent_context.update(
+                {
+                    "insights": context["insights"],
+                    "user_history": context["history"][-3:],
+                }
+            )
+        return agent_context
+
+    @staticmethod
+    def _is_fast_local_chat(prompt):
+        normalized = ai_brain.normalize_prompt(prompt)
+        if ai_brain._answer_math_question(prompt):
+            return True
+        return normalized in {
+            "bonjour",
+            "salut",
+            "hello",
+            "coucou",
+            "merci",
+            "bravo",
+            "super",
+            "ca va",
+            "comment vas tu",
+            "qui es tu",
+            "presente toi",
+            "ton nom",
+        }
+
+    @staticmethod
+    def _looks_compound(prompt):
+        normalized = f" {ai_brain.normalize_prompt(prompt)} "
+        return any(
+            marker in normalized
+            for marker in (" puis ", " ensuite ", " et dis ", " et regarde ", " et verifie ", " apres cela ")
+        )
+
+    def _should_use_agent(self, intent_data):
+        if not config.AI_SETTINGS.get("agent_enabled", True):
+            return False
+        if not ai_brain.can_answer_general_questions():
+            return False
+
+        raw = (intent_data.get("raw") or "").strip()
+        if not raw:
+            return False
+        intent = intent_data.get("intent", "")
+        if intent == "chat_fallback":
+            return not self._is_fast_local_chat(raw)
+        if intent in {"iot_status", "iot_temperature"}:
+            return True
+        if intent == "open_project" and self._looks_compound(raw):
+            return True
+
+        route = self.registry.get(intent)
+        return bool(route and route.ai_enabled and self._looks_compound(raw))
+
+    @staticmethod
+    def _agent_confirmation_payload(pending_action):
+        return {
+            "intent": pending_action.tool_name,
+            "target": pending_action.arguments.get("target", ""),
+            "slots": dict(pending_action.arguments),
+            "agent_pending": pending_action,
+        }
+
+    def _handle_agent_request(self, intent_data):
+        prompt = (intent_data.get("raw") or intent_data.get("target", "") or "").strip()
+        tool_names = self._agent_tool_names(intent_data)
+
+        def historical_fallback():
+            if intent_data.get("intent") == "chat_fallback":
+                return self._handle_local_chat_fallback(intent_data, allow_ollama=False)
+            return self._execute_intent(intent_data)
+
+        result = self.agent.run(
+            prompt,
+            context=self._agent_context(prompt, tool_names=tool_names),
+            fallback=historical_fallback,
+            tool_names=tool_names,
+        )
+        if result.pending_action is not None:
+            self.pending_confirmation = self._agent_confirmation_payload(result.pending_action)
+        return result.response
+
     def _handle_daily_brief(self, _intent_data):
         context = self._local_brain_context()
         return self.local_brain.generate_daily_brief(
@@ -512,7 +896,7 @@ class AssistantCore:
     def _handle_capabilities(self, _intent_data):
         return self.local_brain.explain_capabilities()
 
-    def _handle_local_chat_fallback(self, intent_data):
+    def _handle_local_chat_fallback(self, intent_data, *, allow_ollama=True):
         target = (intent_data.get("target", "") or "").strip()
         if target.startswith("mets ") or target.startswith("joue "):
             return "Je peux lancer la musique localement. Dis par exemple: mets du ninho."
@@ -525,6 +909,7 @@ class AssistantCore:
             preferences=context["preferences"],
             insights=context["insights"],
             session_turn=context["session_turn"],
+            allow_ollama=allow_ollama,
         )
 
     def _handle_open_scheduler(self, _intent_data):

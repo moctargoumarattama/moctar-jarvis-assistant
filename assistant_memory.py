@@ -1,16 +1,468 @@
-import json
+"""Système de mémoire duale pour JARVIS (Court Terme + Sémantique Long Terme).
+
+Fournit :
+1. Mémoire de Travail (Court Terme / Sliding Window) : Gestion fluide d'un historique
+   glissant token-aware pour éviter tout débordement de contexte.
+2. Mémoire Sémantique Long Terme (Persistante locale SQLite) : Stockage et recherche
+   sémantique par mots-clés pondérés (BM25 / Token Overlap) des faits techniques et préférences.
+3. Rétrocompatibilité totale avec les composants historiques (SessionMemory, UserMemoryStore).
+"""
+
+from collections import Counter
 from datetime import datetime
+import json
+import logging
+import math
 from pathlib import Path
+import re
+import sqlite3
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import config
 
+logger = logging.getLogger("jarvis.memory")
+
+_DEFAULT_DB_PATH = config.DATA_DIR / "jarvis_memory.db"
+
+_STOPWORDS: Set[str] = {
+    "le", "la", "les", "un", "une", "des", "du", "de", "d", "l", "et", "ou",
+    "en", "a", "au", "aux", "pour", "dans", "sur", "par", "avec", "sans",
+    "sous", "ce", "cet", "cette", "ces", "mon", "ton", "son", "ma", "ta", "sa",
+    "mes", "tes", "ses", "notre", "votre", "leur", "nos", "vos", "leurs",
+    "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles",
+    "qui", "que", "quoi", "dont", "ou", "est", "sont", "ete", "etre", "avoir",
+    "fait", "faire", "plus", "moins", "tres", "bien", "aussi", "the", "a", "an",
+    "and", "or", "in", "on", "at", "to", "for", "of", "with", "is", "are", "was",
+}
+
+
+def _tokenize(text: str) -> List[str]:
+    """Tokenise, normalise et filtre les stopwords d'un texte."""
+    if not text:
+        return []
+    cleaned = re.sub(r"[^\w\s-]", " ", text.lower())
+    tokens = [t for t in re.split(r"[\s_-]+", cleaned) if len(t) > 1 and t not in _STOPWORDS]
+    return tokens
+
+
+from contextlib import contextmanager
+
+
+class AssistantMemory:
+    """Gestionnaire de mémoire duale industrielle (SQLite locale + historique glissant)."""
+
+    def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:
+        self.db_path = Path(db_path or _DEFAULT_DB_PATH)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+        logger.info("AssistantMemory connectée à %s", self.db_path)
+
+    @contextmanager
+    def _get_connection(self):
+        """Crée une connexion SQLite fermée automatiquement à la fin du bloc."""
+        conn = sqlite3.connect(str(self.db_path), timeout=15.0)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def _init_db(self) -> None:
+        """Initialise le schéma de base de données SQLite de façon idempotente."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Table 1 : Faits et connaissances persistantes à long terme
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    embedding_or_keywords TEXT,
+                    importance_score INTEGER DEFAULT 1,
+                    UNIQUE(category, key)
+                )
+                """
+            )
+
+            # Table 2 : Historique de conversations multi-tours pour la mémoire de travail
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS conversation_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT,
+                    tool_calls TEXT,
+                    tool_call_id TEXT
+                )
+                """
+            )
+
+            # Index d'optimisation pour requêtes rapides
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_memories_cat_key ON memories(category, key)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_conv_session ON conversation_history(session_id, timestamp)")
+            conn.commit()
+
+    # ==========================================================================
+    # 1. MÉMOIRE SÉMANTIQUE LONG TERME (FAITS, PRÉFÉRENCES, CONFIGURATIONS)
+    # ==========================================================================
+
+    def save_fact(
+        self,
+        category: str,
+        key: str,
+        value: str,
+        importance: int = 1,
+    ) -> bool:
+        """Enregistre ou met à jour un fait dans la mémoire permanente (upsert).
+
+        Args:
+            category: Domaine du fait (ex: 'system', 'preferences', 'iot', 'network').
+            key: Identifiant concis du fait (ex: 'ip_vps', 'ssh_port', 'favorite_theme').
+            value: Contenu informatif détaillé du fait.
+            importance: Niveau de priorité de 1 (standard) à 5 (critique).
+
+        Returns:
+            bool: True si l'opération a réussi, False sinon.
+        """
+        normalized_cat = category.strip().lower() or "general"
+        normalized_key = key.strip().lower()
+        if not normalized_key or not value:
+            logger.warning("Tentative d'enregistrement d'un fait invalide (clé ou valeur vide).")
+            return False
+
+        # Extraction des mots-clés d'indexation
+        keywords = " ".join(_tokenize(f"{normalized_cat} {normalized_key} {value}"))
+        now_iso = datetime.now().isoformat(timespec="seconds")
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO memories (timestamp, category, key, content, embedding_or_keywords, importance_score)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(category, key) DO UPDATE SET
+                        content = excluded.content,
+                        timestamp = excluded.timestamp,
+                        embedding_or_keywords = excluded.embedding_or_keywords,
+                        importance_score = excluded.importance_score
+                    """,
+                    (now_iso, normalized_cat, normalized_key, value.strip(), keywords, int(importance)),
+                )
+                conn.commit()
+            logger.info("Fait mémorisé avec succès : [%s] %s = %s", normalized_cat, normalized_key, value.strip())
+            return True
+        except Exception as exc:
+            logger.exception("Erreur lors de l'enregistrement du fait dans memories : %s", exc)
+            return False
+
+    def search_facts(
+        self,
+        query: str,
+        limit: int = 3,
+        category: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Recherche les faits les plus pertinents par similarité lexicale et pondération.
+
+        Args:
+            query: Question ou termes de recherche.
+            limit: Nombre maximal de faits à retourner.
+            category: Catégorie optionnelle pour restreindre le périmètre (ex: 'network', 'iot').
+
+        Returns:
+            List[Dict[str, Any]]: Faits triés par score de pertinence décroissant.
+        """
+        query_tokens = _tokenize(query)
+        raw_query_lower = query.lower().strip()
+        normalized_cat = category.lower().strip() if category else None
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if normalized_cat:
+                    cursor.execute(
+                        "SELECT id, timestamp, category, key, content, embedding_or_keywords, importance_score FROM memories WHERE LOWER(category) = ?",
+                        (normalized_cat,),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT id, timestamp, category, key, content, embedding_or_keywords, importance_score FROM memories"
+                    )
+                rows = cursor.fetchall()
+        except Exception as exc:
+            logger.error("Erreur lors de la lecture des mémoires : %s", exc)
+            return []
+
+        if not query_tokens and not raw_query_lower:
+            return [
+                {
+                    "id": r[0],
+                    "timestamp": r[1],
+                    "category": r[2],
+                    "key": r[3],
+                    "content": r[4],
+                    "importance": r[6],
+                    "score": 1.0,
+                }
+                for r in sorted(rows, key=lambda x: x[6], reverse=True)[:limit]
+            ]
+
+        scored_results: List[Tuple[float, Dict[str, Any]]] = []
+
+        for row in rows:
+            _id, ts, cat, key, content, kw, importance = row
+            score = 0.0
+            key_lower = key.lower()
+            cat_lower = cat.lower()
+            content_lower = content.lower()
+
+            # 1. Correspondance exacte ou partielle sur la clé
+            if key_lower == raw_query_lower:
+                score += 15.0
+            elif key_lower in raw_query_lower or raw_query_lower in key_lower:
+                score += 8.0
+            elif any(token in key_lower for token in query_tokens):
+                score += 4.0
+
+            # 2. Correspondance sur la catégorie
+            if cat_lower in raw_query_lower:
+                score += 3.0
+            if normalized_cat and cat_lower == normalized_cat:
+                score += 2.0
+
+            # 3. Fréquence des tokens dans le contenu
+            doc_tokens = Counter(_tokenize(f"{key} {content} {kw}"))
+            for q_tok in query_tokens:
+                if q_tok in doc_tokens:
+                    # Score TF logarithmique
+                    score += 1.5 * (1.0 + math.log(doc_tokens[q_tok]))
+
+            # 4. Bonus d'importance déclarée
+            if score > 0:
+                score *= (1.0 + 0.2 * min(int(importance or 1), 5))
+                scored_results.append(
+                    (
+                        score,
+                        {
+                            "id": _id,
+                            "timestamp": ts,
+                            "category": cat,
+                            "key": key,
+                            "content": content,
+                            "importance": importance,
+                            "score": round(score, 3),
+                        },
+                    )
+                )
+
+        scored_results.sort(key=lambda item: item[0], reverse=True)
+        return [item[1] for item in scored_results[:limit]]
+
+    def get_system_context_snippet(self, user_query: str) -> str:
+        """Génère un bloc de contexte compact récapitulant les faits pertinents pour le prompt système.
+
+        Args:
+            user_query: Requête courante de l'utilisateur.
+
+        Returns:
+            str: Bloc textuel à injecter dynamiquement dans le SYSTEM_PROMPT.
+        """
+        relevant_facts = self.search_facts(user_query, limit=4)
+
+        # Récupération supplémentaire des faits hautement critiques (importance >= 4)
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT category, key, content FROM memories WHERE importance_score >= 4 ORDER BY timestamp DESC LIMIT 3"
+                )
+                critical_rows = cursor.fetchall()
+        except Exception:
+            critical_rows = []
+
+        seen_keys = set()
+        fact_lines: List[str] = []
+
+        # Ajout des faits trouvés par recherche sémantique
+        for fact in relevant_facts:
+            compound_key = f"{fact['category']}:{fact['key']}"
+            if compound_key not in seen_keys:
+                seen_keys.add(compound_key)
+                fact_lines.append(f"- [{fact['category']}] {fact['key']} = {fact['content']}")
+
+        # Ajout des faits critiques
+        for cat, k, val in critical_rows:
+            compound_key = f"{cat}:{k}"
+            if compound_key not in seen_keys:
+                seen_keys.add(compound_key)
+                fact_lines.append(f"- [{cat}] {k} = {val}")
+
+        if not fact_lines:
+            return ""
+
+        return (
+            "FAITS MÉMORISÉS ET PRÉFÉRENCES (MÉMOIRE PERMANENTE JARVIS) :\n"
+            + "\n".join(fact_lines)
+        )
+
+    def delete_fact(self, key: str, category: Optional[str] = None) -> bool:
+        """Supprime un fait de la mémoire permanente."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if category:
+                    cursor.execute("DELETE FROM memories WHERE category = ? AND key = ?", (category.strip().lower(), key.strip().lower()))
+                else:
+                    cursor.execute("DELETE FROM memories WHERE key = ?", (key.strip().lower(),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as exc:
+            logger.error("Erreur lors de la suppression du fait '%s' : %s", key, exc)
+            return False
+
+    # ==========================================================================
+    # 2. MÉMOIRE DE TRAVAIL (COURT TERME / SLIDING WINDOW TOKEN-AWARE)
+    # ==========================================================================
+
+    def add_message(
+        self,
+        session_id: str,
+        role: str,
+        content: Optional[str] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        tool_call_id: Optional[str] = None,
+    ) -> None:
+        """Enregistre un message dans l'historique de la session.
+
+        Args:
+            session_id: Identifiant de la session de conversation.
+            role: Rôle de l'émetteur ('user', 'assistant', 'system', 'tool').
+            content: Corps textuel du message.
+            tool_calls: Appels d'outils émis par l'assistant le cas échéant.
+            tool_call_id: ID du tool call si le message est une réponse d'outil.
+        """
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        tool_calls_str = json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO conversation_history (session_id, timestamp, role, content, tool_calls, tool_call_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (session_id, now_iso, role, content or "", tool_calls_str, tool_call_id),
+                )
+                conn.commit()
+        except Exception as exc:
+            logger.error("Erreur lors de l'enregistrement dans conversation_history : %s", exc)
+
+    def get_context_window(
+        self,
+        session_id: str,
+        max_turns: int = 8,
+        max_chars: int = 14000,
+    ) -> List[Dict[str, Any]]:
+        """Récupère la fenêtre glissante des derniers tours optimisée pour injection LLM.
+
+        Garantit que le protocole Function Calling reste valide en évitant d'isoler
+        un message 'tool' de son message 'assistant' déclencheur.
+
+        Args:
+            session_id: Identifiant de session cible.
+            max_turns: Nombre maximal d'échanges à remonter.
+            max_chars: Limite indicative de caractères pour éviter l'explosion du contexte.
+
+        Returns:
+            List[Dict[str, Any]]: Liste ordonnée chronologiquement des messages récents.
+        """
+        fetch_limit = max(10, max_turns * 3)
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT role, content, tool_calls, tool_call_id
+                    FROM conversation_history
+                    WHERE session_id = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (session_id, fetch_limit),
+                )
+                rows = cursor.fetchall()
+        except Exception as exc:
+            logger.error("Erreur lors de la lecture de la fenêtre de contexte : %s", exc)
+            return []
+
+        if not rows:
+            return []
+
+        # Remise dans l'ordre chronologique
+        rows.reverse()
+
+        messages: List[Dict[str, Any]] = []
+        total_chars = 0
+
+        for role, content, tool_calls_raw, tool_call_id in rows:
+            msg: Dict[str, Any] = {"role": role, "content": content or ""}
+            if tool_calls_raw:
+                try:
+                    msg["tool_calls"] = json.loads(tool_calls_raw)
+                except Exception:
+                    pass
+            if tool_call_id:
+                msg["tool_call_id"] = tool_call_id
+
+            msg_len = len(content or "") + len(tool_calls_raw or "")
+            if total_chars + msg_len > max_chars and len(messages) >= 2:
+                # Éviter de couper au milieu si le message suivant est un tool
+                break
+
+            total_chars += msg_len
+            messages.append(msg)
+
+        # Nettoyage de tête : ne jamais commencer la liste de contexte par un message 'tool'
+        while messages and messages[0].get("role") == "tool":
+            messages.pop(0)
+
+        # Tronquer aux max_turns derniers messages si nécessaire
+        if len(messages) > max_turns * 2:
+            messages = messages[-(max_turns * 2):]
+            while messages and messages[0].get("role") == "tool":
+                messages.pop(0)
+
+        return messages
+
+    def clear_session(self, session_id: str) -> None:
+        """Efface l'historique court terme d'une session."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM conversation_history WHERE session_id = ?", (session_id,))
+                conn.commit()
+                logger.info("Historique de session '%s' réinitialisé.", session_id)
+        except Exception as exc:
+            logger.error("Erreur lors de l'effacement de session : %s", exc)
+
+
+# ==============================================================================
+# RÉTROCOMPATIBILITÉ AVEC L'ANCIENNE ARCHITECTURE JARVIS
+# ==============================================================================
 
 class SessionMemory:
-    def __init__(self, max_turns=20):
-        self.max_turns = max_turns
-        self.turns = []
+    """Mémoire de session en mémoire vive (pour compatibilité avec assistant_core)."""
 
-    def add_turn(self, intent, target, response):
+    def __init__(self, max_turns: int = 20) -> None:
+        self.max_turns = max_turns
+        self.turns: List[Dict[str, Any]] = []
+
+    def add_turn(self, intent: str, target: str, response: str) -> None:
         self.turns.append(
             {
                 "intent": intent,
@@ -20,21 +472,52 @@ class SessionMemory:
             }
         )
         if len(self.turns) > self.max_turns:
-            self.turns = self.turns[-self.max_turns :]
+            self.turns = self.turns[-self.max_turns:]
 
-    def last_turn(self):
+    def add(self, role: str, content: str) -> None:
+        """Alias pour ajouter un tour de dialogue rôle/contenu."""
+        self.turns.append(
+            {
+                "role": role,
+                "content": content,
+                "at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+        if len(self.turns) > self.max_turns:
+            self.turns = self.turns[-self.max_turns:]
+
+    def get_history(self) -> List[Dict[str, Any]]:
+        """Renvoie la liste des tours enregistrés."""
+        return list(self.turns)
+
+    def last_turn(self) -> Optional[Dict[str, Any]]:
         if not self.turns:
             return None
         return self.turns[-1]
 
+    def recent_turns(self, limit: int = 4) -> List[Dict[str, Any]]:
+        limit = max(0, int(limit))
+        if limit == 0:
+            return []
+        return list(self.turns[-limit:])
+
+    def clear(self) -> None:
+        self.turns.clear()
+
 
 class UserMemoryStore:
+    """Gestionnaire de mémoire utilisateur JSON (pour compatibilité avec assistant_core)."""
+
     MAX_RESPONSE_CHARS = 220
 
-    def __init__(self, path=None):
-        self.path = Path(path or config.USER_MEMORY_FILE)
+    def __init__(self, path: Optional[Union[str, Path]] = None) -> None:
+        target = Path(path or config.USER_MEMORY_FILE)
+        if target.is_dir():
+            self.path = target / "user_memory.json"
+        else:
+            self.path = target
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._cache = None
+        self._cache: Optional[Dict[str, Any]] = None
         if not self.path.exists():
             self.path.write_text(
                 json.dumps(
@@ -53,7 +536,7 @@ class UserMemoryStore:
                 encoding="utf-8",
             )
 
-    def _load(self):
+    def _load(self) -> Dict[str, Any]:
         if self._cache is not None:
             return self._cache
         try:
@@ -72,25 +555,34 @@ class UserMemoryStore:
             }
             return self._cache
 
-    def _save(self, payload):
+    def _save(self, payload: Dict[str, Any]) -> None:
         serialized = json.dumps(payload, indent=2, ensure_ascii=False)
         self.path.write_text(serialized, encoding="utf-8")
         self._cache = payload
 
-    def set_preference(self, key, value):
+    def set_preference(self, key: str, value: Any) -> None:
         payload = self._load()
         payload.setdefault("preferences", {})[key] = value
         self._save(payload)
 
-    def get_preference(self, key, default=None):
+    def get_preference(self, key: str, default: Any = None) -> Any:
         payload = self._load()
         return payload.get("preferences", {}).get(key, default)
 
-    def get_preferences(self):
+    def remember(self, key: str, value: Any) -> bool:
+        """Alias de mémorisation directe pour compatibilité."""
+        self.set_preference(key, value)
+        return True
+
+    def recall(self, key: str, default: Any = None) -> Any:
+        """Alias de rappel direct pour compatibilité."""
+        return self.get_preference(key, default)
+
+    def get_preferences(self) -> Dict[str, Any]:
         payload = self._load()
         return dict(payload.get("preferences", {}))
 
-    def record_interaction(self, intent, target, response):
+    def record_interaction(self, intent: str, target: str, response: Any) -> None:
         payload = self._load()
         history = payload.setdefault("history", [])
         insights = payload.setdefault("insights", {})
@@ -124,14 +616,14 @@ class UserMemoryStore:
 
         self._save(payload)
 
-    def get_history(self, limit=None):
+    def get_history(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         payload = self._load()
         history = list(payload.get("history", []))
         if limit is None:
             return history
         return history[-limit:]
 
-    def get_insights(self):
+    def get_insights(self) -> Dict[str, Any]:
         payload = self._load()
         insights = payload.get("insights", {})
         return {

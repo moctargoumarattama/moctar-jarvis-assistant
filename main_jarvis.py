@@ -32,6 +32,7 @@ from wake_word_simple import (
     consume_voice_activation,
     pause_soft_wake_listener,
     release_command_microphone,
+    resume_soft_wake_listener,
     should_activate_by_voice,
     start_soft_wake_listener,
     stop_soft_wake_listener,
@@ -39,6 +40,10 @@ from wake_word_simple import (
 
 
 IDLE_SLEEP_SECONDS = 0.15
+RUNTIME_IDLE = "IDLE"
+RUNTIME_LISTENING = "LISTENING"
+RUNTIME_PROCESSING = "PROCESSING"
+RUNTIME_SPEAKING = "SPEAKING"
 logger = logging.getLogger("jarvis")
 COMMAND_ONLY_ALLOWED_PREFIXES = {
     "active",
@@ -47,9 +52,11 @@ COMMAND_ONLY_ALLOWED_PREFIXES = {
     "baisse",
     "alarme",
     "cherche",
+    "close",
     "combien",
     "coupe",
     "cree",
+    "ferme",
     "donne",
     "joue",
     "lance",
@@ -66,15 +73,53 @@ COMMAND_ONLY_ALLOWED_PREFIXES = {
     "play",
     "quel",
     "quelle",
+    "quelles",
+    "quels",
     "rappel",
     "rappel-moi",
     "rappelle",
     "rappelle-moi",
     "resume",
 }
+
+
+def _set_runtime_phase(state, phase):
+    state["runtime_phase"] = phase
+    if phase == RUNTIME_IDLE:
+        resume_soft_wake_listener()
+    else:
+        pause_soft_wake_listener()
+
+
+def _assistant_expects_followup(assistant):
+    checker = getattr(assistant, "expects_followup", None)
+    if callable(checker):
+        return bool(checker())
+    return bool(getattr(assistant, "pending_music_request", False))
+
+
+def _is_duplicate_command(command, state, now_value=None):
+    normalized = ai_brain.normalize_prompt(command)
+    if not normalized:
+        return False
+
+    current_time = time.monotonic() if now_value is None else now_value
+    previous = state.get("last_command_signature", "")
+    previous_at = state.get("last_command_at", 0.0)
+    duplicate = (
+        normalized == previous
+        and current_time - previous_at < config.VOICE_COMMAND_DEBOUNCE_SECONDS
+    )
+    if not duplicate:
+        state["last_command_signature"] = normalized
+        state["last_command_at"] = current_time
+    return duplicate
+
+
 COMMAND_ONLY_SAFE_INTENTS = {
     "add_todo",
     "battery",
+    "close_app",
     "create_note",
     "date",
     "energy_audit_template",
@@ -116,6 +161,92 @@ def format_assistant_message(text):
     return text
 
 
+def submit_manual_command(command, app, ui, assistant, state):
+    command = (command or "").strip()
+    if not command:
+        ui.update_text("Ecris d'abord une commande.")
+        app.processEvents()
+        return False
+
+    if (
+        state.get("should_listen")
+        or state.get("runtime_phase", RUNTIME_IDLE) != RUNTIME_IDLE
+        or state.get("listen_job")
+        or state.get("command_job")
+    ):
+        ui.update_text(
+            "Jarvis traite deja une demande. Attends sa reponse ou clique sur Reinitialiser."
+        )
+        app.processEvents()
+        logger.info(
+            "Manual command ignored while phase=%s",
+            state.get("runtime_phase", RUNTIME_IDLE),
+        )
+        return False
+
+    consume_voice_activation()
+    state["should_listen"] = False
+    state["activation_source"] = "manual"
+    music_was_paused = assistant.pause_music_for_command()
+    _set_listening_popup(ui, False)
+    ui.set_mode("idle")
+    ui.update_text("Je traite ta commande ecrite...")
+    app.processEvents()
+
+    if not start_command_job(command, assistant, music_was_paused, state):
+        ui.update_text(state.pop("feedback", "Commande ignoree."))
+        if music_was_paused and not _assistant_expects_followup(assistant):
+            assistant.resume_music_after_command()
+        app.processEvents()
+        return False
+
+    logger.info("Manual command submitted")
+    return True
+
+
+def reset_runtime(app, ui, assistant, state):
+    """Reset transient state while leaving persisted tasks and user memory intact."""
+    logger.info("Runtime reset requested")
+    consume_voice_activation()
+    state["should_listen"] = False
+
+    command_job = state.pop("command_job", None)
+    listen_job = state.pop("listen_job", None)
+    for job in (command_job, listen_job):
+        if isinstance(job, dict):
+            job["cancelled"] = True
+
+    music_was_paused = bool(state.pop("listen_job_music_was_paused", False))
+    if isinstance(command_job, dict):
+        music_was_paused = bool(command_job.get("music_was_paused")) or music_was_paused
+
+    reset_session = getattr(assistant, "reset_session", None)
+    if callable(reset_session):
+        reset_session()
+    if music_was_paused or getattr(assistant, "music_paused_for_command", False):
+        assistant.resume_music_after_command()
+
+    for key in (
+        "feedback",
+        "listen_job_error",
+        "last_command_signature",
+        "last_command_at",
+    ):
+        state.pop(key, None)
+
+    _set_listening_popup(ui, False)
+    _set_runtime_phase(state, RUNTIME_IDLE)
+    ui.set_mode("idle")
+    if command_job or listen_job:
+        ui.update_text(
+            "Reinitialisation effectuee. La reponse en cours sera ignoree; tu peux ecrire une nouvelle commande."
+        )
+    else:
+        ui.update_text("Session reinitialisee. Tu peux parler ou ecrire une commande.")
+    app.processEvents()
+    return True
+
+
 def configure_logging():
     if logger.handlers:
         return
@@ -150,11 +281,24 @@ def setup_runtime():
     state = {
         "should_listen": False,
         "activation_source": "ui",
+        "runtime_phase": RUNTIME_IDLE,
+        "assistant_lock": threading.Lock(),
     }
 
     def activate_listen(source="ui"):
-        if state["should_listen"]:
+        if (
+            state["should_listen"]
+            or state.get("runtime_phase", RUNTIME_IDLE) != RUNTIME_IDLE
+            or state.get("listen_job")
+            or state.get("command_job")
+        ):
+            logger.info(
+                "Listen request ignored from %s while phase=%s",
+                source,
+                state.get("runtime_phase", RUNTIME_IDLE),
+            )
             return
+        _set_runtime_phase(state, RUNTIME_LISTENING)
         state["activation_source"] = source
         state["should_listen"] = True
         ui.set_mode("listening")
@@ -169,6 +313,16 @@ def setup_runtime():
         activate_listen("ui")
 
     ui.listen_requested.connect(activate_from_ui)
+
+    def submit_from_ui(command):
+        submit_manual_command(command, app, ui, assistant, state)
+
+    ui.manual_command_requested.connect(submit_from_ui)
+
+    def reset_from_ui():
+        reset_runtime(app, ui, assistant, state)
+
+    ui.reset_requested.connect(reset_from_ui)
 
     def show_ai_status():
         ui.update_text(ui.ai_status_message)
@@ -193,10 +347,14 @@ def setup_runtime():
     return app, ui, engine, assistant, state
 
 
-def speak(engine, ui, app, text):
+def speak(engine, ui, app, text, state=None):
     text = format_assistant_message(text)
     logger.info("Assistant response: %s", text)
     print("M.O.C.T.A.R:", text)
+    if state is not None:
+        _set_runtime_phase(state, RUNTIME_SPEAKING)
+    else:
+        pause_soft_wake_listener()
     ui.set_mode("speaking")
     ui.update_text(text)
     app.processEvents()
@@ -205,6 +363,10 @@ def speak(engine, ui, app, text):
         t2s.text2speech(engine, text)
     finally:
         ui.set_mode("idle")
+        if state is not None:
+            _set_runtime_phase(state, RUNTIME_IDLE)
+        else:
+            resume_soft_wake_listener()
         app.processEvents()
 
 
@@ -213,7 +375,7 @@ def listen_for_command(_app=None, _ui=None):
     try:
         return s2t.voice2text("fr")
     finally:
-        release_command_microphone()
+        release_command_microphone(resume_listener=False)
 
 
 def handle_command(command, assistant):
@@ -223,25 +385,46 @@ def handle_command(command, assistant):
 
 
 def start_command_job(command, assistant, music_was_paused, state):
-    def _worker():
-        try:
-            result = handle_command(command, assistant)
-        except Exception as exc:
-            logger.exception("Intent handling failed")
-            result = f"Erreur interne : {exc}"
-        state["command_job"]["result"] = result
-        state["command_job"]["done"] = True
+    if _is_duplicate_command(command, state):
+        logger.info("Duplicate command ignored: %s", ai_brain.normalize_prompt(command))
+        state["feedback"] = "Cette commande vient deja d'etre traitee."
+        _set_runtime_phase(state, RUNTIME_IDLE)
+        return False
+
+    _set_runtime_phase(state, RUNTIME_PROCESSING)
 
     job = {
         "command": command,
         "music_was_paused": music_was_paused,
         "result": None,
         "done": False,
+        "cancelled": False,
     }
+
+    def _worker():
+        result = None
+        assistant_lock = state.setdefault("assistant_lock", threading.Lock())
+        with assistant_lock:
+            if not job["cancelled"]:
+                try:
+                    result = handle_command(command, assistant)
+                except Exception as exc:
+                    logger.exception("Intent handling failed")
+                    result = f"Erreur interne : {exc}"
+
+            if job["cancelled"]:
+                reset_session = getattr(assistant, "reset_session", None)
+                if callable(reset_session):
+                    reset_session()
+
+        job["result"] = result
+        job["done"] = True
+
     thread = threading.Thread(target=_worker, daemon=True)
     job["thread"] = thread
     state["command_job"] = job
     thread.start()
+    return True
 
 
 def get_finished_command_job(state):
@@ -252,24 +435,29 @@ def get_finished_command_job(state):
     if thread and thread.is_alive():
         return None
     state["command_job"] = None
+    if job.get("cancelled"):
+        return None
     return job
 
 
 def start_listen_job(app, ui, state):
+    job = {
+        "result": None,
+        "done": False,
+        "cancelled": False,
+    }
+
     def _worker():
         try:
             command = listen_for_command()
         except Exception as exc:
             logger.exception("Voice capture failed")
             command = ""
-            state["listen_job_error"] = str(exc)
-        state["listen_job"]["result"] = command
-        state["listen_job"]["done"] = True
+            if not job["cancelled"]:
+                state["listen_job_error"] = str(exc)
+        job["result"] = command
+        job["done"] = True
 
-    job = {
-        "result": None,
-        "done": False,
-    }
     thread = threading.Thread(target=_worker, daemon=True)
     job["thread"] = thread
     state["listen_job"] = job
@@ -284,6 +472,8 @@ def get_finished_listen_job(state):
     if thread and thread.is_alive():
         return None
     state["listen_job"] = None
+    if job.get("cancelled"):
+        return None
     return job
 
 
@@ -347,7 +537,8 @@ def run_loop(app, ui, engine, assistant, state):
                 error_message = state.pop("listen_job_error", "")
                 _set_listening_popup(ui, False)
                 ui.set_mode("idle")
-                if state.pop("listen_job_music_was_paused", False) and not assistant.pending_music_request:
+                _set_runtime_phase(state, RUNTIME_IDLE)
+                if state.pop("listen_job_music_was_paused", False) and not _assistant_expects_followup(assistant):
                     assistant.resume_music_after_command()
                 feedback = format_assistant_message(
                     state.pop(
@@ -366,7 +557,12 @@ def run_loop(app, ui, engine, assistant, state):
             ui.update_text("Je reflechis...")
             app.processEvents()
             _set_listening_popup(ui, False)
-            start_command_job(command, assistant, music_was_paused, state)
+            if not start_command_job(command, assistant, music_was_paused, state):
+                ui.set_mode("idle")
+                ui.update_text(state.pop("feedback", "Commande ignoree."))
+                if music_was_paused and not _assistant_expects_followup(assistant):
+                    assistant.resume_music_after_command()
+                app.processEvents()
             continue
 
         job = get_finished_command_job(state)
@@ -375,18 +571,18 @@ def run_loop(app, ui, engine, assistant, state):
             music_was_paused = job.get("music_was_paused", False)
 
             if result == "__STOP__":
-                speak(engine, ui, app, "D'accord. J'arrete.")
+                speak(engine, ui, app, "D'accord. J'arrete.", state=state)
                 _set_listening_popup(ui, False)
                 break
 
             if result == "__OPEN_SCHEDULER__":
-                speak(engine, ui, app, "J'ouvre le planificateur de tâches.")
+                speak(engine, ui, app, "J'ouvre le planificateur de tâches.", state=state)
                 try:
                     from scheduler.scheduler_ui import open_scheduler
                     open_scheduler(parent=None)
                 except Exception as exc:
                     logger.exception("Failed to open scheduler UI")
-                    speak(engine, ui, app, f"Impossible d'ouvrir le planificateur : {exc}")
+                    speak(engine, ui, app, f"Impossible d'ouvrir le planificateur : {exc}", state=state)
                 ui.set_mode("idle")
                 app.processEvents()
                 _set_listening_popup(ui, False)
@@ -395,14 +591,14 @@ def run_loop(app, ui, engine, assistant, state):
                 continue
 
             spoken_result = format_assistant_message(result)
-            speak(engine, ui, app, spoken_result)
+            speak(engine, ui, app, spoken_result, state=state)
             _set_listening_popup(ui, False)
-            if music_was_paused and not assistant.pending_music_request:
+            if music_was_paused and not _assistant_expects_followup(assistant):
                 assistant.resume_music_after_command()
             ui.update_text(spoken_result)
             ui.set_mode("idle")
-            if assistant.pending_music_request:
-                state["should_listen"] = True
+            if _assistant_expects_followup(assistant):
+                state["activate_listen"]("followup")
             app.processEvents()
             continue
 
@@ -421,7 +617,7 @@ def run_loop(app, ui, engine, assistant, state):
             pending_messages = [f"Erreur de rappel : {exc}"]
 
         for message in pending_messages:
-            speak(engine, ui, app, message)
+            speak(engine, ui, app, message, state=state)
 
         if not state["should_listen"] and not should_activate_by_voice():
             time.sleep(IDLE_SLEEP_SECONDS)
@@ -441,11 +637,18 @@ def run_loop(app, ui, engine, assistant, state):
 
         command = resolve_next_command(app, ui, state)
         if not command:
+            if state["should_listen"]:
+                state["listen_job_music_was_paused"] = music_was_paused
+                ui.set_mode("listening")
+                ui.update_text("Je t'ecoute...")
+                app.processEvents()
+                start_listen_job(app, ui, state)
+                continue
+
             _set_listening_popup(ui, False)
-            if music_was_paused and not assistant.pending_music_request:
+            _set_runtime_phase(state, RUNTIME_IDLE)
+            if music_was_paused and not _assistant_expects_followup(assistant):
                 assistant.resume_music_after_command()
-            if assistant.pending_music_request:
-                state["should_listen"] = True
             ui.set_mode("idle")
             feedback = format_assistant_message(
                 state.pop("feedback", "Je n'ai pas compris. Essaie encore ou utilise le bouton d'écoute.")
@@ -459,7 +662,12 @@ def run_loop(app, ui, engine, assistant, state):
         app.processEvents()
         _set_listening_popup(ui, False)
         state["should_listen"] = False
-        start_command_job(command, assistant, music_was_paused, state)
+        if not start_command_job(command, assistant, music_was_paused, state):
+            ui.set_mode("idle")
+            ui.update_text(state.pop("feedback", "Commande ignoree."))
+            if music_was_paused and not _assistant_expects_followup(assistant):
+                assistant.resume_music_after_command()
+            app.processEvents()
 
 
 def shutdown_runtime(state):

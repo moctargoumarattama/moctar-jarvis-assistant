@@ -57,18 +57,25 @@ pip install -r requirements.txt
 
 1. Edite le fichier `.env`.
 2. `OLLAMA_MODEL`, `OLLAMA_VISION_MODEL` et `OLLAMA_BASE_URL` pilotent le moteur local.
-3. Ajuste les chemins projets et dossiers dans [config.py](config.py) si besoin.
+3. La couche agentique utilise le tool calling natif d'Ollama et reste bornee a cinq etapes par defaut.
+4. Ajuste les chemins projets et dossiers dans [config.py](config.py) si besoin.
 
 Variables utiles :
 - `OLLAMA_MODEL`
 - `OLLAMA_VISION_MODEL`
 - `OLLAMA_BASE_URL`
+- `OLLAMA_TIMEOUT_SECONDS`
+- `MOCTAR_AGENT_ENABLED`
+- `OLLAMA_AGENT_MAX_STEPS`
+- `OLLAMA_AGENT_THINKING` (`auto`, `always` ou `never`)
 - `ENABLE_SOFT_WAKE_WORD`
 - `SOFT_WAKE_LANGUAGE`
 - `SOFT_WAKE_TIMEOUT`
 - `SOFT_WAKE_PHRASE_LIMIT`
 - `SOFT_WAKE_COOLDOWN_SECONDS`
+- `SOFT_WAKE_DUPLICATE_SECONDS`
 - `SOFT_WAKE_MIN_CONFIDENCE`
+- `VOICE_COMMAND_DEBOUNCE_SECONDS`
 - `JARVIS_MIC_INDEX`
 - `JARVIS_MIC_TIMEOUT`
 - `JARVIS_MIC_PHRASE_LIMIT`

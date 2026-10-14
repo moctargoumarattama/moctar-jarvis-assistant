@@ -53,7 +53,11 @@ _listener_guard = threading.Lock()
 _microphone_lock = threading.Lock()
 _activation_payload_lock = threading.Lock()
 _pending_wake_lock = threading.Lock()
+_capture_generation_lock = threading.Lock()
 _last_activation_at = 0.0
+_last_activation_signature = ""
+_last_activation_signature_at = 0.0
+_capture_generation = 0
 _last_error_logs = {}
 _ambient_adjusted_at = 0.0
 _activation_payload = None
@@ -74,6 +78,7 @@ _COMMAND_HINTS = {
     "met",
     "lance",
     "cherche",
+    "close",
     "ajoute",
     "cree",
     "resume",
@@ -86,12 +91,32 @@ _COMMAND_HINTS = {
     "augmente",
     "quelle",
     "quel",
+    "quelles",
+    "quels",
     "combien",
     "joue",
     "play",
+    "ferme",
 }
 _MAX_INLINE_COMMAND_WORDS = 6
 _PENDING_WAKE_SECONDS = 4.0
+_INCOMPLETE_COMMAND_ONLY = {
+    "active",
+    "cherche",
+    "close",
+    "donne",
+    "joue",
+    "lance",
+    "met",
+    "mets",
+    "open",
+    "ouvre",
+    "ferme",
+    "quel",
+    "quelle",
+    "quelles",
+    "quels",
+}
 
 
 def normalize_wake_text(text):
@@ -103,6 +128,33 @@ def normalize_wake_text(text):
     normalized = re.sub(r"[^a-z0-9\s]", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized.strip()
+
+
+def _current_capture_generation():
+    with _capture_generation_lock:
+        return _capture_generation
+
+
+def _capture_is_current(generation):
+    with _capture_generation_lock:
+        return generation == _capture_generation and not _pause_event.is_set()
+
+
+def clear_voice_activation():
+    global _activation_payload
+
+    _activation_event.clear()
+    with _activation_payload_lock:
+        _activation_payload = None
+    _clear_pending_wake()
+
+
+def invalidate_soft_wake_captures():
+    global _capture_generation
+
+    with _capture_generation_lock:
+        _capture_generation += 1
+    clear_voice_activation()
 
 
 def _ranked_wake_words(wake_words=None):
@@ -188,6 +240,9 @@ def _score_pending_wake_command(command):
 
 def _score_command_only_activation(normalized_text):
     if not _looks_like_inline_command(normalized_text):
+        return 0.0
+
+    if normalized_text in _INCOMPLETE_COMMAND_ONLY:
         return 0.0
 
     # Music playing in the room often produces transcripts beginning with
@@ -364,8 +419,6 @@ def _listen_for_short_phrase():
 
 
 def _listen_loop():
-    global _activation_payload, _last_activation_at
-
     while not _stop_event.is_set():
         if not config.ENABLE_SOFT_WAKE_WORD:
             time.sleep(0.5)
@@ -381,6 +434,7 @@ def _listen_loop():
             continue
 
         audio = None
+        capture_generation = _current_capture_generation()
         try:
             try:
                 audio = _listen_for_short_phrase()
@@ -408,25 +462,55 @@ def _listen_loop():
             time.sleep(0.3)
             continue
 
-        activation = evaluate_transcript_for_activation(text)
-        normalized = normalize_wake_text(text)
-        logger.info(
-            "Soft wake transcript: raw=%r normalized=%r match=%r command=%r confidence=%.2f",
-            text,
-            normalized,
-            activation["wake_word"] if activation else None,
-            activation["command"] if activation else "",
-            activation["confidence"] if activation else 0.0,
-        )
-        if not activation:
-            logger.debug("Soft wake ignore: %s", normalized)
-            continue
+        publish_soft_wake_transcript(text, capture_generation=capture_generation)
 
-        now_value = time.monotonic()
-        if now_value - _last_activation_at < config.SOFT_WAKE_COOLDOWN_SECONDS:
-            continue
 
-        _last_activation_at = now_value
+def publish_soft_wake_transcript(text, *, capture_generation=None, now_value=None):
+    global _activation_payload, _last_activation_at
+    global _last_activation_signature, _last_activation_signature_at
+
+    generation = _current_capture_generation() if capture_generation is None else capture_generation
+    if not _capture_is_current(generation):
+        logger.debug("Soft wake stale transcription ignored")
+        return False
+
+    activation = evaluate_transcript_for_activation(text, now_value=now_value)
+    normalized = normalize_wake_text(text)
+    if not _capture_is_current(generation):
+        _clear_pending_wake()
+        logger.debug("Soft wake transcription invalidated during evaluation")
+        return False
+    logger.info(
+        "Soft wake transcript: raw=%r normalized=%r match=%r command=%r confidence=%.2f",
+        text,
+        normalized,
+        activation["wake_word"] if activation else None,
+        activation["command"] if activation else "",
+        activation["confidence"] if activation else 0.0,
+    )
+    if not activation:
+        logger.debug("Soft wake ignore: %s", normalized)
+        return False
+
+    current_time = time.monotonic() if now_value is None else now_value
+    signature = normalize_wake_text(activation.get("command") or activation.get("wake_word"))
+    with _capture_generation_lock:
+        if generation != _capture_generation or _pause_event.is_set():
+            logger.debug("Soft wake transcription invalidated before publication")
+            return False
+        if current_time - _last_activation_at < config.SOFT_WAKE_COOLDOWN_SECONDS:
+            return False
+        if (
+            signature
+            and signature == _last_activation_signature
+            and current_time - _last_activation_signature_at < config.SOFT_WAKE_DUPLICATE_SECONDS
+        ):
+            logger.info("Soft wake duplicate ignored: %s", signature)
+            return False
+
+        _last_activation_at = current_time
+        _last_activation_signature = signature
+        _last_activation_signature_at = current_time
         with _activation_payload_lock:
             _activation_payload = {
                 "wake_word": activation["wake_word"],
@@ -437,12 +521,14 @@ def _listen_loop():
                 "normalized": normalized,
             }
         _activation_event.set()
-        logger.info(
-            "Soft wake word detected: %s (confidence=%.2f, command=%r)",
-            activation["wake_word"],
-            activation["confidence"],
-            activation["command"],
-        )
+
+    logger.info(
+        "Soft wake word detected: %s (confidence=%.2f, command=%r)",
+        activation["wake_word"],
+        activation["confidence"],
+        activation["command"],
+    )
+    return True
 
 
 def start_soft_wake_listener():
@@ -492,6 +578,7 @@ def consume_voice_activation():
 
 def pause_soft_wake_listener():
     _pause_event.set()
+    invalidate_soft_wake_captures()
 
 
 def resume_soft_wake_listener():
@@ -505,16 +592,18 @@ def acquire_command_microphone(app=None):
             app.processEvents()
 
 
-def release_command_microphone():
+def release_command_microphone(*, resume_listener=True):
     if _microphone_lock.locked():
         _microphone_lock.release()
-    resume_soft_wake_listener()
+    if resume_listener:
+        resume_soft_wake_listener()
 
 
 def stop_soft_wake_listener():
     global _activation_payload, _listener_started
 
     _stop_event.set()
+    pause_soft_wake_listener()
     if _listener_thread and _listener_thread.is_alive():
         _listener_thread.join(timeout=2)
     _listener_started = False
@@ -527,12 +616,17 @@ def stop_soft_wake_listener():
 
 def reset_soft_wake_state():
     global _activation_payload, _last_activation_at, _listener_started
+    global _capture_generation, _last_activation_signature, _last_activation_signature_at
 
     _listener_started = False
     _activation_event.clear()
     _stop_event.clear()
     _pause_event.clear()
     _last_activation_at = 0.0
+    _last_activation_signature = ""
+    _last_activation_signature_at = 0.0
+    with _capture_generation_lock:
+        _capture_generation += 1
     with _activation_payload_lock:
         _activation_payload = None
     _clear_pending_wake()

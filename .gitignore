@@ -1,27 +1,84 @@
+# ==============================================================================
+# ENVIRONNEMENT & SECRETS
+# ==============================================================================
 .env
 .env.*
 !.env.example
-venv/
-.venv/
-__pycache__/
-.idea/
-logs/
-notes/
-data/
-screenshots/
-*.pyc
-*.log
 *.key
-*.pyproject.user
-*.side
 token.json
 credentials.json
 old_credentials.json
+
+# ==============================================================================
+# PYTHON & ENVIRONNEMENTS VIRTUELS
+# ==============================================================================
+venv/
+.venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# ==============================================================================
+# TESTS & COUVERTURE
+# ==============================================================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ==============================================================================
+# CACHES NAVIGATEUR & CHROMIUM / WHATSAPP
+# ==============================================================================
+data/browser_profiles/**/Cache/**
+data/browser_profiles/**/Code Cache/**
+data/browser_profiles/**/Crashpad/**
+data/browser_profiles/**/GPUPersistentCache/**
+data/browser_profiles/**/GrShaderCache/**
+data/browser_profiles/**/ShaderCache/**
+data/browser_profiles/**/component_crx_cache/**
+data/browser_profiles/**/extensions_crx_cache/**
+data/browser_profiles/
+
+# ==============================================================================
+# BASES DE DONNÉES LOCALES & JOURNAUX DE SÉCURITÉ / RUNTIME
+# ==============================================================================
+*.log
+logs/
+data/security_audit.log
+data/*.db
+data/*.db-journal
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Données locales d'exécution & mémoires
+data/
+notes/
+screenshots/
 contacts.csv
 user_data.csv
 PyWhatKit_DB.txt
+
+# ==============================================================================
+# IDE & OUTILS DE DÉVELOPPEMENT
+# ==============================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.pyproject.user
+*.side
 JarvisGUI/.qtcreator/
 JarvisGUI/FaceRecogGUI/.qtcreator/
 JarvisGUI/LoginUI/.qtcreator/
 **/.qtcreator/
-
+.DS_Store
+Thumbs.db

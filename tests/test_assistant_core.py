@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from assistant_core import AssistantCore
+from intent_engine import detect_intent
 
 
 class AssistantCorePhase2Tests(unittest.TestCase):
@@ -93,6 +94,89 @@ class AssistantCorePhase2Tests(unittest.TestCase):
         self.assertIn("Quelle musique", response)
         play_music.assert_called_once_with("Ninho")
         self.assertIn("Ninho", follow_up)
+
+    def test_music_followup_corrects_common_damso_transcription(self):
+        with patch(
+            "assistant_core.music_actions.play_music",
+            return_value="J'ouvre Damso dans YouTube Music.",
+        ) as play_music:
+            self.assistant.handle_intent({"intent": "play_music", "target": "", "slots": {}})
+            response = self.assistant.handle_intent(
+                {"intent": "chat_fallback", "target": "dams", "raw": "dams", "slots": {}}
+            )
+
+        play_music.assert_called_once_with("Damso")
+        self.assertIn("Damso", response)
+
+    def test_tomorrow_agenda_is_answered_locally(self):
+        self.mock_personal_class.return_value.list_todos_for_day.return_value = (
+            "Tu n'as aucune tache ni aucun rappel programme pour demain."
+        )
+        self.assistant.agent.run = Mock()
+
+        with patch("assistant_core.sched_store.list_tasks", return_value=[]):
+            response = self.assistant.handle_intent(detect_intent("quelle est la page pour demain"))
+
+        self.mock_personal_class.return_value.list_todos_for_day.assert_called_once_with("tomorrow")
+        self.assertIn("demain", response)
+        self.assistant.agent.run.assert_not_called()
+
+    def test_tomorrow_agenda_includes_matching_scheduled_publications(self):
+        self.mock_personal_class.return_value.list_todos_for_day.return_value = (
+            "Tu n'as aucune tache ni aucun rappel programme pour demain."
+        )
+        scheduled = [
+            {
+                "title": "Promotion Baba Market",
+                "platform": "whatsapp",
+                "frequency": "daily",
+                "weekday": None,
+                "send_time": "09:00",
+            }
+        ]
+
+        with patch("assistant_core.sched_store.list_tasks", return_value=scheduled):
+            response = self.assistant.handle_intent(detect_intent("mes taches pour demain"))
+
+        self.assertIn("Promotion Baba Market", response)
+        self.assertIn("09:00", response)
+
+    def test_incomplete_open_command_is_handled_locally(self):
+        self.assistant.agent.run = Mock()
+
+        response = self.assistant.handle_intent(detect_intent("ouvre"))
+
+        self.assertEqual("Que veux-tu ouvrir ?", response)
+        self.assertTrue(self.assistant.expects_followup())
+        self.assistant.agent.run.assert_not_called()
+
+    def test_followup_target_completes_incomplete_open_command(self):
+        self.assistant.handle_intent(detect_intent("ouvre"))
+
+        with patch(
+            "assistant_core.system_actions.open_app",
+            return_value="J'ouvre Google Chrome.",
+        ) as open_app:
+            response = self.assistant.handle_intent(detect_intent("Google Chrome"))
+
+        open_app.assert_called_once_with("chrome")
+        self.assertEqual("J'ouvre Google Chrome.", response)
+        self.assertFalse(self.assistant.expects_followup())
+
+    def test_reset_session_clears_only_transient_conversation_state(self):
+        self.assistant.pending_confirmation = {"intent": "close_app"}
+        self.assistant.pending_music_request = True
+        self.assistant.pending_followup = {"prefix": "ouvre"}
+        self.assistant.session_memory.add_turn("time", "", "Il est 19:00.")
+        user_memory = self.assistant.user_memory
+
+        self.assistant.reset_session()
+
+        self.assertIsNone(self.assistant.pending_confirmation)
+        self.assertFalse(self.assistant.pending_music_request)
+        self.assertIsNone(self.assistant.pending_followup)
+        self.assertEqual([], self.assistant.session_memory.recent_turns())
+        self.assertIs(user_memory, self.assistant.user_memory)
 
     def test_music_is_paused_then_resumed_for_a_command(self):
         self.assistant.music_playing = True

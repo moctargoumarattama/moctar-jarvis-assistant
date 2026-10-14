@@ -2,6 +2,15 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+except Exception:
+    def load_dotenv(*_args, **_kwargs):
+        return False
+
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 
 @dataclass(frozen=True)
 class ProjectConfig:
@@ -249,12 +258,17 @@ SOFT_WAKE_LANGUAGE = os.getenv("SOFT_WAKE_LANGUAGE", "fr-FR").strip() or "fr-FR"
 SOFT_WAKE_TIMEOUT = float(os.getenv("SOFT_WAKE_TIMEOUT", "2"))
 SOFT_WAKE_PHRASE_LIMIT = float(os.getenv("SOFT_WAKE_PHRASE_LIMIT", "2"))
 SOFT_WAKE_COOLDOWN_SECONDS = float(os.getenv("SOFT_WAKE_COOLDOWN_SECONDS", "1.5"))
+SOFT_WAKE_DUPLICATE_SECONDS = float(os.getenv("SOFT_WAKE_DUPLICATE_SECONDS", "8"))
 SOFT_WAKE_MIN_CONFIDENCE = float(os.getenv("SOFT_WAKE_MIN_CONFIDENCE", "0.88"))
+VOICE_COMMAND_DEBOUNCE_SECONDS = float(os.getenv("VOICE_COMMAND_DEBOUNCE_SECONDS", "5"))
 
 AI_SETTINGS = {
     "default_model": os.getenv("OLLAMA_MODEL", "qwen3:8b").strip() or "qwen3:8b",
     "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip() or "http://localhost:11434",
     "enable_general_ai": _optional_bool_env("MOCTAR_ENABLE_GENERAL_AI", True),
+    "agent_enabled": _optional_bool_env("MOCTAR_AGENT_ENABLED", True),
+    "agent_max_steps": max(1, min(_optional_int_env("OLLAMA_AGENT_MAX_STEPS", 5), 10)),
+    "agent_thinking": os.getenv("OLLAMA_AGENT_THINKING", "auto").strip().lower() or "auto",
     "chat_fallback": "Je ne peux pas utiliser l'IA pour le moment.",
 }
 

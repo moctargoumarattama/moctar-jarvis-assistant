@@ -52,6 +52,10 @@ class KnowledgeLibrary:
                 return answer
         return ""
 
+    def lookup_local(self, query):
+        """Return only bundled knowledge, without triggering a network lookup."""
+        return self._offline_answer(query)
+
     @classmethod
     def _is_math_like_query(cls, query):
         normalized = cls._normalize_text(query)
@@ -59,6 +63,46 @@ class KnowledgeLibrary:
             return False
         operators = ("+", "-", "*", "/", " x ", " fois ", " calcule ", " combien font ", " combien fait ")
         return any(operator in f" {normalized} " for operator in operators)
+
+    @classmethod
+    def _is_encyclopedic_query(cls, query):
+        normalized = cls._normalize_text(query)
+        if not normalized:
+            return False
+
+        operational_markers = (
+            "agenda",
+            "demain",
+            "mes notes",
+            "mes taches",
+            "mes todos",
+            "planning",
+            "priorite",
+            "projet",
+            "rappel",
+            "tache",
+            "todo",
+        )
+        if any(marker in normalized for marker in operational_markers):
+            return False
+
+        question_starters = (
+            "c est quoi ",
+            "comment ",
+            "definition ",
+            "explique ",
+            "ou est ",
+            "ou se trouve ",
+            "pourquoi ",
+            "qu est ce ",
+            "quel est ",
+            "quelle est ",
+            "qui est ",
+        )
+        if normalized.startswith(question_starters):
+            return True
+
+        return len(normalized.split()) <= 2
 
     @staticmethod
     def _trim_extract(extract):
@@ -81,6 +125,8 @@ class KnowledgeLibrary:
         if offline:
             return offline
         if self._is_math_like_query(query):
+            return ""
+        if not self._is_encyclopedic_query(query):
             return ""
         if not config.KNOWLEDGE_SETTINGS["enable_wikipedia"] or not self.requester:
             return ""

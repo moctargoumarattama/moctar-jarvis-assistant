@@ -609,7 +609,40 @@ def detect_intent(raw_text):
         target = extract_after_prefix(text, ["ajoute todo ", "ajoute une todo "])
         return {"intent": "add_todo", "target": target, "confidence": 95, "raw": raw_text, "slots": {}}
 
-    if any(token in text for token in ["liste mes todos", "liste les todos", "mes todos", "liste todo"]):
+    if text in {
+        "ma tache pour demain",
+        "mes taches pour demain",
+        "mon programme pour demain",
+        "qu est ce que j ai a faire demain",
+        "qu est ce que j ai demain",
+        "quelle est la page pour demain",
+        "quelle est la tache pour demain",
+        "quelles sont mes taches demain",
+        "quelles sont mes taches pour demain",
+    }:
+        return {
+            "intent": "list_todos",
+            "target": "",
+            "confidence": 92,
+            "raw": raw_text,
+            "slots": {"day": "tomorrow"},
+        }
+
+    if text in {
+        "affiche mes taches",
+        "donne moi mes taches",
+        "liste les taches",
+        "liste les todos",
+        "liste mes taches",
+        "liste mes todos",
+        "liste todo",
+        "mes todos",
+        "montre moi mes taches",
+        "quelles sont les taches",
+        "quelles sont mes taches",
+        "quelles sont mes todos",
+        "quels sont mes todos",
+    }:
         return {"intent": "list_todos", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
 
     if any(

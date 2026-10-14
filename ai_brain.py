@@ -9,8 +9,11 @@ import unicodedata
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+import socket
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 import config
 from knowledge_library import KnowledgeLibrary
@@ -24,8 +27,16 @@ except Exception:
 
 DEFAULT_MODEL = "qwen3:8b"
 DEFAULT_BASE_URL = "http://localhost:11434"
-OLLAMA_TIMEOUT_SECONDS = 120
+OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "45"))
 logger = logging.getLogger("jarvis.ai")
+
+
+class OllamaRequestError(RuntimeError):
+    pass
+
+
+class OllamaTimeoutError(OllamaRequestError):
+    pass
 _ALLOWED_MATH_BINOPS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -323,22 +334,30 @@ def get_ai_status():
         }
 
 
-def _extract_ollama_content(payload):
+def extract_ollama_message(payload):
     if not isinstance(payload, dict):
         raise RuntimeError("invalid Ollama response")
 
     message = payload.get("message") or {}
-    if isinstance(message, dict) and message.get("content"):
-        return message["content"]
+    if isinstance(message, dict) and ("content" in message or message.get("tool_calls")):
+        return message
 
     choices = payload.get("choices") or []
     if choices:
         first_choice = choices[0] or {}
         message = first_choice.get("message") or {}
-        if isinstance(message, dict) and message.get("content"):
-            return message["content"]
+        if isinstance(message, dict) and ("content" in message or message.get("tool_calls")):
+            return message
 
     raise RuntimeError("Ollama response did not include a message")
+
+
+def _extract_ollama_content(payload):
+    message = extract_ollama_message(payload)
+    content = message.get("content")
+    if content is None:
+        raise RuntimeError("Ollama response did not include message content")
+    return str(content)
 
 
 def _format_due_label(due_at_raw):
@@ -989,6 +1008,7 @@ class LocalBrain:
         preferences=None,
         session_turn=None,
         insights=None,
+        allow_ollama=True,
     ):
         normalized = normalize_prompt(prompt)
 
@@ -1061,7 +1081,7 @@ class LocalBrain:
         fallback = self.knowledge_library.lookup(prompt) or (
             "Je n'ai pas assez d'information pour repondre proprement. Reformule ta demande."
         )
-        if _should_use_ollama_assistant(prompt):
+        if allow_ollama and _should_use_ollama_assistant(prompt):
             return self._ask_personal_assistant(
                 prompt,
                 fallback=fallback,
@@ -1096,6 +1116,70 @@ class LocalBrain:
         )
 
 
+def chat_ollama(
+    messages,
+    *,
+    tools=None,
+    model=None,
+    max_predict=64,
+    temperature=0.2,
+    think=False,
+):
+    default_model, base_url = _ollama_settings()
+    model = (model or default_model).strip() or default_model
+    url = _ollama_chat_url(base_url)
+    payload = {
+        "model": model,
+        "messages": list(messages),
+        "stream": False,
+    }
+    if tools:
+        payload["tools"] = list(tools)
+
+    if url.endswith("/chat/completions"):
+        payload.update(
+            {
+                "max_tokens": max_predict,
+                "temperature": temperature,
+                "top_p": 0.9,
+            }
+        )
+    else:
+        payload.update(
+            {
+                "think": bool(think),
+                "keep_alive": "5m",
+                "options": {
+                    "num_predict": max_predict,
+                    "temperature": temperature,
+                    "top_p": 0.9,
+                },
+            }
+        )
+
+    payload_bytes = json.dumps(payload).encode("utf-8")
+    request = Request(
+        url,
+        data=payload_bytes,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=OLLAMA_TIMEOUT_SECONDS) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+    except TimeoutError as exc:
+        raise OllamaTimeoutError("Ollama request timed out") from exc
+    except URLError as exc:
+        if isinstance(getattr(exc, "reason", None), TimeoutError):
+            raise OllamaTimeoutError("Ollama request timed out") from exc
+        raise OllamaRequestError("Ollama is unavailable") from exc
+    except (HTTPError, ValueError) as exc:
+        raise OllamaRequestError("Ollama request failed") from exc
+    if not isinstance(response_payload, dict):
+        raise RuntimeError("invalid Ollama response")
+    return response_payload
+
+
 def ask_ollama(
     prompt,
     *,
@@ -1104,10 +1188,10 @@ def ask_ollama(
     model=None,
     max_predict=64,
     temperature=0.2,
+    tools=None,
+    think=False,
+    return_full_response=False,
 ):
-    default_model, base_url = _ollama_settings()
-    model = (model or default_model).strip() or default_model
-    url = _ollama_chat_url(base_url)
     user_message = {"role": "user", "content": prompt}
     encoded_images = []
     for image_path in _normalize_media_paths(images):
@@ -1119,42 +1203,27 @@ def ask_ollama(
     if encoded_images:
         user_message["images"] = encoded_images
 
-    payload_bytes = json.dumps(
-        {
-            "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt or (
-                        "Tu es M.O.C.T.A.R, un assistant personnel francophone, utile au quotidien. "
-                        "Reponds clairement, naturellement et de facon concise. N'invente rien. "
-                        "Pour les sujets medicaux, juridiques ou financiers, signale les limites et conseille une verification professionnelle."
-                    ),
-                },
-                user_message,
-            ],
-            "stream": False,
-            "think": False,
-            "keep_alive": "5m",
-            "options": {
-                "num_predict": max_predict,
-                "temperature": temperature,
-                "top_p": 0.9,
+    response_payload = chat_ollama(
+        [
+            {
+                "role": "system",
+                "content": system_prompt or (
+                    "Tu es M.O.C.T.A.R, un assistant personnel francophone, utile au quotidien. "
+                    "Reponds clairement, naturellement et de facon concise. N'invente rien. "
+                    "Pour les sujets medicaux, juridiques ou financiers, signale les limites et conseille une verification professionnelle."
+                ),
             },
-        }
-    ).encode("utf-8")
-    request = Request(
-        url,
-        data=payload_bytes,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+            user_message,
+        ],
+        tools=tools,
+        model=model,
+        max_predict=max_predict,
+        temperature=temperature,
+        think=think,
     )
-    try:
-        with urlopen(request, timeout=OLLAMA_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except (HTTPError, URLError, TimeoutError, ValueError) as exc:
-        raise RuntimeError(f"Ollama request failed: {exc}") from exc
-    return _extract_ollama_content(payload)
+    if return_full_response or tools is not None:
+        return response_payload
+    return _extract_ollama_content(response_payload)
 
 
 def safe_ask_ollama(prompt, fallback="Je ne peux pas utiliser l'IA pour le moment.", **kwargs):
@@ -1162,3 +1231,353 @@ def safe_ask_ollama(prompt, fallback="Je ne peux pas utiliser l'IA pour le momen
         return ask_ollama(prompt, **kwargs)
     except Exception:
         return fallback
+
+
+
+# ==============================================================================
+# CLASSE AIBrain : COUCHE UNIVERSELLE AVEC SUPPORT NATIF TOOL CALLING
+# ==============================================================================
+
+class AIBrain:
+    """Couche d'inférence universelle pour LLM avec support avancé du Function Calling.
+
+    Prend en charge nativement :
+    - Les modèles Ollama locaux (/api/chat)
+    - Les API compatibles OpenAI (/v1/chat/completions)
+    - La normalisation stricte des réponses en format unifié :
+      {
+          "content": Optional[str],
+          "tool_calls": List[Dict[str, Any]],  # [{"id": str, "name": str, "arguments": dict}]
+          "finish_reason": str                  # 'stop', 'tool_calls', ou 'error'
+      }
+    - Le parsing résilient des arguments pour petits modèles locaux
+    - La gestion robuste des erreurs réseau et timeouts
+    """
+
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        timeout: Optional[float] = None,
+        api_type: str = "auto",
+    ) -> None:
+        load_dotenv()
+        env_model, env_base_url = _ollama_settings()
+
+        self.base_url = (
+            base_url
+            or os.getenv("OPENAI_BASE_URL")
+            or os.getenv("OLLAMA_BASE_URL")
+            or env_base_url
+            or DEFAULT_BASE_URL
+        ).rstrip("/")
+        self.model = (
+            model
+            or os.getenv("OPENAI_MODEL")
+            or os.getenv("OLLAMA_MODEL")
+            or env_model
+            or DEFAULT_MODEL
+        ).strip()
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.timeout = float(timeout or os.getenv("LLM_TIMEOUT_SECONDS") or OLLAMA_TIMEOUT_SECONDS)
+
+        # Détection automatique du type de backend
+        if api_type == "auto":
+            if "/v1" in self.base_url or "openai.com" in self.base_url or (self.api_key and "localhost" not in self.base_url):
+                self.api_type = "openai"
+            else:
+                self.api_type = "ollama"
+        else:
+            self.api_type = api_type.lower()
+
+        logger.info(
+            "AIBrain initialisé [type=%s, model=%s, base_url=%s, timeout=%ss]",
+            self.api_type,
+            self.model,
+            self.base_url,
+            self.timeout,
+        )
+
+    @staticmethod
+    def _parse_arguments(raw_args: Any) -> Dict[str, Any]:
+        """Convertit de manière résiliente des arguments en dictionnaire Python.
+
+        Gère les cas où le modèle retourne un dictionnaire natif, une chaîne JSON propre,
+        du markdown JSON ou une chaîne JSON imparfaite.
+        """
+        if isinstance(raw_args, dict):
+            return raw_args
+        if not raw_args:
+            return {}
+        if isinstance(raw_args, str):
+            cleaned = raw_args.strip()
+            # Nettoyage des balises Markdown ```json ... ```
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+                cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+            try:
+                parsed = json.loads(cleaned)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+            # Recherche regex d'un objet JSON { ... }
+            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            if match:
+                try:
+                    parsed = json.loads(match.group(0))
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    pass
+        return {}
+
+    @classmethod
+    def _extract_text_tool_calls(cls, content: str) -> List[Dict[str, Any]]:
+        """Extrait les tool calls rédigés sous forme de texte brut par certains modèles locaux."""
+        tool_calls: List[Dict[str, Any]] = []
+        if not content:
+            return tool_calls
+
+        # Format 1 : XML-like <tool_call> ... </tool_call>
+        xml_matches = re.findall(r"<tool_call>\s*(.*?)\s*</tool_call>", content, re.DOTALL)
+        for block in xml_matches:
+            parsed = cls._parse_arguments(block)
+            name = parsed.get("name") or parsed.get("tool") or parsed.get("function")
+            if name:
+                args = parsed.get("arguments") or parsed.get("parameters") or {}
+                tool_calls.append({
+                    "id": f"call_{name}_{uuid4().hex[:8]}",
+                    "name": name,
+                    "arguments": cls._parse_arguments(args),
+                })
+
+        # Format 2 : [TOOL_CALLS] [...]
+        if not tool_calls and "[TOOL_CALLS]" in content:
+            after = content.split("[TOOL_CALLS]", 1)[1].strip()
+            try:
+                parsed_list = json.loads(after)
+                if isinstance(parsed_list, list):
+                    for item in parsed_list:
+                        if isinstance(item, dict) and "name" in item:
+                            tool_calls.append({
+                                "id": f"call_{item['name']}_{uuid4().hex[:8]}",
+                                "name": item["name"],
+                                "arguments": cls._parse_arguments(item.get("arguments", {})),
+                            })
+            except Exception:
+                pass
+
+        return tool_calls
+
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        temperature: float = 0.2,
+    ) -> Dict[str, Any]:
+        """Exécute un tour de conversation avec support universel du Tool Calling.
+
+        Args:
+            messages: Historique des messages au format [{"role": "...", "content": "..."}].
+            tools: Schémas JSON des outils disponibles au format OpenAI/Ollama.
+            temperature: Température d'échantillonnage (0.2 par défaut pour le raisonnement logique).
+
+        Returns:
+            Dict[str, Any] normalisé :
+            {
+                "content": Optional[str],
+                "tool_calls": List[Dict[str, Any]],
+                "finish_reason": str
+            }
+        """
+        if self.api_type == "openai":
+            return self._chat_openai(messages=messages, tools=tools, temperature=temperature)
+        return self._chat_ollama(messages=messages, tools=tools, temperature=temperature)
+
+    def _chat_ollama(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        temperature: float = 0.2,
+    ) -> Dict[str, Any]:
+        endpoint = f"{self.base_url}/api/chat"
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": list(messages),
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "top_p": 0.9,
+            },
+        }
+        if tools:
+            payload["tools"] = list(tools)
+
+        req = Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except HTTPError as exc:
+            err_body = exc.read().decode("utf-8", errors="ignore") if hasattr(exc, "read") else ""
+            logger.error("Erreur HTTP %s (%s) Ollama: %s", exc.code, exc.reason, err_body)
+            # Si /api/chat retourne 404, tenter un fallback automatique vers /v1/chat/completions
+            if exc.code == 404:
+                logger.info("Ollama /api/chat a retourné 404, tentative via OpenAI endpoint...")
+                return self._chat_openai(messages, tools=tools, temperature=temperature)
+            return {
+                "content": f"Erreur HTTP {exc.code} du serveur Ollama : {exc.reason}",
+                "tool_calls": [],
+                "finish_reason": "error",
+            }
+        except (URLError, TimeoutError, socket.timeout) as exc:
+            logger.error("Erreur de connexion/timeout Ollama: %s", exc)
+            return {
+                "content": f"Le serveur Ollama ({self.base_url}) est inaccessible ou a expiré : {exc}",
+                "tool_calls": [],
+                "finish_reason": "error",
+            }
+        except Exception as exc:
+            logger.exception("Erreur inattendue Ollama: %s", exc)
+            return {
+                "content": f"Erreur inattendue lors de la communication avec Ollama : {exc}",
+                "tool_calls": [],
+                "finish_reason": "error",
+            }
+
+        return self._normalize_ollama_payload(data)
+
+    def _chat_openai(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        temperature: float = 0.2,
+    ) -> Dict[str, Any]:
+        if self.base_url.endswith("/v1"):
+            endpoint = f"{self.base_url}/chat/completions"
+        elif "/v1/" in self.base_url or self.base_url.endswith("/chat/completions"):
+            endpoint = self.base_url
+        else:
+            endpoint = f"{self.base_url}/v1/chat/completions"
+
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": list(messages),
+            "temperature": temperature,
+        }
+        if tools:
+            payload["tools"] = list(tools)
+            payload["tool_choice"] = "auto"
+
+        req = Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except HTTPError as exc:
+            err_body = exc.read().decode("utf-8", errors="ignore") if hasattr(exc, "read") else ""
+            logger.error("Erreur HTTP %s (%s) API OpenAI: %s", exc.code, exc.reason, err_body)
+            return {
+                "content": f"Erreur HTTP {exc.code} du serveur compatible OpenAI : {exc.reason}",
+                "tool_calls": [],
+                "finish_reason": "error",
+            }
+        except (URLError, TimeoutError, socket.timeout) as exc:
+            logger.error("Erreur de connexion/timeout API OpenAI: %s", exc)
+            return {
+                "content": f"L'API OpenAI ({self.base_url}) est inaccessible ou a expiré : {exc}",
+                "tool_calls": [],
+                "finish_reason": "error",
+            }
+        except Exception as exc:
+            logger.exception("Erreur inattendue API OpenAI: %s", exc)
+            return {
+                "content": f"Erreur inattendue lors de l'appel OpenAI : {exc}",
+                "tool_calls": [],
+                "finish_reason": "error",
+            }
+
+        return self._normalize_openai_payload(data)
+
+    def _normalize_ollama_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalise la réponse brute d'Ollama (/api/chat)."""
+        msg = data.get("message") or {}
+        content = msg.get("content") or None
+        raw_tool_calls = msg.get("tool_calls") or []
+
+        normalized_tool_calls: List[Dict[str, Any]] = []
+        for tc in raw_tool_calls:
+            func = tc.get("function") or {}
+            name = func.get("name")
+            if not name:
+                continue
+            args = self._parse_arguments(func.get("arguments"))
+            call_id = tc.get("id") or f"call_{name}_{uuid4().hex[:8]}"
+            normalized_tool_calls.append({
+                "id": call_id,
+                "name": name,
+                "arguments": args,
+            })
+
+        # Extraction de tool calls textuels si le modèle les a insérés dans content
+        if not normalized_tool_calls and content:
+            text_calls = self._extract_text_tool_calls(content)
+            if text_calls:
+                normalized_tool_calls = text_calls
+
+        finish_reason = "tool_calls" if normalized_tool_calls else (data.get("done_reason") or "stop")
+        return {
+            "content": content,
+            "tool_calls": normalized_tool_calls,
+            "finish_reason": finish_reason,
+        }
+
+    def _normalize_openai_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalise la réponse brute compatible OpenAI (/v1/chat/completions)."""
+        choices = data.get("choices") or [{}]
+        choice = choices[0] if choices else {}
+        msg = choice.get("message") or {}
+        content = msg.get("content") or None
+        raw_tool_calls = msg.get("tool_calls") or []
+
+        normalized_tool_calls: List[Dict[str, Any]] = []
+        for tc in raw_tool_calls:
+            func = tc.get("function") or {}
+            name = func.get("name")
+            if not name:
+                continue
+            args = self._parse_arguments(func.get("arguments"))
+            call_id = tc.get("id") or f"call_{name}_{uuid4().hex[:8]}"
+            normalized_tool_calls.append({
+                "id": call_id,
+                "name": name,
+                "arguments": args,
+            })
+
+        if not normalized_tool_calls and content:
+            text_calls = self._extract_text_tool_calls(content)
+            if text_calls:
+                normalized_tool_calls = text_calls
+
+        finish_reason = choice.get("finish_reason") or ("tool_calls" if normalized_tool_calls else "stop")
+        return {
+            "content": content,
+            "tool_calls": normalized_tool_calls,
+            "finish_reason": finish_reason,
+        }

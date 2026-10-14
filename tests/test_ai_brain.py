@@ -54,6 +54,71 @@ class AiBrainConfigTests(unittest.TestCase):
         self.assertEqual("POST", request.method)
         self.assertEqual("application/json", request.headers["Content-type"])
 
+    def test_chat_ollama_sends_tools_and_keeps_complete_response(self):
+        raw_payload = {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"function": {"name": "time", "arguments": {}}},
+                ],
+            }
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(raw_payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=None)
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "time",
+                    "description": "Retourne l'heure locale.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+
+        with patch("ai_brain.urlopen", return_value=response) as open_mock:
+            payload = ai_brain.chat_ollama(
+                [{"role": "user", "content": "Quelle heure est-il ?"}],
+                tools=tools,
+                think=False,
+            )
+
+        self.assertEqual(raw_payload, payload)
+        request_payload = json.loads(open_mock.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(tools, request_payload["tools"])
+        self.assertFalse(request_payload["think"])
+
+    def test_chat_ollama_reports_timeout_explicitly(self):
+        with patch("ai_brain.urlopen", side_effect=TimeoutError("timed out")):
+            with self.assertRaises(ai_brain.OllamaTimeoutError):
+                ai_brain.chat_ollama([{"role": "user", "content": "bonjour"}])
+
+    def test_ask_ollama_can_return_complete_response(self):
+        raw_payload = {"message": {"role": "assistant", "content": "reponse complete"}}
+        with patch("ai_brain.chat_ollama", return_value=raw_payload):
+            payload = ai_brain.ask_ollama("bonjour", return_full_response=True)
+
+        self.assertEqual(raw_payload, payload)
+
+    def test_ask_ollama_with_tools_keeps_complete_response_automatically(self):
+        raw_payload = {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"function": {"name": "time", "arguments": {}}}],
+            }
+        }
+        with patch("ai_brain.chat_ollama", return_value=raw_payload):
+            payload = ai_brain.ask_ollama(
+                "quelle heure",
+                tools=[{"type": "function", "function": {"name": "time"}}],
+            )
+
+        self.assertEqual(raw_payload, payload)
+
     def test_safe_ask_ollama_returns_fallback_on_failure(self):
         with patch("ai_brain.ask_ollama", side_effect=RuntimeError("boom")):
             answer = ai_brain.safe_ask_ollama("bonjour", fallback="fallback local")
