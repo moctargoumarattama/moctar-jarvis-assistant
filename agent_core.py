@@ -27,6 +27,21 @@ from actions import execute_tool, get_all_tools_schema
 logger = logging.getLogger("jarvis.agent")
 
 AGENT_SYSTEM_PROMPT = (
+    "RÈGLE ABSOLUE : Ne fais JAMAIS de promesse d'action ni de phrase d'attente "
+    "(INTERDIT : 'Je vais vérifier', 'Je commence par', 'Patientez'). "
+    "Si une information demande un outil, APPELLE DIRECTEMENT L'OUTIL au premier tour sans texte d'introduction.\n"
+    "Les observations réelles déjà fournies dans le contexte système sont des résultats déjà obtenus : "
+    "utilise-les directement, sans rappeler un outil pour obtenir les mêmes mesures. "
+    "N'invente aucune valeur manquante ; indique explicitement les mesures indisponibles.\n"
+    "Les métriques system_telemetry décrivent uniquement l'hôte mesuré : elles ne prouvent pas "
+    "la disponibilité des services, des équipements distants ni de toute l'infrastructure. "
+    "Indique ces limites si aucune observation dédiée n'est fournie.\n"
+    "STRUCTURE DE RÉPONSE OBLIGATOIRE : Une fois les observations obtenues, réponds en deux sections :\n"
+    "[État Opérationnel] : synthèse claire avec les valeurs chiffrées réelles observées, leurs unités "
+    "et un statut vert/orange/rouge justifié par ces observations.\n"
+    "[Recommandations M.O.C.T.A.R] : 1 à 3 conseils proactifs et concrets d'optimisation des ressources "
+    "ou d'alertes préventives, fondés sur les observations. Ne présente pas une recommandation comme une action déjà exécutée.\n"
+    "Ces règles ne dispensent jamais des validations de sécurité ni des confirmations requises pour les actions sensibles.\n\n"
     "Tu es M.O.C.T.A.R (ou MOCTAR), une intelligence artificielle d'ingénierie avancée et assistant opérationnel autonome de haut niveau. "
     "Tes principes directeurs fondamentaux sont l'exactitude absolue, la sécurité, l'efficacité, la douceur et l'ancrage dans le réel.\n\n"
     "RÈGLES D'UTILISATION DES OUTILS (TOOL CALLING) :\n"
@@ -145,6 +160,16 @@ class AgentCore:
             "explique", "plan", "synthese", "apres-midi", "etape", "recherche"
         )
         return len(prompt.split()) > 7 or any(cue in normalized for cue in complex_cues)
+
+    @staticmethod
+    def _is_action_promise(content: str) -> bool:
+        """Repère un arrêt sur une annonce d'action au lieu d'un résultat réel."""
+        return bool(re.match(
+            r"^\s*(?:je vais (?:v[ée]rifier|consulter|analyser|examiner|r[ée]cup[ée]rer|collecter|ex[ée]cuter|commencer)\b|"
+            r"je commence par\b|patientez\b)",
+            content,
+            flags=re.IGNORECASE,
+        ))
 
     def _call_llm(
         self,
@@ -460,7 +485,11 @@ class AgentCore:
             except Exception:
                 pass
         if context:
-            system_content += f"\n\nContexte local additionnel :\n{json.dumps(context, ensure_ascii=False)}"
+            system_content += (
+                "\n\nContexte local additionnel (observations réelles déjà obtenues ; "
+                "utilise directement les mesures présentes sans nouvelle collecte) :\n"
+                f"{json.dumps(context, ensure_ascii=False)}"
+            )
 
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": system_content},
@@ -474,6 +503,7 @@ class AgentCore:
             tools=active_tools,
             thinking=self._should_think(prompt),
         )
+        promise_retry_used = False
 
         for step in range(self.max_iterations):
             state.model_steps += 1
@@ -496,6 +526,26 @@ class AgentCore:
             tool_calls = llm_response.get("tool_calls") or []
 
             if not tool_calls:
+                if self._is_action_promise(content):
+                    if not promise_retry_used and state.model_steps < self.max_steps:
+                        promise_retry_used = True
+                        state.messages.append({
+                            "role": "system",
+                            "content": (
+                                "Une promesse d'action seule ne répond pas à la demande. "
+                                "Appelle maintenant l'outil nécessaire sans introduction. "
+                                "Si le contexte contient déjà les observations demandées, donne directement "
+                                "les valeurs réelles et les recommandations dans les deux sections obligatoires. "
+                                "Si l'action est impossible, explique précisément la limitation."
+                            ),
+                        })
+                        continue
+                    if fallback is not None:
+                        return AgentResult(response=fallback(), status="fallback", used_fallback=True)
+                    return AgentResult(
+                        response="Le modèle n'a fourni ni résultat ni appel d'outil pour cette demande.",
+                        status="error",
+                    )
                 return AgentResult(response=content.strip(), status="final")
 
             # Arrêt si le nombre maximal d'étapes de modèle est atteint

@@ -197,35 +197,36 @@ def get_system_telemetry(_psutil_module: Any = psutil) -> Dict[str, Any]:
     """
     action_name = "get_system_telemetry"
     try:
+        required_collectors = ("cpu_percent", "virtual_memory", "disk_usage")
+        missing = [name for name in required_collectors if not callable(getattr(_psutil_module, name, None))]
+        if missing:
+            raise RuntimeError(f"Collecte psutil indisponible : {', '.join(missing)}.")
+
         # CPU
-        cpu_pct = _psutil_module.cpu_percent(interval=0.1) if hasattr(_psutil_module, "cpu_percent") else 0.0
+        cpu_pct = _psutil_module.cpu_percent(interval=0.1)
+        if cpu_pct is None:
+            raise RuntimeError("Mesure CPU indisponible.")
 
         # Memory
-        mem = _psutil_module.virtual_memory() if hasattr(_psutil_module, "virtual_memory") else None
-        if mem:
-            mem_total_gb = round(mem.total / (1024 ** 3), 1)
-            mem_used_gb = round((mem.total - mem.available) / (1024 ** 3), 1)
-            mem_percent = mem.percent
-        else:
-            mem_total_gb = 0.0
-            mem_used_gb = 0.0
-            mem_percent = 0.0
+        mem = _psutil_module.virtual_memory()
+        if mem is None:
+            raise RuntimeError("Mesure RAM indisponible.")
+        mem_total_gb = round(mem.total / (1024 ** 3), 1)
+        mem_used_gb = round((mem.total - mem.available) / (1024 ** 3), 1)
+        mem_percent = mem.percent
 
         # Disk
         path = os.path.abspath(os.sep) if os.name == "nt" else "/"
         try:
-            disk = _psutil_module.disk_usage(path) if hasattr(_psutil_module, "disk_usage") else None
+            disk = _psutil_module.disk_usage(path)
         except Exception:
-            disk = _psutil_module.disk_usage("/") if hasattr(_psutil_module, "disk_usage") else None
+            disk = _psutil_module.disk_usage("/")
 
-        if disk:
-            disk_total_gb = round(disk.total / (1024 ** 3), 1)
-            disk_free_gb = round(disk.free / (1024 ** 3), 1)
-            disk_percent = disk.percent
-        else:
-            disk_total_gb = 0.0
-            disk_free_gb = 0.0
-            disk_percent = 0.0
+        if disk is None:
+            raise RuntimeError("Mesure disque indisponible.")
+        disk_total_gb = round(disk.total / (1024 ** 3), 1)
+        disk_free_gb = round(disk.free / (1024 ** 3), 1)
+        disk_percent = disk.percent
 
         # Thermal sensors
         temperature = None

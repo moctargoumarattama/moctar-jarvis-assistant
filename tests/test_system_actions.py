@@ -3,6 +3,7 @@
 from datetime import datetime
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, Mock, patch
 
@@ -37,6 +38,63 @@ class SystemActionsTests(unittest.TestCase):
         res = system_actions.get_battery_response(battery_provider=lambda: None)
         self.assertFalse(res["success"])
         self.assertIn("ne peux pas lire", res["message"])
+
+    def test_system_telemetry_does_not_invent_metrics_when_psutil_is_unavailable(self):
+        for missing in ("all", "cpu_percent", "virtual_memory", "disk_usage"):
+            with self.subTest(missing=missing):
+                collectors = {
+                    "cpu_percent": lambda **kwargs: 17.25,
+                    "virtual_memory": lambda: SimpleNamespace(total=16 * 1024 ** 3, available=12 * 1024 ** 3, percent=25.0),
+                    "disk_usage": lambda path: SimpleNamespace(total=500 * 1024 ** 3, free=125 * 1024 ** 3, percent=75.0),
+                }
+                if missing == "all":
+                    collectors = {}
+                else:
+                    collectors.pop(missing)
+
+                res = system_actions.get_system_telemetry(_psutil_module=SimpleNamespace(**collectors))
+
+                self.assertFalse(res["success"])
+                self.assertIsNone(res["data"])
+                self.assertIn("psutil indisponible", res["error"])
+
+    def test_system_telemetry_rejects_missing_measurements(self):
+        for missing in ("cpu_percent", "virtual_memory", "disk_usage"):
+            with self.subTest(missing=missing):
+                collectors = SimpleNamespace(
+                    cpu_percent=lambda **kwargs: 17.25,
+                    virtual_memory=lambda: SimpleNamespace(total=16 * 1024 ** 3, available=12 * 1024 ** 3, percent=25.0),
+                    disk_usage=lambda path: SimpleNamespace(total=500 * 1024 ** 3, free=125 * 1024 ** 3, percent=75.0),
+                )
+                setattr(collectors, missing, lambda *args, **kwargs: None)
+
+                res = system_actions.get_system_telemetry(_psutil_module=collectors)
+
+                self.assertFalse(res["success"])
+                self.assertIsNone(res["data"])
+                self.assertIn("indisponible", res["error"])
+
+    def test_system_telemetry_preserves_the_collected_measurements(self):
+        collectors = SimpleNamespace(
+            cpu_percent=lambda **kwargs: 17.25,
+            virtual_memory=lambda: SimpleNamespace(total=16 * 1024 ** 3, available=12 * 1024 ** 3, percent=25.0),
+            disk_usage=lambda path: SimpleNamespace(total=500 * 1024 ** 3, free=125 * 1024 ** 3, percent=75.0),
+            sensors_temperatures=lambda: {"coretemp": [SimpleNamespace(current=46.5)]},
+        )
+
+        res = system_actions.get_system_telemetry(_psutil_module=collectors)
+
+        self.assertTrue(res["success"])
+        self.assertIsNone(res["error"])
+        self.assertEqual({
+            "cpu_percent": 17.25,
+            "temperature_c": 46.5,
+            "memory": {"used_gb": 4.0, "total_gb": 16.0, "percent": 25.0},
+            "disk": {"free_gb": 125.0, "total_gb": 500.0, "percent_used": 75.0},
+        }, res["data"])
+        self.assertIn("CPU 17.25%", res["message"])
+        self.assertIn("RAM 4.0/16.0 Go (25.0%)", res["message"])
+        self.assertIn("125.0/500.0 Go (25.0% libre)", res["message"])
 
     def test_capture_screenshot_success(self):
         mock_pyautogui = Mock()

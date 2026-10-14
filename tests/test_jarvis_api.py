@@ -1,18 +1,66 @@
 """Tests unitaires pour les routes API de l'agent Jarvis headless dans NOC Dashboard."""
 from __future__ import annotations
 
+from contextlib import ExitStack
+import json
+from pathlib import Path
+import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi.testclient import TestClient
 
 import main
+from config import Settings
+from headless_bridge import JarvisHeadlessBridge
 
 
 class TestJarvisAPI(unittest.TestCase):
     def setUp(self) -> None:
-        self.app = main.create_app()
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        self.temp_dir = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+        self.db_path = self.temp_dir / "jarvis-test-memory.db"
+        self.stack.enter_context(patch(
+            "main.JarvisHeadlessBridge",
+            side_effect=lambda **kwargs: JarvisHeadlessBridge(db_path=self.db_path, **kwargs),
+        ))
+        self.stack.enter_context(patch("main.collector.Collector.start", new=AsyncMock()))
+        self.stack.enter_context(patch("main.collector.Collector.close", new=AsyncMock()))
+        self.stack.enter_context(patch(
+            "main.WhatsAppController.refresh_voice_readiness", new=AsyncMock(),
+        ))
+        self.stack.enter_context(patch(
+            "main.collector.Collector.collect", new=AsyncMock(side_effect=self.local_snapshot),
+        ))
+        self.stack.enter_context(patch(
+            "ai_brain.get_ai_status", return_value={"online": True},
+        ))
+        self.app = main.create_app(Settings(
+            interval=60,
+            voice_enabled=False,
+            sentinel_geoip_enabled=False,
+            sentinel_state_path=str(self.temp_dir / "sentinel.json"),
+            cyber_state_path=str(self.temp_dir / "cyber.json"),
+        ))
         self.client = TestClient(self.app)
+
+    @staticmethod
+    def local_snapshot() -> dict:
+        return {
+            "timestamp": main.collector.utc_now(),
+            "hostname": "test-host",
+            "platform": "test",
+            "uptime_seconds": 100,
+            "global_status": "operational",
+            "hardware": {},
+            "services": [],
+            "infrastructure": {},
+            "vps": [],
+            "events": [],
+            "actions": {"restart_enabled": False},
+            "collector": {"last_success": main.collector.utc_now(), "error": None},
+        }
 
     def test_jarvis_status_endpoint(self) -> None:
         with self.client as client:
@@ -70,8 +118,6 @@ class TestJarvisAPI(unittest.TestCase):
     def test_get_system_telemetry_action(self) -> None:
         import actions
         from actions.system_actions import get_system_telemetry
-        from agent_core import AgentCore
-
         # 1. Vérification dans TOOL_DISPATCHER
         self.assertIn("get_system_telemetry", actions.TOOL_DISPATCHER)
 
@@ -116,28 +162,60 @@ class TestJarvisAPI(unittest.TestCase):
                 )
 
     def test_jarvis_query_system_telemetry(self) -> None:
+        telemetry_result = {
+            "success": True,
+            "action": "get_system_telemetry",
+            "message": "CPU 12.5%, RAM 4.2/16 Go, Disque 52 Go libre.",
+            "data": {
+                "cpu_percent": 12.5,
+                "temperature_c": None,
+                "memory": {"used_gb": 4.2, "total_gb": 16.0, "percent": 26.25},
+                "disk": {"free_gb": 52.0, "total_gb": 256.0, "percent_used": 79.7},
+            },
+            "error": None,
+        }
+        telemetry = Mock(return_value=telemetry_result)
+        expected_reply = (
+            "[État Opérationnel]\n"
+            "CPU 12.5%, RAM 4.2/16 Go (26.25%), Disque 52 Go libres.\n"
+            "[Recommandations M.O.C.T.A.R]\n"
+            "VERT : maintenir la surveillance des ressources."
+        )
+
+        def infer(messages, tools=None, think=None):
+            # Le premier appel IA reçoit déjà les observations réelles, sans
+            # dépendre du function-calling du modèle ni d'un second prélèvement.
+            telemetry.assert_called_once_with()
+            self.assertEqual("system", messages[0]["role"])
+            system = messages[0]["content"]
+            self.assertIn(json.dumps(telemetry_result, ensure_ascii=False), system)
+            self.assertIn("collected_at", system)
+            tool_names = {tool["function"]["name"] for tool in tools or []}
+            self.assertNotIn("get_system_telemetry", tool_names)
+            return {"content": expected_reply, "tool_calls": [], "finish_reason": "stop"}
+
         with self.client as client:
-            with patch.object(
-                self.app.state.runtime.jarvis,
-                "execute_prompt",
-                return_value={
-                    "status": "success",
-                    "reply": "Télémétrie : CPU 12%, RAM 4.2/16 Go, Disque 52 Go libre.",
-                    "thought_chain": ["Appel de get_system_telemetry"],
-                    "tools_used": [{"tool": "get_system_telemetry", "result": {"cpu_percent": 12.0}}],
-                    "timestamp": "2026-10-14T18:05:00",
-                    "session_id": "test_telemetry_session",
-                    "source": "web_text",
-                },
-            ):
+            bridge = self.app.state.runtime.jarvis
+            self.assertEqual(self.db_path, bridge.db_path)
+            with patch.dict("actions.TOOL_DISPATCHER", {"get_system_telemetry": telemetry}), \
+                    patch.object(bridge.agent, "_call_llm", side_effect=infer) as llm:
                 response = client.post(
                     "/api/jarvis/query",
-                    json={"prompt": "Vérifie les ressources CPU et l'espace disque du système."},
+                    json={"prompt": "Quel est l'état global du système et de l'infrastructure ?"},
                 )
                 self.assertEqual(response.status_code, 200)
                 data = response.json()
                 self.assertEqual(data["status"], "success")
-                self.assertIn("get_system_telemetry", [t["tool"] for t in data["tools_used"]])
+                self.assertIn("CPU 12.5 %", data["reply"])
+                self.assertIn("RAM 4.2/16 Go (26.25 %)", data["reply"])
+                self.assertIn("Disque 52/256 Go libres (79.7 % utilisés)", data["reply"])
+                self.assertIn("VERT : maintenir la surveillance des ressources.", data["reply"])
+                self.assertIn("[État Opérationnel]", data["reply"])
+                self.assertIn("[Recommandations M.O.C.T.A.R]", data["reply"])
+                self.assertEqual(1, len(data["tools_used"]))
+                self.assertEqual("get_system_telemetry", data["tools_used"][0]["tool"])
+                self.assertEqual(telemetry_result["data"], data["tools_used"][0]["data"])
+                llm.assert_called_once()
 
 
 if __name__ == "__main__":

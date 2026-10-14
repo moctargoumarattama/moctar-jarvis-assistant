@@ -1,11 +1,29 @@
 """Tests unitaires pour JarvisHeadlessBridge."""
 
 import tempfile
+import json
 from pathlib import Path
 import unittest
 from unittest.mock import MagicMock, Mock, patch
 
-from headless_bridge import JarvisHeadlessBridge
+import actions
+from agent_core import AgentResult
+from headless_bridge import JarvisHeadlessBridge, select_tools_for_prompt
+
+
+def telemetry_result(cpu=12.5, memory=45.0, disk=60.0):
+    return {
+        "success": True,
+        "action": "get_system_telemetry",
+        "message": "Mesures de test.",
+        "data": {
+            "cpu_percent": cpu,
+            "temperature_c": None,
+            "memory": {"used_gb": 7.2, "total_gb": 16.0, "percent": memory},
+            "disk": {"free_gb": 40.0, "total_gb": 100.0, "percent_used": disk},
+        },
+        "error": None,
+    }
 
 
 class JarvisHeadlessBridgeTests(unittest.TestCase):
@@ -50,6 +68,111 @@ class JarvisHeadlessBridgeTests(unittest.TestCase):
         self.assertIn("timestamp", res)
         self.assertIn("session_id", res)
         self.assertEqual("web_text", res["source"])
+
+    def test_agent_result_is_unwrapped_without_collecting_unrelated_metrics(self):
+        collect = Mock()
+        with patch.dict(actions.TOOL_DISPATCHER, {"get_system_telemetry": collect}), \
+                patch.object(self.bridge.agent, "run", return_value=AgentResult("Il est 15:30.")):
+            result = self.bridge.execute_prompt("Quelle heure est-il ?")
+        self.assertEqual("Il est 15:30.", result["reply"])
+        collect.assert_not_called()
+
+    def test_general_prompt_exposes_five_tools_and_status_words_select_telemetry(self):
+        self.assertEqual(5, len(select_tools_for_prompt("Bonjour !")))
+        for prompt in ("État global", "statut", "système", "infrastructure", "cpu", "ram"):
+            with self.subTest(prompt=prompt):
+                self.assertIn("get_system_telemetry", select_tools_for_prompt(prompt))
+
+    def test_status_metrics_are_in_first_system_message_and_collected_once(self):
+        measured = telemetry_result()
+        collect = Mock(return_value=measured)
+        original_timeout = self.bridge.brain.timeout
+        reply = "[État Opérationnel]\nCPU 12.5 %, RAM 45 %, Disque 60 %.\n[Recommandations M.O.C.T.A.R]\nStatut VERT : surveiller la charge."
+        with patch.dict(actions.TOOL_DISPATCHER, {"get_system_telemetry": collect}), \
+                patch.object(self.bridge.agent, "_call_llm", return_value={"content": reply}) as llm:
+            result = self.bridge.execute_prompt("Quel est l'état global du système et de l'infrastructure ?")
+
+        collect.assert_called_once_with()
+        self.assertIn("CPU 12.5 %", result["reply"])
+        self.assertIn("RAM 7.2/16 Go (45 %)", result["reply"])
+        self.assertIn("Statut VERT : surveiller la charge.", result["reply"])
+        system_content = llm.call_args.args[0][0]["content"]
+        self.assertIn(json.dumps(measured, ensure_ascii=False), system_content)
+        self.assertEqual([], llm.call_args.kwargs["tools"])
+        self.assertFalse(llm.call_args.kwargs["think"])
+        self.assertEqual(measured["data"], result["tools_used"][0]["data"])
+        self.assertEqual(1, len(result["tools_used"]))
+        self.assertEqual(original_timeout, self.bridge.brain.timeout)
+        self.assertEqual([reply], result["thought_chain"])
+
+    def test_ollama_timeout_returns_measured_report_and_prioritized_advice(self):
+        measured = telemetry_result(cpu=96.0, memory=92.0, disk=91.0)
+        with patch.dict(actions.TOOL_DISPATCHER, {"get_system_telemetry": Mock(return_value=measured)}), \
+                patch.object(self.bridge.agent, "_call_llm", side_effect=TimeoutError("CPU occupé")):
+            result = self.bridge.execute_prompt("Quel est le statut du système ?")
+
+        self.assertEqual("success", result["status"])
+        for expected in ("[État Opérationnel]", "ROUGE", "CPU 96 %", "RAM 7.2/16 Go (92 %)",
+                         "Disque 40/100 Go libres (91 % utilisés)", "[Recommandations M.O.C.T.A.R]",
+                         "processus gourmands", "après sauvegarde", "ne sont pas mesurés"):
+            self.assertIn(expected, result["reply"])
+        self.assertNotIn("Bonjour monsieur", result["reply"])
+
+    def test_missing_telemetry_does_not_fabricate_zero_metrics(self):
+        with patch.dict(actions.TOOL_DISPATCHER, {"get_system_telemetry": None}), \
+                patch.object(self.bridge.agent, "_call_llm", side_effect=TimeoutError()):
+            result = self.bridge.execute_prompt("État du système")
+        self.assertIn("ORANGE", result["reply"])
+        self.assertIn("Télémétrie indisponible", result["reply"])
+        self.assertNotIn("CPU 0", result["reply"])
+        self.assertFalse(result["tools_used"][0]["success"])
+
+    def test_unstructured_filler_is_replaced_by_local_measured_report(self):
+        with patch.dict(actions.TOOL_DISPATCHER, {"get_system_telemetry": Mock(return_value=telemetry_result())}), \
+                patch.object(self.bridge.agent, "_call_llm", return_value={"content": "Le système va bien."}):
+            result = self.bridge.execute_prompt("État du système")
+        self.assertIn("CPU 12.5 %", result["reply"])
+        self.assertIn("[Recommandations M.O.C.T.A.R]", result["reply"])
+
+    def test_status_inference_shares_a_bounded_timeout_across_retries(self):
+        original_timeout = self.bridge.brain.timeout
+        observed_timeouts = []
+
+        def promise(*args, **kwargs):
+            observed_timeouts.append(self.bridge.brain.timeout)
+            return {"content": "Je vais vérifier le système."}
+
+        with patch.dict(actions.TOOL_DISPATCHER, {"get_system_telemetry": Mock(return_value=telemetry_result())}), \
+                patch.object(self.bridge.agent, "_call_llm", side_effect=promise) as llm, \
+                patch("headless_bridge.time.monotonic", side_effect=[10.0, 10.8, 11.1]):
+            result = self.bridge.execute_prompt("État du système")
+        self.assertEqual(1, llm.call_count)
+        self.assertAlmostEqual(0.2, observed_timeouts[0])
+        self.assertEqual(original_timeout, self.bridge.brain.timeout)
+        self.assertIn("CPU 12.5 %", result["reply"])
+
+    def test_model_cannot_replace_measured_operational_values(self):
+        invented_reply = (
+            "[État Opérationnel]\nCPU 1 %, RAM 1 %, Disque 1 %. Infrastructure vérifiée.\n"
+            "[Recommandations M.O.C.T.A.R]\nSurveiller les journaux."
+        )
+        with patch.dict(actions.TOOL_DISPATCHER, {"get_system_telemetry": Mock(return_value=telemetry_result())}), \
+                patch.object(self.bridge.agent, "_call_llm", return_value={"content": invented_reply}):
+            result = self.bridge.execute_prompt("État global du système")
+        self.assertIn("CPU 12.5 %", result["reply"])
+        self.assertIn("RAM 7.2/16 Go (45 %)", result["reply"])
+        self.assertIn("Disque 40/100 Go libres (60 % utilisés)", result["reply"])
+        self.assertNotIn("Infrastructure vérifiée", result["reply"])
+        self.assertNotIn("CPU 1 %", result["reply"])
+        self.assertIn("Surveiller les journaux.", result["reply"])
+
+    def test_mixed_status_and_git_request_preserves_project_tools(self):
+        with patch.dict(actions.TOOL_DISPATCHER, {"get_system_telemetry": Mock(return_value=telemetry_result())}), \
+                patch.object(self.bridge.agent, "run", return_value=AgentResult("Statut Git consulté.")) as run:
+            self.bridge.execute_prompt("Vérifie le système et le statut git du projet.")
+        self.assertIn("git_status", run.call_args.kwargs["tool_names"])
+        self.assertNotIn("get_system_telemetry", run.call_args.kwargs["tool_names"])
+        self.assertTrue(run.call_args.kwargs["context"]["system_telemetry"]["success"])
 
     def test_clear_and_get_history(self):
         self.bridge.memory.add_message("session_test", "user", "bonjour")

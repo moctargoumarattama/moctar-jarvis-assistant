@@ -13,9 +13,13 @@ import asyncio
 from datetime import datetime
 import json
 import logging
+import math
 from pathlib import Path
+import re
 import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple
+import unicodedata
 from uuid import uuid4
 
 import actions
@@ -29,6 +33,71 @@ import config
 logger = logging.getLogger("jarvis.headless")
 
 
+def _is_system_status_prompt(prompt: str) -> bool:
+    normalized = unicodedata.normalize("NFKD", prompt.casefold())
+    words = set(re.findall(r"[a-z0-9]+", normalized.encode("ascii", "ignore").decode()))
+    return bool(words.intersection({
+        "etat", "statut", "status", "infrastructure", "systeme", "system",
+        "cpu", "ram", "disque", "disques", "stockage", "telemetrie",
+        "ressource", "ressources", "materiel",
+    }))
+
+
+def _format_telemetry_report(result: Dict[str, Any]) -> str:
+    """Bilan local utilisable même si l'inférence CPU dépasse le budget d'attente."""
+    data = result.get("data") or {}
+    memory = data.get("memory") or {}
+    disk = data.get("disk") or {}
+    disk_percent = disk.get("percent_used", disk.get("percent"))
+
+    def measured(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+    def number(value):
+        return f"{value:g}" if measured(value) else "indisponible"
+
+    metrics = (
+        ("CPU", data.get("cpu_percent"), 85, 95, "Identifier les processus gourmands et répartir les calculs."),
+        ("RAM", memory.get("percent"), 80, 90, "Réduire les services non essentiels et surveiller la mémoire disponible."),
+        ("Disque", disk_percent, 80, 90, "Contrôler la croissance des journaux et planifier la libération d'espace après sauvegarde."),
+    )
+    severity = 0
+    recommendations = []
+    for name, value, warning, critical, advice in metrics:
+        if not measured(value):
+            severity = max(severity, 1)
+            recommendations.append(f"{name} indisponible : rétablir la collecte avant de conclure sur cette ressource.")
+        elif value >= warning:
+            severity = max(severity, 2 if value >= critical else 1)
+            recommendations.append(f"{name} à {number(value)} % : {advice}")
+
+    if not result.get("success"):
+        severity = max(severity, 1)
+    color = ("VERT", "ORANGE", "ROUGE")[severity]
+    if not recommendations:
+        recommendations.append("Conserver une marge de ressources et suivre l'évolution de la charge avant tout nouveau déploiement.")
+
+    if result.get("success"):
+        summary = (
+            f"CPU {number(data.get('cpu_percent'))} % ; "
+            f"RAM {number(memory.get('used_gb'))}/{number(memory.get('total_gb'))} Go "
+            f"({number(memory.get('percent'))} %) ; "
+            f"Disque {number(disk.get('free_gb'))}/{number(disk.get('total_gb'))} Go libres "
+            f"({number(disk_percent)} % utilisés)."
+        )
+    else:
+        summary = "Télémétrie indisponible : " + str(result.get("error") or result.get("message") or "collecte impossible")
+    recommendations = recommendations[:3]
+    if len(recommendations) < 3:
+        recommendations.append("Vérifier les sondes des services et équipements pour compléter le diagnostic de l'infrastructure.")
+    return (
+        f"[État Opérationnel]\nStatut matériel {color}. {summary}\n"
+        "Ce relevé concerne l'hôte ; les services et équipements distants ne sont pas mesurés.\n\n"
+        "[Recommandations M.O.C.T.A.R]\n"
+        + "\n".join(f"{index}. {advice}" for index, advice in enumerate(recommendations, 1))
+    )
+
+
 def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
     """Sélectionne un ensemble pertinent et réduit d'outils selon l'intention du prompt.
 
@@ -37,8 +106,11 @@ def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
     p = (prompt or "").lower()
     tools: set[str] = set()
 
+    def has_keyword(keywords):
+        return any(re.search(r"\b" + re.escape(word) + r"(?:s|x)?\b", p) for word in keywords)
+
     # Mots-clés Énergie / Solaire / Batterie
-    if any(k in p for k in ("energie", "énergie", "solaire", "panneau", "batterie", "consommation", "kw", "kwh", "onduleur", "autonomie", "audit")):
+    if has_keyword(("energie", "énergie", "solaire", "panneau", "batterie", "consommation", "kw", "kwh", "onduleur", "autonomie", "audit")):
         tools.update([
             "calculate_solar_sizing",
             "calculate_battery_sizing",
@@ -48,7 +120,7 @@ def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
         ])
 
     # Mots-clés IoT / Domotique / Capteurs / Relais
-    if any(k in p for k in ("iot", "capteur", "relais", "salon", "lumiere", "lumière", "temperature", "température", "domotique", "switch")):
+    if has_keyword(("iot", "capteur", "relais", "salon", "lumiere", "lumière", "temperature", "température", "domotique", "switch")):
         tools.update([
             "get_iot_status",
             "get_iot_temperature",
@@ -56,7 +128,7 @@ def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
         ])
 
     # Mots-clés Maintenance / Git / Projets / Code
-    if any(k in p for k in ("git", "commit", "push", "pull", "branche", "projet", "vscode", "serveur", "code", "repo", "maintenance")):
+    if has_keyword(("git", "commit", "push", "pull", "branche", "projet", "vscode", "serveur", "code", "repo", "maintenance")):
         tools.update([
             "git_status",
             "git_pull",
@@ -67,7 +139,7 @@ def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
         ])
 
     # Mots-clés Tâches / Notes / Rappels / Mémoire
-    if any(k in p for k in ("tache", "tâche", "todo", "note", "rappel", "rappelle", "agenda", "memoire", "mémoire", "souviens", "recherche")):
+    if has_keyword(("tache", "tâche", "todo", "note", "rappel", "rappelle", "agenda", "memoire", "mémoire", "souviens", "recherche")):
         tools.update([
             "create_note",
             "add_todo",
@@ -81,11 +153,11 @@ def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
         ])
 
     # Mots-clés Télémétrie matérielle / Système / CPU / RAM / Disques / Ressources
-    if any(k in p for k in ("systeme", "système", "cpu", "ram", "disque", "stockage", "temperature", "température", "ressource", "infrastructure", "materiel", "matériel")):
+    if _is_system_status_prompt(prompt) or has_keyword(("temperature", "température")):
         tools.add("get_system_telemetry")
 
     # Mots-clés Système / Heure / Date / Volume / Apps
-    if any(k in p for k in ("heure", "date", "jour", "volume", "son", "ouvre", "ferme", "capture", "ecran", "écran")):
+    if has_keyword(("heure", "date", "jour", "volume", "son", "ouvre", "ferme", "capture", "ecran", "écran")):
         tools.update([
             "get_time_response",
             "get_date_response",
@@ -96,7 +168,7 @@ def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
         ])
 
     # Mots-clés Web / Musique / Recherche
-    if any(k in p for k in ("musique", "chanson", "youtube", "google", "cherche", "site", "web")):
+    if has_keyword(("musique", "chanson", "youtube", "google", "cherche", "site", "web")):
         tools.update([
             "play_music",
             "control_music",
@@ -199,11 +271,42 @@ class JarvisHeadlessBridge:
         with self._lock:
             thought_chain: List[str] = []
             tools_used: List[Dict[str, Any]] = []
+            telemetry_result = None
+            telemetry_deadline = None
+            original_timeout = self.brain.timeout
+
+            targeted_tools = select_tools_for_prompt(user_input)
+            system_context = None
+            if _is_system_status_prompt(user_input):
+                try:
+                    telemetry_tool = actions.TOOL_DISPATCHER.get("get_system_telemetry")
+                    if not callable(telemetry_tool):
+                        raise RuntimeError("L'outil get_system_telemetry est indisponible.")
+                    telemetry_result = telemetry_tool()
+                    if not isinstance(telemetry_result, dict):
+                        raise TypeError("Résultat de télémétrie invalide.")
+                except Exception as exc:
+                    logger.warning("Précollecte de télémétrie indisponible : %s", exc)
+                    telemetry_result = {"success": False, "data": None, "message": "Collecte impossible.", "error": str(exc)}
+                system_context = {"system_telemetry": telemetry_result, "collected_at": datetime.now().isoformat()}
+                tools_used.append({"tool": "get_system_telemetry", "arguments": {}, **{
+                    key: telemetry_result.get(key) for key in ("success", "message", "data", "error")
+                }})
+                targeted_tools = tuple(name for name in targeted_tools if name != "get_system_telemetry")
+                if not targeted_tools:
+                    # Une seule synthèse sans schémas d'outils ; repli local si le CPU est occupé.
+                    telemetry_deadline = time.monotonic() + 1.0
 
             # Interception des pensées intermédiaires du LLM
             orig_call_llm = self.agent._call_llm
 
             def hooked_call_llm(messages, tools=None, think=None):
+                if telemetry_deadline is not None:
+                    remaining = telemetry_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("Budget de synthèse de télémétrie dépassé.")
+                    self.brain.timeout = min(original_timeout, remaining)
+                    think = False
                 resp = orig_call_llm(messages, tools=tools, think=think)
                 content = resp.get("content") or ""
                 if content.strip():
@@ -214,6 +317,8 @@ class JarvisHeadlessBridge:
             orig_execute_tool = actions.execute_tool
 
             def hooked_execute_tool(tool_name, arguments=None):
+                if tool_name == "get_system_telemetry" and telemetry_result is not None:
+                    return telemetry_result
                 res = orig_execute_tool(tool_name, arguments)
                 tools_used.append({
                     "tool": tool_name,
@@ -231,6 +336,8 @@ class JarvisHeadlessBridge:
             actions.execute_tool = hooked_execute_tool
 
             def local_fallback() -> str:
+                if telemetry_result is not None:
+                    return _format_telemetry_report(telemetry_result)
                 from intent_engine import detect_intent
                 detected = detect_intent(user_input)
                 intent = detected.get("intent")
@@ -251,9 +358,10 @@ class JarvisHeadlessBridge:
 
             status = "success"
             try:
-                targeted_tools = select_tools_for_prompt(user_input)
+                self.agent._call_llm = hooked_call_llm
                 agent_result = self.agent.run(
                     prompt=user_input,
+                    context=system_context,
                     session_id=current_session,
                     tool_names=targeted_tools,
                     fallback=local_fallback,
@@ -267,12 +375,27 @@ class JarvisHeadlessBridge:
 
                 if not reply:
                     reply = local_fallback()
+                if telemetry_deadline is not None:
+                    measured_report = local_fallback()
+                    recommendations_heading = "[Recommandations M.O.C.T.A.R]"
+                    if telemetry_result.get("success") and all(
+                        section in reply for section in ("[État Opérationnel]", recommendations_heading)
+                    ):
+                        # Le modèle conseille ; les chiffres et le statut proviennent toujours des mesures.
+                        recommendations = reply.partition(recommendations_heading)[2].strip()
+                        reply = (
+                            measured_report.partition(recommendations_heading)[0]
+                            + recommendations_heading + "\n" + recommendations
+                        ) if recommendations else measured_report
+                    else:
+                        reply = measured_report
             except Exception as exc:
                 logger.exception("Erreur exécution agent headless : %s", exc)
                 reply = f"Erreur lors de l'exécution de la requête : {exc}"
                 status = "error"
             finally:
                 self.agent._call_llm = orig_call_llm
+                self.brain.timeout = original_timeout
                 actions.execute_tool = orig_execute_tool
                 agent_core.execute_tool = orig_agent_execute_tool
 

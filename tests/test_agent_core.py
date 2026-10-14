@@ -87,6 +87,77 @@ class AgentCoreTests(unittest.TestCase):
         self.assertIn("diffusion", result.response)
         self.assertEqual(1, len(chat.calls))
 
+    def test_precollected_metrics_are_available_before_first_model_call(self):
+        telemetry = {
+            "system_telemetry": {"cpu_percent": 17.5, "memory_percent": 42.0, "disk_percent": 63.0},
+            "collected_at": "2026-10-14T18:00:00+01:00",
+        }
+        expected = (
+            "[État Opérationnel]\nCPU 17.5 %, RAM 42.0 %, disque 63.0 % : vert.\n"
+            "[Recommandations M.O.C.T.A.R]\nSurveiller l'espace disque."
+        )
+        handler = Mock()
+        self.register("get_system_telemetry", handler)
+        chat = ScriptedChat([assistant_response(expected)])
+        agent = AgentCore(self.registry, self.security, chat_client=chat)
+
+        result = agent.run("Quel est l'état global du système ?", context=telemetry, tool_names=())
+
+        self.assertEqual(expected, result.response)
+        self.assertEqual(1, len(chat.calls))
+        system_content = chat.calls[0]["messages"][0]["content"]
+        self.assertIn(json.dumps(telemetry, ensure_ascii=False), system_content)
+        self.assertIn("observations réelles déjà obtenues", system_content)
+        self.assertIn("uniquement l'hôte mesuré", system_content)
+        self.assertIn("APPELLE DIRECTEMENT L'OUTIL au premier tour", system_content)
+        self.assertIn("[État Opérationnel]", system_content)
+        self.assertIn("[Recommandations M.O.C.T.A.R]", system_content)
+        handler.assert_not_called()
+
+    def test_action_promise_is_retried_before_returning_a_result(self):
+        handler = Mock(return_value="Il est 14:30.")
+        self.register("time", handler)
+        chat = ScriptedChat([
+            assistant_response("Je vais vérifier l'heure."),
+            assistant_response(tool_name="time", arguments={}),
+            assistant_response("Il est 14:30."),
+        ])
+        agent = AgentCore(self.registry, self.security, chat_client=chat)
+
+        result = agent.run("Quelle heure est-il ?")
+
+        self.assertEqual("final", result.status)
+        self.assertEqual("Il est 14:30.", result.response)
+        self.assertEqual(3, len(chat.calls))
+        self.assertIn("Une promesse d'action seule", chat.calls[1]["messages"][-1]["content"])
+        handler.assert_called_once()
+
+    def test_repeated_action_promises_use_fallback_once(self):
+        chat = ScriptedChat([
+            assistant_response("Je commence par analyser le système."),
+            assistant_response("Patientez, je consulte les métriques."),
+        ])
+        fallback = Mock(return_value="CPU mesuré : 17.5 %.")
+        agent = AgentCore(self.registry, self.security, chat_client=chat)
+
+        result = agent.run("Quel est le statut du système ?", fallback=fallback)
+
+        self.assertEqual("fallback", result.status)
+        self.assertTrue(result.used_fallback)
+        self.assertEqual("CPU mesuré : 17.5 %.", result.response)
+        self.assertEqual(2, len(chat.calls))
+        fallback.assert_called_once_with()
+
+    def test_action_promise_does_not_exceed_the_step_limit(self):
+        chat = ScriptedChat([assistant_response("Je vais vérifier les métriques.")])
+        agent = AgentCore(self.registry, self.security, chat_client=chat, max_steps=1)
+
+        result = agent.run("Quel est le statut du système ?")
+
+        self.assertEqual("error", result.status)
+        self.assertNotIn("Je vais", result.response)
+        self.assertEqual(1, len(chat.calls))
+
     def test_request_can_omit_all_tools_for_a_general_question(self):
         self.register("time", Mock(return_value="Il est 10:00."))
         chat = ScriptedChat([assistant_response("Le ciel diffuse davantage la lumiere bleue.")])
