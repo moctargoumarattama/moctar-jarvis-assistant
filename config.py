@@ -395,6 +395,7 @@ class Settings:
     enable_restart: bool = True
     vps_stale_seconds: float = 20.0
     vps_retention_seconds: float = 86400.0
+    vps_state_path: str = ""
     max_vps: int = 128
     max_streams: int = 32
     event_limit: int = 200
@@ -436,6 +437,7 @@ class Settings:
             enable_restart=_noc_boolean("NOC_ENABLE_RESTART", True),
             vps_stale_seconds=_noc_number("NOC_VPS_STALE_SECONDS", 20, 5, 3600),
             vps_retention_seconds=_noc_number("NOC_VPS_RETENTION_SECONDS", 86400, 60, 604800),
+            vps_state_path=os.environ.get("NOC_VPS_STATE_PATH", str(Path(os.environ.get("STATE_DIRECTORY") or DATA_DIR) / "vps-registry.json")),
             max_vps=int(_noc_number("NOC_MAX_VPS", 128, 1, 1024)),
             max_streams=int(_noc_number("NOC_MAX_STREAMS", 32, 1, 128)),
             admin_phone_number=re.sub(r"\D", "", os.environ.get("ADMIN_PHONE_NUMBER", "212770010264")),

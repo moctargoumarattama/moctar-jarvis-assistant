@@ -5,10 +5,12 @@ import asyncio
 import copy
 import json
 import os
+import tempfile
 import time
 import unittest
 from contextlib import ExitStack
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -145,6 +147,47 @@ class APITests(unittest.TestCase):
         self.assertEqual(published["global_status"], "incident")
         self.assertEqual(self.report().status_code, 200)
         self.assertTrue(self.runtime.vps_snapshot()[0]["healthy"])
+
+    def test_vps_report_is_published_immediately_without_waiting_for_next_collection(self) -> None:
+        self.client.portal.call(self.runtime.publish, local_snapshot())
+        revision = self.runtime.revision
+        self.assertEqual(self.report().status_code, 200)
+        self.assertGreater(self.runtime.revision, revision)
+        published = self.client.get("/api/snapshot").json()["vps"]
+        self.assertEqual(published[0]["hostname"], "vps-one")
+        self.assertFalse(published[0]["restored"])
+
+    def test_vps_survives_dashboard_restart_until_fresh_authenticated_report(self) -> None:
+        directory = self.stack.enter_context(tempfile.TemporaryDirectory())
+        settings = replace(self.settings, vps_state_path=str(Path(directory) / "vps.json"))
+        first, _ = self.open_client(settings)
+        headers = {"x-vps-token": VPS_TOKEN}
+        self.assertEqual(first.post("/api/vps/report", json=remote_report(), headers=headers).status_code, 200)
+        restarted, runtime = self.open_client(settings)
+        restarted.portal.call(runtime.publish, local_snapshot())
+        restored = restarted.get("/api/snapshot").json()["vps"][0]
+        self.assertEqual(restored["hostname"], "vps-one")
+        self.assertEqual(restored["cpu_percent"], 20.0)
+        self.assertTrue(restored["restored"])
+        self.assertTrue(restored["stale"])
+        self.assertFalse(restored["healthy"])
+        self.assertGreaterEqual(restored["age_seconds"], 0)
+        self.assertEqual(restarted.post("/api/vps/report", json=remote_report(), headers=headers).status_code, 200)
+        connected = restarted.get("/api/snapshot").json()["vps"][0]
+        self.assertFalse(connected["restored"])
+        self.assertFalse(connected["stale"])
+        self.assertTrue(connected["healthy"])
+
+    def test_live_metrics_assets_are_served_with_fixed_paths_and_mime_types(self) -> None:
+        directory = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+        (directory / "static").mkdir()
+        for filename, mime in (("live_metrics.js", "application/javascript"), ("live_metrics.css", "text/css")):
+            (directory / "static" / filename).write_text("/* chart asset */")
+            with patch("main.BASE_DIR", directory):
+                response = self.client.get("/static/" + filename)
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.headers["content-type"].startswith(mime))
+        self.assertEqual(self.client.get("/static/config.py").status_code, 404)
 
     def test_vps_incident_metrics_and_stopped_services_affect_global_health(self) -> None:
         for change in ("cpu", "memory", "disk", "service"):

@@ -1,7 +1,9 @@
 """Formats de numéros administrateur et secret VPS lus depuis l'environnement."""
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
+from pathlib import Path
 
 from config import Settings
 from whatsapp import normalize_phone, parse_message
@@ -29,6 +31,16 @@ class EnvironmentConfigTests(unittest.TestCase):
             self.assertEqual(Settings.from_env().vps_token, '')
         with patch.dict(os.environ, {'NOC_VPS_TOKEN':'private-test-vps'}, clear=True):
             self.assertEqual(Settings.from_env().vps_token, 'private-test-vps')
+
+    def test_vps_state_uses_systemd_state_directory_or_explicit_override(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"STATE_DIRECTORY": directory}, clear=True):
+                self.assertEqual(Settings.from_env().vps_state_path, str(Path(directory) / "vps-registry.json"))
+            custom = str(Path(directory) / "custom.json")
+            with patch.dict(os.environ, {"STATE_DIRECTORY": directory, "NOC_VPS_STATE_PATH": custom}, clear=True):
+                self.assertEqual(Settings.from_env().vps_state_path, custom)
+            with patch.dict(os.environ, {"NOC_VPS_STATE_PATH": ""}, clear=True):
+                self.assertEqual(Settings.from_env().vps_state_path, "")
 
 
 if __name__ == '__main__':

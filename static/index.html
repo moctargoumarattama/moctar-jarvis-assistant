@@ -534,6 +534,7 @@
       }
     }
   </style>
+  <link rel="stylesheet" href="/static/live_metrics.css?v=1">
 </head>
 <body>
   <a class="skip-link" href="#overview" style="position:absolute;left:-9999px" onfocus="this.style.left='85px';this.style.top='12px'" onblur="this.style.left='-9999px'">Aller au tableau de bord</a>
@@ -557,7 +558,7 @@
       <div class="page-heading"><h1>Tour de contrôle<span style="color:var(--cyan)">.</span></h1><div class="telemetry-info"><div class="stream-label" id="stream-state" data-tone="warning"><span class="led"></span><span id="stream-state-text">Connexion…</span></div><div class="collection-interval">Collecte <span class="mono">2 s</span></div><div>Relevé <span class="mono" id="last-update">—</span></div></div></div>
       <div class="connection-banner" id="connection-banner" role="status" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v4M12 17h.01"/></svg><span id="connection-message"></span></div>
       <section aria-labelledby="hardware-title">
-        <div class="section-heading"><h2 id="hardware-title"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></svg>Ressources matérielles</h2><span class="meta" id="uptime">UPTIME —</span></div>
+        <div class="section-heading"><h2 id="hardware-title"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></svg>Ressources matérielles</h2><div class="metrics-heading-controls"><span class="meta" id="uptime">UPTIME —</span><button type="button" id="live-metrics-open" class="live-metrics-launch" data-live-metrics-open="central" aria-haspopup="dialog" aria-controls="live-metrics-dialog"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18M6 14l4-5 4 4 6-8"/></svg>Courbes en direct</button></div></div>
         <div class="hardware-grid">
           <article class="card metric-card cpu-card"><div class="card-top"><div class="card-label"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Processeur</div><span class="meta mono" id="core-count">— CŒURS</span></div><div class="cpu-body"><div class="gauge" id="cpu-gauge" role="img" aria-label="Charge CPU non disponible"><div class="gauge-content"><div class="gauge-number"><span id="cpu-value">—</span><small>%</small></div><span class="gauge-caption">Charge CPU</span></div></div><div class="cpu-trend"><div class="chart-caption"><span>HISTORIQUE DE SESSION</span><span class="mono" id="trend-length">0 / 120</span></div><svg class="trend-svg" id="cpu-chart" viewBox="0 0 200 65" role="img" aria-label="Historique des mesures CPU" preserveAspectRatio="none"><defs><linearGradient id="cpu-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#5ed9ec" stop-opacity=".2"/><stop offset="100%" stop-color="#5ed9ec" stop-opacity="0"/></linearGradient></defs><path class="chart-grid" d="M0 8H200M0 28H200M0 48H200"/><path id="cpu-area" class="chart-area"/><path id="cpu-line" class="chart-line"/><circle id="cpu-dot" class="chart-end" r="2" hidden/></svg><div class="chart-caption"><span>0 %</span><span>100 %</span></div></div></div><div class="core-grid" id="core-grid"><span class="no-data">En attente des mesures par cœur…</span></div></article>
           <article class="card metric-card memory-card"><div class="card-top"><div class="card-label"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18v10H3V7ZM7 10v4M11 10v4M15 10v4M7 17v3M12 17v3M17 17v3"/></svg>Mémoire</div><span class="meta mono">RAM</span></div><div class="memory-body"><div class="gauge" id="memory-gauge" role="img" aria-label="Mémoire utilisée non disponible"><div class="gauge-content"><div class="gauge-number"><span id="memory-percent">—</span><small>%</small></div><span class="gauge-caption">Utilisée</span></div></div><div class="memory-values"><div class="primary-value" id="memory-used">—</div><div class="secondary-value">sur <span class="mono" id="memory-total">—</span></div></div></div><div class="swap-row"><div class="detail-line"><span>SWAP</span><span class="value" id="swap-value">—</span></div><div class="progress-track" role="progressbar" id="swap-progress" aria-label="Mémoire SWAP" aria-valuemin="0" aria-valuemax="100"><div class="progress-fill" id="swap-fill"></div></div></div></article>
@@ -569,7 +570,7 @@
       <div class="bottom-grid">
         <section id="infrastructure" aria-labelledby="infrastructure-title"><div class="section-heading"><h2 id="infrastructure-title"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 17H6a4 4 0 0 1-.7-7.9 7 7 0 0 1 13.4 0A4 4 0 0 1 18 17h-2M12 13v8M9 18l3 3 3-3"/></svg>Infrastructure & réseau</h2><span class="meta">CONNECTIVITÉ</span></div><div class="network-grid"><article class="card network-card"><div class="network-top"><div class="network-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17a4 4 0 0 1-.6-7.8A6 6 0 0 1 16 7a5 5 0 0 1 2 10H5ZM8 13l2-2 2 2 2-2 2 2"/></svg></div><span class="badge" id="cloudflare-badge"><span class="led"></span><span>EN ATTENTE</span></span></div><h3 class="network-name">Cloudflare Tunnel</h3><p class="network-meta">cloudflared</p><div class="network-footer"><span>État systemd</span><strong id="cloudflare-state">—</strong></div><p class="network-error" id="cloudflare-error" hidden></p></article><article class="card network-card"><div class="network-top"><div class="network-icon whatsapp"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a9 9 0 0 1-13.4 7.9L3 21l1.6-4.6A9 9 0 1 1 21 11.5Z"/><path d="M8.5 7.5c-2 3 1 6 4 8l2-1.5-2-2-1 1c-1.5-1-2.5-2-3-3l1-1-1-1.5Z"/></svg></div><span class="badge" id="whatsapp-badge"><span class="led"></span><span>EN ATTENTE</span></span></div><h3 class="network-name">Passerelle WhatsApp</h3><p class="network-meta" id="whatsapp-phone">Session en attente</p><div class="network-footer"><span id="whatsapp-state">klasora-whatsapp</span><strong id="whatsapp-latency">— ms</strong></div><p class="network-error" id="whatsapp-error" hidden></p></article></div></section>
         <section id="remote-servers" aria-labelledby="vps-title">
-          <div class="section-heading remote-heading"><h2 id="vps-title">Radar Sentinel & cyberdéfense</h2><div class="cyber-launch-controls"><button type="button" class="meta cyber-counter" id="sentinel-block-count" title="IP bloquées aujourd’hui par Sentinel · ouvrir la console de cyberdéfense" aria-haspopup="dialog" aria-controls="cyberdefense-modal">— IP BLOQUÉES</button><button type="button" class="cyber-launch" id="cyberdefense-open" aria-label="Ouvrir la console de cyberdéfense locale" aria-haspopup="dialog" aria-controls="cyberdefense-modal">&gt;_</button></div></div>
+          <div class="section-heading remote-heading"><h2 id="vps-title">Radar Sentinel & cyberdéfense</h2><div class="cyber-launch-controls"><button type="button" id="live-metrics-vps-open" class="live-metrics-launch compact" data-live-metrics-open="vps" aria-label="Courbes en direct des VPS" aria-haspopup="dialog" aria-controls="live-metrics-dialog"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18M6 14l4-5 4 4 6-8"/></svg>Courbes</button><button type="button" class="meta cyber-counter" id="sentinel-block-count" title="IP bloquées aujourd’hui par Sentinel · ouvrir la console de cyberdéfense" aria-haspopup="dialog" aria-controls="cyberdefense-modal">— IP BLOQUÉES</button><button type="button" class="cyber-launch" id="cyberdefense-open" aria-label="Ouvrir la console de cyberdéfense locale" aria-haspopup="dialog" aria-controls="cyberdefense-modal">&gt;_</button></div></div>
           <div class="card remote-panel">
             <div class="remote-toolbar"><div class="remote-tabs" role="tablist" aria-label="Serveurs distants et cyberdéfense"><button class="remote-tab" id="vps-tab" type="button" role="tab" aria-selected="false" aria-controls="vps-list" tabindex="-1"><span id="vps-count">0 VPS</span></button><button class="remote-tab" id="sentinel-tab" type="button" role="tab" aria-selected="true" aria-controls="sentinel-list">Sentinel</button></div><span class="sentinel-agent" id="sentinel-agent" data-tone="neutral"><span class="led"></span><span id="sentinel-agent-text">EN ATTENTE</span></span></div>
             <div class="sentinel-queue-warning" id="sentinel-queue-warning" hidden></div>
@@ -793,7 +794,14 @@
       <button type="button" class="button" id="scheduler-refresh-btn">Rafraîchir</button>
     </footer>
   </dialog>
+  <dialog id="live-metrics-dialog" aria-labelledby="live-metrics-title" aria-describedby="live-metrics-description">
+    <header class="live-metrics-header"><div><div class="eyebrow">OBSERVATOIRE / TÉLÉMÉTRIE</div><h2 id="live-metrics-title">Courbes en direct</h2><p id="live-metrics-description">Les mesures réelles de vos hôtes, horodatées et actualisées en continu.</p></div><button type="button" class="live-metrics-close" id="live-metrics-close" aria-label="Fermer les courbes en direct" title="Fermer (Échap)" autofocus><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></header>
+    <div class="live-metrics-toolbar"><div class="live-metrics-host-field"><label for="live-metrics-host">Hôte observé</label><select id="live-metrics-host"><option value="central">Hôte central</option></select></div><fieldset class="live-metrics-period"><legend>Fenêtre d’observation</legend><div class="live-metrics-period-buttons"><button type="button" data-live-metrics-minutes="5" aria-pressed="true">5 min</button><button type="button" data-live-metrics-minutes="15" aria-pressed="false">15 min</button><button type="button" data-live-metrics-minutes="60" aria-pressed="false">1 h</button></div></fieldset><div class="live-metrics-status" id="live-metrics-status" data-tone="warning" role="status"><span class="led"></span><span id="live-metrics-status-text">EN ATTENTE</span></div></div>
+    <div class="live-metrics-scroll"><div class="live-metrics-context"><div><h3 id="live-metrics-host-title">Hôte central · en attente</h3><p id="live-metrics-last-seen">En attente du premier relevé.</p></div><span class="live-metrics-count" id="live-metrics-count">0 relevé</span></div><div class="live-metrics-notice" id="live-metrics-notice">L’historique se construit pendant cette session, même lorsque cette fenêtre est fermée.</div><div class="live-metrics-grid" id="live-metrics-charts"></div><section class="live-metrics-services" id="live-metrics-services" aria-labelledby="live-metrics-services-title" hidden><h3 id="live-metrics-services-title">Services · dernier état connu</h3><div class="live-metrics-service-grid" id="live-metrics-service-list"></div></section></div>
+    <footer class="live-metrics-footer"><span>Historique de session · 1 h maximum · Les coupures de mesure restent visibles. Aucun point simulé.</span><span>Échap pour fermer</span></footer>
+  </dialog>
   <div class="toast" id="toast" role="status" hidden></div>
+  <script src="/static/live_metrics.js?v=1"></script>
   <script>
     'use strict';
     (() => {
@@ -858,6 +866,7 @@
       function displayError(id, value) { const node = $(id); node.textContent = value ? String(value) : ''; node.hidden = !value; }
       function setStream(connected, message) {
         state.stale = !connected;
+        window.NocLiveMetrics?.setConnection(connected);
         $('stream-state').dataset.tone = connected ? 'success' : 'warning';
         set('stream-state-text', connected ? 'Flux en direct' : 'Flux interrompu');
         set('console-state', connected ? 'FLUX CONNECTÉ · SSE' : 'RECONNEXION EN COURS');
@@ -866,6 +875,7 @@
         $('connection-banner').hidden = connected;
         set('connection-message', message || 'Connexion interrompue. Les dernières mesures sont conservées pendant la reconnexion.');
         updateGlobalStatus();
+        if (state.remoteTab === 'vps') renderRemoteAgentStatus();
       }
       function updateGlobalStatus() {
         const status = state.snapshot?.global_status;
@@ -991,7 +1001,7 @@
           const hostname = document.createElement('h3'); hostname.className = 'vps-host'; hostname.textContent = server.hostname || 'VPS sans nom';
           const badge = document.createElement('span'); badge.className = 'badge'; badge.dataset.tone = server.stale ? 'warning' : server.healthy === false ? 'error' : 'success';
           const led = document.createElement('span'); led.className = 'led';
-          const label = document.createElement('span'); label.textContent = server.stale ? 'RAPPORT ANCIEN' : server.healthy === false ? 'INCIDENT' : 'CONNECTÉ'; badge.append(led,label); row.append(hostname,badge);
+          const label = document.createElement('span'); label.textContent = server.restored ? 'RECONNEXION EN ATTENTE' : server.stale ? 'RAPPORT ANCIEN' : server.healthy === false ? 'INCIDENT' : 'CONNECTÉ'; badge.append(led,label); row.append(hostname,badge);
           const stats = document.createElement('div'); stats.className = 'vps-stats';
           [['CPU',server.cpu_percent,varColor('cyan')],['RAM',server.memory?.percent,varColor('green')],['DISQUE',server.disk?.percent,'#9d96eb']].forEach(([name, percent, color]) => {
             const stat = document.createElement('div'); stat.className = 'vps-stat';
@@ -1018,6 +1028,14 @@
         container.replaceChildren(fragment);
       }
       function varColor(name) { return 'var(--' + name + ')'; }
+      function renderRemoteAgentStatus() {
+        if (state.remoteTab !== 'vps') return;
+        const servers = Array.isArray(state.snapshot?.vps) ? state.snapshot.vps : [];
+        const fresh = servers.filter(server => server && !server.stale && !server.restored);
+        set('sentinel-agent-text', !servers.length ? 'VPS EN ATTENTE' : state.stale ? 'FLUX INTERROMPU' : fresh.length ? fresh.length + ' VPS EN LIGNE' : 'RAPPORTS ANCIENS');
+        $('sentinel-agent').dataset.tone = !servers.length ? 'neutral' : state.stale || fresh.length < servers.length ? 'warning' : 'success';
+        $('sentinel-agent').title = 'Télémétrie VPS : ' + fresh.length + ' rapport(s) récent(s) sur ' + servers.length + '. Le statut de Sentinel est affiché dans son onglet.';
+      }
       function selectRemoteTab(name, focus = false) {
         state.remoteTab = name === 'vps' ? 'vps' : 'sentinel';
         ['vps', 'sentinel'].forEach(tab => {
@@ -1027,6 +1045,7 @@
           if (focus && selected) button.focus();
         });
         try { localStorage.setItem('noc.remote-tab', state.remoteTab); } catch { /* Preferences are optional. */ }
+        renderSentinel(state.snapshot?.sentinel);
       }
       function renderSentinel(sentinel) {
         const data = sentinel && typeof sentinel === 'object' ? sentinel : null;
@@ -1036,6 +1055,7 @@
         const status = !data ? 'EN ATTENTE' : !configured ? 'NON CONFIGURÉ' : active ? 'AGENT ACTIF' : disconnected ? 'DÉCONNECTÉ' : 'AGENT EN ATTENTE';
         set('sentinel-agent-text', status); $('sentinel-agent').dataset.tone = active ? 'success' : disconnected ? 'error' : configured ? 'warning' : 'neutral';
         $('sentinel-agent').title = dateValid(data?.last_seen) ? 'Dernier rapport : ' + new Date(data.last_seen).toLocaleString('fr-FR') : 'Aucun rapport reçu';
+        renderRemoteAgentStatus();
         set('sentinel-block-count', (data && isNumber(data.blocked_today) ? numeric(data.blocked_today) : '—') + ' IP BLOQUÉES');
         const dropped = isNumber(data?.queue_dropped) && data.queue_dropped > 0;
         $('sentinel-queue-warning').hidden = !dropped;
@@ -1304,6 +1324,7 @@
         if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) throw new Error('Réponse du collecteur invalide.');
         const firstSnapshot = !state.snapshot;
         state.snapshot = snapshot; state.lastReceipt = Date.now();
+        window.NocLiveMetrics?.ingest(snapshot);
         if (live) setStream(true);
         set('hostname', snapshot.hostname || 'Serveur central'); set('platform', snapshot.platform || '');
         set('last-update', time(snapshot.timestamp)); set('uptime', 'UPTIME ' + ageLabel(snapshot.uptime_seconds));
@@ -1483,7 +1504,7 @@
         document.querySelectorAll('.nav-link').forEach(item => { item.classList.remove('active'); item.removeAttribute('aria-current'); });
         link.classList.add('active'); link.setAttribute('aria-current','page');
       }));
-      function updateClock() { const now = new Date(); set('clock-time', clockFormat.format(now)); $('clock-time').dateTime = now.toISOString(); set('clock-date', shortDateFormat.format(now).toUpperCase()); }
+      function updateClock() { const now = new Date(); set('clock-time', clockFormat.format(now)); $('clock-time').dateTime = now.toISOString(); set('clock-date', shortDateFormat.format(now).toUpperCase()); window.NocLiveMetrics?.tick(now.getTime()); }
       updateClock(); setInterval(updateClock, 1000);
       setInterval(() => {
         if (state.snapshot && Date.now() - state.lastReceipt > 7500) {
