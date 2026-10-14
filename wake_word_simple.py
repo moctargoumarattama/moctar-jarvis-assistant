@@ -444,11 +444,11 @@ def _listen_loop():
                 _log_throttled("warning", "soft_wake_micro", f"Soft wake word micro indisponible : {exc}", cooldown=15.0)
                 time.sleep(0.5)
         finally:
-            try:
-                if _microphone_lock.locked():
+            if acquired:
+                try:
                     _microphone_lock.release()
-            except RuntimeError:
-                pass
+                except RuntimeError:
+                    pass
 
         if audio is None:
             continue
@@ -589,15 +589,20 @@ def resume_soft_wake_listener():
     _pause_event.clear()
 
 
-def acquire_command_microphone(app=None, timeout=2.5):
+def acquire_command_microphone(app=None, timeout=2.5) -> bool:
     pause_soft_wake_listener()
     start_time = time.monotonic()
-    while not _microphone_lock.acquire(timeout=0.08):
+    acquired = False
+    while not acquired:
+        acquired = _microphone_lock.acquire(timeout=0.08)
+        if acquired:
+            break
         if app is not None:
             app.processEvents()
         if time.monotonic() - start_time > timeout:
             logger.warning("Microphone acquire timed out after %.1fs", timeout)
             break
+    return acquired
 
 
 def release_command_microphone(*, resume_listener=True):

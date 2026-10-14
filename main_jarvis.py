@@ -1,3 +1,6 @@
+import os
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+
 import logging
 import time
 import threading
@@ -158,7 +161,13 @@ COMMAND_ONLY_SAFE_INTENTS = {
 
 
 def format_assistant_message(text):
-    text = (text or "").strip()
+    if isinstance(text, dict):
+        text = text.get("message") or text.get("response") or str(text)
+    elif hasattr(text, "response"):
+        text = getattr(text, "response")
+    elif hasattr(text, "message"):
+        text = getattr(text, "message")
+    text = str(text or "").strip()
     if not text:
         return "Je n'ai pas de reponse pour le moment."
     return text
@@ -415,11 +424,12 @@ def speak(engine, ui, app, text, state=None):
 
 
 def listen_for_command(_app=None, _ui=None):
-    acquire_command_microphone()
+    acquired = acquire_command_microphone()
     try:
         return s2t.voice2text("fr")
     finally:
-        release_command_microphone(resume_listener=False)
+        if acquired:
+            release_command_microphone(resume_listener=False)
 
 
 def handle_command(command, assistant):
@@ -530,7 +540,6 @@ def get_finished_listen_job(state):
 
     state["listen_job"] = None
     if job.get("cancelled"):
-        release_command_microphone(resume_listener=False)
         return None
     return job
 

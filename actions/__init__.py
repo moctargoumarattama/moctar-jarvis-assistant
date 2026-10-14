@@ -434,16 +434,28 @@ def execute_tool(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> 
 
         if param_name in raw_args:
             val = raw_args[param_name]
-            # Coercion de type basique si nécessaire (chaîne -> int/float/bool)
-            if param.annotation is int and isinstance(val, str) and val.isdigit():
-                val = int(val)
-            elif param.annotation is float and isinstance(val, str):
-                try:
+            # Coercion de type basique si nécessaire (chaîne/float -> int/float/bool)
+            if param.annotation is int:
+                if isinstance(val, (int, float)) and not isinstance(val, bool):
+                    val = int(round(val))
+                elif isinstance(val, str):
+                    try:
+                        val = int(round(float(val.strip())))
+                    except (ValueError, TypeError):
+                        pass
+            elif param.annotation is float:
+                if isinstance(val, (int, float)) and not isinstance(val, bool):
                     val = float(val)
-                except ValueError:
-                    pass
-            elif param.annotation is bool and isinstance(val, str):
-                val = val.strip().lower() in ("true", "1", "yes", "oui")
+                elif isinstance(val, str):
+                    try:
+                        val = float(val.strip())
+                    except (ValueError, TypeError):
+                        pass
+            elif param.annotation is bool:
+                if isinstance(val, str):
+                    val = val.strip().lower() in ("true", "1", "yes", "oui")
+                elif isinstance(val, (int, float)):
+                    val = bool(val)
 
             filtered_kwargs[param_name] = val
         elif param.default is inspect.Parameter.empty:

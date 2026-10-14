@@ -678,7 +678,14 @@
     <div class="terminal-footer"><span id="events-dialog-state" data-tone="warning">EN ATTENTE DU FLUX</span><span>200 événements max. · Échap pour fermer</span></div>
   </dialog>
   <dialog id="voice-dialog" aria-labelledby="voice-title">
-    <div class="eyebrow" style="margin-bottom:8px">WHATSAPP · VOICE-TO-ACTION</div><h2 id="voice-title">Module vocal</h2><div class="voice-detail-meta" id="voice-module-meta">En attente du collecteur</div><div class="voice-detail-meta" id="voice-detail-meta">Aucune commande reçue pour le moment.</div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px">
+      <div>
+        <div class="eyebrow" style="margin-bottom:6px">WHATSAPP · VOICE-TO-ACTION</div>
+        <h2 id="voice-title" style="margin:0">Module vocal</h2>
+      </div>
+      <button class="jarvis-btn-icon" id="voice-close-icon" type="button" aria-label="Fermer la modale" title="Fermer (Échap)">✕</button>
+    </div>
+    <div class="voice-detail-meta" id="voice-module-meta">En attente du collecteur</div><div class="voice-detail-meta" id="voice-detail-meta">Aucune commande reçue pour le moment.</div>
     <div id="voice-command-details" hidden><div class="voice-detail-label">Transcription / message</div><div class="voice-detail-text" id="voice-transcription"></div><div class="voice-detail-label">Réponse</div><div class="voice-detail-text" id="voice-response"></div></div>
     <details class="voice-simulation"><summary>Simuler une commande</summary><p class="voice-simulation-note">Simulation uniquement : aucune action sur les services et aucun envoi WhatsApp.</p><form id="voice-simulate-form"><label class="dialog-label" for="voice-simulate-command">Commande à tester</label><select id="voice-simulate-command" name="text"><option value="statut">statut</option><option value="restart babamarket">restart babamarket</option></select><div class="voice-simulation-feedback" id="voice-simulate-feedback" role="status" hidden></div><div class="dialog-actions"><button class="button primary" id="voice-simulate-submit" type="submit">Lancer la simulation</button></div></form></details>
     <div class="dialog-actions"><button class="button" id="voice-close" type="button">Fermer</button></div>
@@ -1343,6 +1350,7 @@
       $('voice-trigger').disabled = false;
       $('voice-trigger').addEventListener('click', () => { updateVoiceDetails(); $('voice-dialog').showModal(); });
       $('voice-close').addEventListener('click', () => $('voice-dialog').close());
+      $('voice-close-icon')?.addEventListener('click', () => $('voice-dialog').close());
       $('voice-simulate-form').addEventListener('submit', async event => {
         event.preventDefault();
         if (state.simulating) return;
