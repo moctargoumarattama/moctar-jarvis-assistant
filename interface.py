@@ -284,7 +284,7 @@ if PYQT_AVAILABLE:
             """)
             self.ai_status_btn.clicked.connect(self.ai_status_requested.emit)
             self.ai_status_message = ""
-            self.set_ai_status(config.AI_SETTINGS.get("default_model", "qwen3:8b"), config.AI_SETTINGS.get("base_url", "http://localhost:11434"), online=True)
+            self.set_ai_status(config.AI_SETTINGS.get("default_model", config.OLLAMA_MODEL), config.AI_SETTINGS.get("base_url", "http://localhost:11434"), online=True)
 
             self.manual_label = QLabel("Commande manuelle")
             self.manual_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #7fffd4;")

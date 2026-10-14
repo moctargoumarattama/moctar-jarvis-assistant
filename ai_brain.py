@@ -26,9 +26,12 @@ except Exception:
         return False
 
 
-DEFAULT_MODEL = "qwen3:8b"
-DEFAULT_BASE_URL = "http://localhost:11434"
-OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "45"))
+DEFAULT_MODEL = config.OLLAMA_MODEL
+DEFAULT_BASE_URL = config.OLLAMA_BASE_URL
+OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", str(config.OLLAMA_TIMEOUT_SECONDS)))
+OLLAMA_MAX_PREDICT = 512
+OLLAMA_TEMPERATURE = 0.15
+OLLAMA_STOP = ("Observation:", "<|im_end|>", "\n\nUser:")
 logger = logging.getLogger("jarvis.ai")
 
 
@@ -123,6 +126,16 @@ def _ollama_chat_url(base_url):
     if normalized.endswith("/v1"):
         return f"{normalized}/chat/completions"
     return f"{normalized}/api/chat"
+
+
+def _ollama_inference_options(max_predict=OLLAMA_MAX_PREDICT, temperature=OLLAMA_TEMPERATURE):
+    """Keep compact-model replies deterministic with enough room for tool JSON."""
+    return {
+        "num_predict": max(384, min(int(max_predict), OLLAMA_MAX_PREDICT)),
+        "temperature": max(0.1, min(float(temperature), 0.2)),
+        "top_p": 0.9,
+        "stop": list(OLLAMA_STOP),
+    }
 
 
 def _looks_like_open_question(prompt):
@@ -1128,8 +1141,8 @@ def chat_ollama(
     *,
     tools=None,
     model=None,
-    max_predict=512,
-    temperature=0.2,
+    max_predict=OLLAMA_MAX_PREDICT,
+    temperature=OLLAMA_TEMPERATURE,
     think=False,
 ):
     default_model, base_url = _ollama_settings()
@@ -1143,24 +1156,22 @@ def chat_ollama(
     if tools:
         payload["tools"] = list(tools)
 
+    inference_options = _ollama_inference_options(max_predict, temperature)
     if url.endswith("/chat/completions"):
         payload.update(
             {
-                "max_tokens": max_predict,
-                "temperature": temperature,
-                "top_p": 0.9,
+                "max_tokens": inference_options["num_predict"],
+                "temperature": inference_options["temperature"],
+                "top_p": inference_options["top_p"],
+                "stop": inference_options["stop"],
             }
         )
     else:
         payload.update(
             {
-                "think": bool(think),
+                "think": bool(think) and model != config.OLLAMA_MODEL,
                 "keep_alive": "5m",
-                "options": {
-                    "num_predict": max_predict,
-                    "temperature": temperature,
-                    "top_p": 0.9,
-                },
+                "options": inference_options,
             }
         )
 
@@ -1193,8 +1204,8 @@ def ask_ollama(
     images=None,
     system_prompt=None,
     model=None,
-    max_predict=512,
-    temperature=0.2,
+    max_predict=OLLAMA_MAX_PREDICT,
+    temperature=OLLAMA_TEMPERATURE,
     tools=None,
     think=False,
     return_full_response=False,
@@ -1284,8 +1295,9 @@ class AIBrain:
 
         # Détection automatique du type de backend
         if requested_type == "auto":
-            is_loopback = urlsplit(self.base_url).hostname in {"localhost", "127.0.0.1", "::1"}
-            if "/v1" in self.base_url or "openai.com" in self.base_url or (self.api_key and not is_loopback):
+            endpoint = urlsplit(self.base_url)
+            is_ollama = endpoint.hostname in {"localhost", "127.0.0.1", "::1"} or endpoint.port == 11434
+            if "/v1" in self.base_url or "openai.com" in self.base_url or (self.api_key and not is_ollama):
                 self.api_type = "openai"
             else:
                 self.api_type = "ollama"
@@ -1379,14 +1391,14 @@ class AIBrain:
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
-        temperature: float = 0.2,
+        temperature: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Exécute un tour de conversation avec support universel du Tool Calling.
 
         Args:
             messages: Historique des messages au format [{"role": "...", "content": "..."}].
             tools: Schémas JSON des outils disponibles au format OpenAI/Ollama.
-            temperature: Température d'échantillonnage (0.2 par défaut pour le raisonnement logique).
+            temperature: Température d'échantillonnage (0.15 pour Ollama, 0.2 pour OpenAI).
 
         Returns:
             Dict[str, Any] normalisé :
@@ -1397,25 +1409,24 @@ class AIBrain:
             }
         """
         if self.api_type == "openai":
-            return self._chat_openai(messages=messages, tools=tools, temperature=temperature)
-        return self._chat_ollama(messages=messages, tools=tools, temperature=temperature)
+            return self._chat_openai(messages=messages, tools=tools, temperature=0.2 if temperature is None else temperature)
+        return self._chat_ollama(
+            messages=messages, tools=tools,
+            temperature=OLLAMA_TEMPERATURE if temperature is None else temperature,
+        )
 
     def _chat_ollama(
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
-        temperature: float = 0.2,
+        temperature: float = OLLAMA_TEMPERATURE,
     ) -> Dict[str, Any]:
         endpoint = f"{self.base_url}/api/chat"
         payload: Dict[str, Any] = {
             "model": self.model,
             "messages": list(messages),
             "stream": False,
-            "options": {
-                "num_predict": 512,
-                "temperature": temperature,
-                "top_p": 0.9,
-            },
+            "options": _ollama_inference_options(temperature=temperature),
         }
         if tools:
             payload["tools"] = list(tools)

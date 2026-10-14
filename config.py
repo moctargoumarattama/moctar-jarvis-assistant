@@ -274,9 +274,13 @@ SOFT_WAKE_DUPLICATE_SECONDS = float(os.getenv("SOFT_WAKE_DUPLICATE_SECONDS", "8"
 SOFT_WAKE_MIN_CONFIDENCE = float(os.getenv("SOFT_WAKE_MIN_CONFIDENCE", "0.88"))
 VOICE_COMMAND_DEBOUNCE_SECONDS = float(os.getenv("VOICE_COMMAND_DEBOUNCE_SECONDS", "5"))
 
+OLLAMA_MODEL = "qwen2.5:1.5b"
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_TIMEOUT_SECONDS = 120.0
+
 AI_SETTINGS = {
-    "default_model": os.getenv("OLLAMA_MODEL", "qwen3:8b").strip() or "qwen3:8b",
-    "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip() or "http://localhost:11434",
+    "default_model": os.getenv("OLLAMA_MODEL", OLLAMA_MODEL).strip() or OLLAMA_MODEL,
+    "base_url": os.getenv("OLLAMA_BASE_URL", OLLAMA_BASE_URL).strip() or OLLAMA_BASE_URL,
     "enable_general_ai": _optional_bool_env("MOCTAR_ENABLE_GENERAL_AI", True),
     "agent_enabled": _optional_bool_env("MOCTAR_AGENT_ENABLED", True),
     "agent_max_steps": max(1, min(_optional_int_env("OLLAMA_AGENT_MAX_STEPS", 5), 10)),

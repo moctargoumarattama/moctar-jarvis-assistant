@@ -42,7 +42,7 @@ class JarvisHeadlessBridgeTests(unittest.TestCase):
         self.assertTrue(self.bridge.active_session_id.startswith("session_web_"))
 
     def test_get_status_returns_required_fields(self):
-        with patch("ai_brain.get_ai_status", return_value={"online": True, "model": "qwen3:8b", "base_url": "http://localhost:11434"}):
+        with patch("ai_brain.get_ai_status", return_value={"online": True, "model": "qwen2.5:1.5b", "base_url": "http://localhost:11434"}):
             status = self.bridge.get_status()
 
         self.assertIn("status", status)

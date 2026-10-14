@@ -598,7 +598,7 @@
         </div>
       </div>
       <div class="jarvis-header-badges">
-        <span class="jarvis-model-badge" id="jarvis-model-badge"><span class="led"></span> qwen3:8b @ Ollama</span>
+        <span class="jarvis-model-badge" id="jarvis-model-badge"><span class="led"></span> qwen2.5:1.5b @ Ollama</span>
         <span class="jarvis-tools-badge" id="jarvis-tools-badge">46 outils ReAct</span>
         <button type="button" class="jarvis-btn-icon" id="jarvis-clear-btn" title="Vider l'historique">
           <svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
@@ -1550,7 +1550,7 @@
               }
             }
             if ($('jarvis-model-badge')) {
-              set('jarvis-model-badge', (data.model || 'qwen3:8b') + ' @ Ollama');
+              set('jarvis-model-badge', (data.model || 'qwen2.5:1.5b') + ' @ Ollama');
             }
             if ($('jarvis-tools-badge')) {
               set('jarvis-tools-badge', (data.tools_count || 46) + ' outils ReAct');

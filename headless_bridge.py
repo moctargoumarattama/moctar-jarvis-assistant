@@ -208,7 +208,7 @@ class JarvisHeadlessBridge:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Inférence IA locale Ollama
-        self.model = model or config.AI_SETTINGS.get("default_model", "qwen3:8b")
+        self.model = model or config.AI_SETTINGS.get("default_model", config.OLLAMA_MODEL)
         self.base_url = base_url or config.AI_SETTINGS.get("base_url", "http://localhost:11434")
         self.brain = AIBrain(model=self.model, base_url=self.base_url)
 
