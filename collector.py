@@ -208,11 +208,17 @@ class Collector:
         swap = psutil.swap_memory()
         temperature = None
         try:
-            sensors = psutil.sensors_temperatures()
-            cpu_readings = [reading.current for name, readings in sensors.items() if any(part in name.lower() for part in ("coretemp", "k10temp", "cpu", "zenpower")) for reading in readings if reading.current is not None and -20 <= reading.current <= 150]
+            sensors = psutil.sensors_temperatures() if hasattr(psutil, "sensors_temperatures") else {}
+            cpu_readings = [
+                reading.current
+                for name, readings in (sensors or {}).items()
+                if any(part in name.lower() for part in ("coretemp", "k10temp", "cpu", "zenpower"))
+                for reading in readings
+                if reading.current is not None and -20 <= reading.current <= 150
+            ]
             if cpu_readings:
                 temperature = round(max(cpu_readings), 1)
-        except (AttributeError, OSError, RuntimeError):
+        except Exception:
             pass
         return {
             "cpu": {"percent": psutil.cpu_percent(interval=None), "cores": psutil.cpu_percent(interval=None, percpu=True)},

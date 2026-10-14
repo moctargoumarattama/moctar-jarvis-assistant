@@ -8,7 +8,9 @@ contrôle du volume sonore, lancement et fermeture d'applications, ouverture de 
 from datetime import datetime
 import locale
 import os
+from pathlib import Path
 import subprocess
+import sys
 from typing import Any, Dict, Optional
 
 try:
@@ -512,6 +514,13 @@ def open_folder(target: str) -> Dict[str, Any]:
     folder_path = config.FOLDER_PATHS.get(normalized_target)
 
     if not folder_path:
+        candidate = Path(target)
+        if not candidate.is_absolute():
+            candidate = config.APP_ROOT / target
+        if candidate.is_dir():
+            folder_path = candidate
+
+    if not folder_path:
         return format_action_result(
             action=action_name,
             success=False,
@@ -530,7 +539,12 @@ def open_folder(target: str) -> Dict[str, Any]:
         )
 
     try:
-        os.startfile(str(folder_path))
+        if hasattr(os, "startfile"):
+            os.startfile(str(folder_path))
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(folder_path)])
+        else:
+            subprocess.Popen(["xdg-open", str(folder_path)])
         return format_action_result(
             action=action_name,
             success=True,

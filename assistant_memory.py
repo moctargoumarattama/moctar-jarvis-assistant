@@ -62,6 +62,7 @@ class AssistantMemory:
         """Crée une connexion SQLite fermée automatiquement à la fin du bloc."""
         conn = sqlite3.connect(str(self.db_path), timeout=15.0)
         try:
+            conn.execute("PRAGMA busy_timeout = 5000;")
             yield conn
         finally:
             conn.close()
@@ -69,6 +70,11 @@ class AssistantMemory:
     def _init_db(self) -> None:
         """Initialise le schéma de base de données SQLite de façon idempotente."""
         with self._get_connection() as conn:
+            try:
+                conn.execute("PRAGMA journal_mode = WAL;")
+                conn.execute("PRAGMA synchronous = NORMAL;")
+            except Exception as pragma_err:
+                logger.debug("Pragma journal_mode ignore: %s", pragma_err)
             cursor = conn.cursor()
             # Table 1 : Faits et connaissances persistantes à long terme
             cursor.execute(

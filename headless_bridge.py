@@ -14,6 +14,7 @@ from datetime import datetime
 import json
 import logging
 from pathlib import Path
+import threading
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
@@ -153,6 +154,7 @@ class JarvisHeadlessBridge:
         )
 
         self.active_session_id = f"session_web_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:4]}"
+        self._lock = threading.Lock()
         logger.info(
             "JarvisHeadlessBridge initialisé (Modèle: %s @ %s, DB: %s, Outils: %d)",
             self.model,
@@ -194,94 +196,95 @@ class JarvisHeadlessBridge:
                 "source": source,
             }
 
-        thought_chain: List[str] = []
-        tools_used: List[Dict[str, Any]] = []
+        with self._lock:
+            thought_chain: List[str] = []
+            tools_used: List[Dict[str, Any]] = []
 
-        # Interception des pensées intermédiaires du LLM
-        orig_call_llm = self.agent._call_llm
+            # Interception des pensées intermédiaires du LLM
+            orig_call_llm = self.agent._call_llm
 
-        def hooked_call_llm(messages, tools=None, think=None):
-            resp = orig_call_llm(messages, tools=tools, think=think)
-            content = resp.get("content") or ""
-            if content.strip():
-                thought_chain.append(content.strip())
-            return resp
+            def hooked_call_llm(messages, tools=None, think=None):
+                resp = orig_call_llm(messages, tools=tools, think=think)
+                content = resp.get("content") or ""
+                if content.strip():
+                    thought_chain.append(content.strip())
+                return resp
 
-        # Interception des outils appelés et de leurs résultats
-        orig_execute_tool = actions.execute_tool
+            # Interception des outils appelés et de leurs résultats
+            orig_execute_tool = actions.execute_tool
 
-        def hooked_execute_tool(tool_name, arguments=None):
-            res = orig_execute_tool(tool_name, arguments)
-            tools_used.append({
-                "tool": tool_name,
-                "arguments": arguments or {},
-                "success": bool(res.get("success", False)),
-                "message": res.get("message", ""),
-                "data": res.get("data"),
-                "error": res.get("error"),
-            })
-            return res
+            def hooked_execute_tool(tool_name, arguments=None):
+                res = orig_execute_tool(tool_name, arguments)
+                tools_used.append({
+                    "tool": tool_name,
+                    "arguments": arguments or {},
+                    "success": bool(res.get("success", False)),
+                    "message": res.get("message", ""),
+                    "data": res.get("data"),
+                    "error": res.get("error"),
+                })
+                return res
 
-        import agent_core
-        orig_agent_execute_tool = getattr(agent_core, "execute_tool", actions.execute_tool)
-        agent_core.execute_tool = hooked_execute_tool
-        actions.execute_tool = hooked_execute_tool
+            import agent_core
+            orig_agent_execute_tool = getattr(agent_core, "execute_tool", actions.execute_tool)
+            agent_core.execute_tool = hooked_execute_tool
+            actions.execute_tool = hooked_execute_tool
 
-        def local_fallback() -> str:
-            from intent_engine import detect_intent
-            detected = detect_intent(user_input)
-            intent = detected.get("intent")
-            if intent == "time":
-                from actions.system_actions import get_time_response
-                res = get_time_response()
-                return res.get("message") if isinstance(res, dict) else str(res)
-            elif intent == "date":
-                from actions.system_actions import get_date_response
-                res = get_date_response()
-                return res.get("message") if isinstance(res, dict) else str(res)
-            elif intent in {"greetings", "hello"}:
-                return "Bonjour monsieur. Je suis prêt. En quoi puis-je vous aider ?"
-            elif intent and intent in actions.TOOL_DISPATCHER:
-                tool_res = actions.execute_tool(intent, detected.get("slots") or {})
-                return tool_res.get("message") if isinstance(tool_res, dict) else str(tool_res)
-            return "Bonjour monsieur. Je suis prêt et à votre écoute."
+            def local_fallback() -> str:
+                from intent_engine import detect_intent
+                detected = detect_intent(user_input)
+                intent = detected.get("intent")
+                if intent == "time":
+                    from actions.system_actions import get_time_response
+                    res = get_time_response()
+                    return res.get("message") if isinstance(res, dict) else str(res)
+                elif intent == "date":
+                    from actions.system_actions import get_date_response
+                    res = get_date_response()
+                    return res.get("message") if isinstance(res, dict) else str(res)
+                elif intent in {"greetings", "hello"}:
+                    return "Bonjour monsieur. Je suis prêt. En quoi puis-je vous aider ?"
+                elif intent and intent in actions.TOOL_DISPATCHER:
+                    tool_res = actions.execute_tool(intent, detected.get("slots") or {})
+                    return tool_res.get("message") if isinstance(tool_res, dict) else str(tool_res)
+                return "Bonjour monsieur. Je suis prêt et à votre écoute."
 
-        status = "success"
-        try:
-            targeted_tools = select_tools_for_prompt(user_input)
-            agent_result = self.agent.run(
-                prompt=user_input,
-                session_id=current_session,
-                tool_names=targeted_tools,
-                fallback=local_fallback,
-            )
-            if hasattr(agent_result, "response"):
-                reply = agent_result.response
-            elif isinstance(agent_result, dict):
-                reply = agent_result.get("response") or agent_result.get("message") or str(agent_result)
-            else:
-                reply = str(agent_result or "").strip()
+            status = "success"
+            try:
+                targeted_tools = select_tools_for_prompt(user_input)
+                agent_result = self.agent.run(
+                    prompt=user_input,
+                    session_id=current_session,
+                    tool_names=targeted_tools,
+                    fallback=local_fallback,
+                )
+                if hasattr(agent_result, "response"):
+                    reply = agent_result.response
+                elif isinstance(agent_result, dict):
+                    reply = agent_result.get("response") or agent_result.get("message") or str(agent_result)
+                else:
+                    reply = str(agent_result or "").strip()
 
-            if not reply:
-                reply = local_fallback()
-        except Exception as exc:
-            logger.exception("Erreur exécution agent headless : %s", exc)
-            reply = f"Erreur lors de l'exécution de la requête : {exc}"
-            status = "error"
-        finally:
-            self.agent._call_llm = orig_call_llm
-            actions.execute_tool = orig_execute_tool
-            agent_core.execute_tool = orig_agent_execute_tool
+                if not reply:
+                    reply = local_fallback()
+            except Exception as exc:
+                logger.exception("Erreur exécution agent headless : %s", exc)
+                reply = f"Erreur lors de l'exécution de la requête : {exc}"
+                status = "error"
+            finally:
+                self.agent._call_llm = orig_call_llm
+                actions.execute_tool = orig_execute_tool
+                agent_core.execute_tool = orig_agent_execute_tool
 
-        return {
-            "status": status,
-            "reply": reply,
-            "thought_chain": thought_chain,
-            "tools_used": tools_used,
-            "timestamp": timestamp,
-            "session_id": current_session,
-            "source": source,
-        }
+            return {
+                "status": status,
+                "reply": reply,
+                "thought_chain": thought_chain,
+                "tools_used": tools_used,
+                "timestamp": timestamp,
+                "session_id": current_session,
+                "source": source,
+            }
 
     async def execute_prompt_async(
         self,

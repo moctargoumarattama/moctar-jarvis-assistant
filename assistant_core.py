@@ -117,7 +117,11 @@ class AssistantCore:
         }:
             return response
 
-        if isinstance(response, dict):
+        if hasattr(response, "response"):
+            response = getattr(response, "response")
+        elif hasattr(response, "message"):
+            response = getattr(response, "message")
+        elif isinstance(response, dict):
             response = response.get("message") or response.get("response") or str(response)
 
         text = str(response or "").strip()

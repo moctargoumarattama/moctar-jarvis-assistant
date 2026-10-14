@@ -1,7 +1,8 @@
 import csv
 import os
-import subprocess
 from pathlib import Path
+import subprocess
+import sys
 
 import config
 
@@ -33,7 +34,12 @@ class ProjectAssistant:
             return self.open_project_in_vscode(project_key)
 
         try:
-            os.startfile(str(project.path))
+            if hasattr(os, "startfile"):
+                os.startfile(str(project.path))
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(project.path)])
+            else:
+                subprocess.Popen(["xdg-open", str(project.path)])
             return f"J'ouvre le projet {project.label}."
         except Exception as exc:
             return f"Impossible d'ouvrir le projet {project.label} : {exc}"
@@ -48,10 +54,13 @@ class ProjectAssistant:
         self._set_current_project(project.key)
 
         try:
-            subprocess.Popen(
-                ["cmd", "/c", "start", "", "code", str(project.path)],
-                shell=False,
-            )
+            if os.name == "nt":
+                subprocess.Popen(
+                    ["cmd", "/c", "start", "", "code", str(project.path)],
+                    shell=False,
+                )
+            else:
+                subprocess.Popen(["code", str(project.path)])
             return f"J'ouvre {project.label} dans VS Code."
         except Exception as exc:
             return f"Impossible d'ouvrir VS Code pour {project.label} : {exc}"

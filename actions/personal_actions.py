@@ -35,7 +35,18 @@ class PersonalAssistant:
             return []
 
     def _save_json(self, path, data):
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=True), encoding="utf-8")
+        temp_file = path.with_suffix(f".tmp_{datetime.now().strftime('%Y%m%d%H%M%S%f')}")
+        try:
+            temp_file.write_text(json.dumps(data, indent=2, ensure_ascii=True), encoding="utf-8")
+            temp_file.replace(path)
+        except Exception:
+            # Fallback direct en cas de verrou de système de fichiers sur Windows
+            path.write_text(json.dumps(data, indent=2, ensure_ascii=True), encoding="utf-8")
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except Exception:
+                    pass
 
     def _slugify(self, text):
         slug = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower()).strip("-")
