@@ -101,9 +101,45 @@ class AssistantMemory:
                 """
             )
 
+            # Table 3 : Métadonnées et thèmes des sessions de conversation
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS conversation_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    message_count INTEGER DEFAULT 0,
+                    summary TEXT
+                )
+                """
+            )
+
             # Index d'optimisation pour requêtes rapides
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_memories_cat_key ON memories(category, key)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_conv_session ON conversation_history(session_id, timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_conv_sessions_updated ON conversation_sessions(updated_at DESC)")
+
+            # Synchronisation automatique idempotente pour sessions existantes
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO conversation_sessions (session_id, title, created_at, updated_at, message_count)
+                SELECT
+                    session_id,
+                    COALESCE(
+                        NULLIF(
+                            (SELECT substr(content, 1, 60) FROM conversation_history WHERE session_id = h.session_id AND role = 'user' ORDER BY id ASC LIMIT 1),
+                            ''
+                        ),
+                        'Session ' || substr(session_id, 1, 8)
+                    ) AS title,
+                    MIN(timestamp) AS created_at,
+                    MAX(timestamp) AS updated_at,
+                    COUNT(*) AS message_count
+                FROM conversation_history h
+                GROUP BY session_id
+                """
+            )
             conn.commit()
 
     # ==========================================================================
@@ -358,6 +394,27 @@ class AssistantMemory:
                     """,
                     (session_id, now_iso, role, content or "", tool_calls_str, tool_call_id),
                 )
+
+                # Mise à jour ou création de la session associée
+                title_candidate = (content or "").strip().replace("\n", " ")[:60] if role == "user" and content else ""
+                default_title = title_candidate or f"Discussion du {now_iso[:10]}"
+
+                cursor.execute(
+                    """
+                    INSERT INTO conversation_sessions (session_id, title, created_at, updated_at, message_count)
+                    VALUES (?, ?, ?, ?, 1)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        updated_at = excluded.updated_at,
+                        message_count = conversation_sessions.message_count + 1,
+                        title = CASE 
+                            WHEN (conversation_sessions.title LIKE 'Discussion du%' OR conversation_sessions.title LIKE 'Session %' OR conversation_sessions.title LIKE 'Nouvelle session%') 
+                                 AND excluded.title != '' AND excluded.title NOT LIKE 'Discussion du%'
+                            THEN excluded.title 
+                            ELSE conversation_sessions.title 
+                        END
+                    """,
+                    (session_id, default_title, now_iso, now_iso),
+                )
                 conn.commit()
         except Exception as exc:
             logger.error("Erreur lors de l'enregistrement dans conversation_history : %s", exc)
@@ -445,10 +502,239 @@ class AssistantMemory:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM conversation_history WHERE session_id = ?", (session_id,))
+                cursor.execute("DELETE FROM conversation_sessions WHERE session_id = ?", (session_id,))
                 conn.commit()
                 logger.info("Historique de session '%s' réinitialisé.", session_id)
         except Exception as exc:
             logger.error("Erreur lors de l'effacement de session : %s", exc)
+
+    def create_or_update_session(
+        self,
+        session_id: str,
+        title: Optional[str] = None,
+        summary: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Crée explicitement ou met à jour les métadonnées d'une session de conversation."""
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        clean_title = (title or "").strip() or f"Session {session_id[:8]}"
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO conversation_sessions (session_id, title, created_at, updated_at, message_count, summary)
+                    VALUES (?, ?, ?, ?, 0, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        title = COALESCE(NULLIF(excluded.title, ''), conversation_sessions.title),
+                        updated_at = excluded.updated_at,
+                        summary = COALESCE(excluded.summary, conversation_sessions.summary)
+                    """,
+                    (session_id, clean_title, now_iso, now_iso, summary),
+                )
+                conn.commit()
+                cursor.execute(
+                    "SELECT session_id, title, created_at, updated_at, message_count, summary FROM conversation_sessions WHERE session_id = ?",
+                    (session_id,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "session_id": row[0],
+                        "title": row[1],
+                        "created_at": row[2],
+                        "updated_at": row[3],
+                        "message_count": row[4],
+                        "summary": row[5],
+                    }
+        except Exception as exc:
+            logger.error("Erreur lors de la création/mise à jour de session '%s' : %s", session_id, exc)
+        return {
+            "session_id": session_id,
+            "title": clean_title,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "message_count": 0,
+            "summary": summary,
+        }
+
+    def list_sessions(
+        self,
+        limit: int = 50,
+        search_query: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Liste les sessions de conversation récentes avec filtrage optionnel par recherche."""
+        limit = max(1, min(int(limit), 200))
+        sessions: List[Dict[str, Any]] = []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if search_query and search_query.strip():
+                    term = f"%{search_query.strip().lower()}%"
+                    cursor.execute(
+                        """
+                        SELECT s.session_id, s.title, s.created_at, s.updated_at, s.message_count, s.summary,
+                               (SELECT content FROM conversation_history WHERE session_id = s.session_id AND role IN ('user', 'assistant') ORDER BY id DESC LIMIT 1) AS last_message
+                        FROM conversation_sessions s
+                        WHERE LOWER(s.title) LIKE ? 
+                           OR s.session_id IN (
+                               SELECT DISTINCT session_id FROM conversation_history 
+                               WHERE LOWER(content) LIKE ?
+                           )
+                        ORDER BY s.updated_at DESC
+                        LIMIT ?
+                        """,
+                        (term, term, limit),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT s.session_id, s.title, s.created_at, s.updated_at, s.message_count, s.summary,
+                               (SELECT content FROM conversation_history WHERE session_id = s.session_id AND role IN ('user', 'assistant') ORDER BY id DESC LIMIT 1) AS last_message
+                        FROM conversation_sessions s
+                        ORDER BY s.updated_at DESC
+                        LIMIT ?
+                        """,
+                        (limit,),
+                    )
+                for row in cursor.fetchall():
+                    sessions.append({
+                        "session_id": row[0],
+                        "title": row[1],
+                        "created_at": row[2],
+                        "updated_at": row[3],
+                        "message_count": row[4],
+                        "summary": row[5],
+                        "last_message": row[6] or "",
+                    })
+        except Exception as exc:
+            logger.error("Erreur lors de la récupération des sessions : %s", exc)
+        return sessions
+
+    def get_session_messages(
+        self,
+        session_id: str,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Récupère l'intégralité chronologique des échanges pour une session donnée."""
+        messages: List[Dict[str, Any]] = []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if limit:
+                    cursor.execute(
+                        """
+                        SELECT id, session_id, timestamp, role, content, tool_calls, tool_call_id
+                        FROM conversation_history
+                        WHERE session_id = ?
+                        ORDER BY id DESC
+                        LIMIT ?
+                        """,
+                        (session_id, int(limit)),
+                    )
+                    rows = cursor.fetchall()
+                    rows.reverse()
+                else:
+                    cursor.execute(
+                        """
+                        SELECT id, session_id, timestamp, role, content, tool_calls, tool_call_id
+                        FROM conversation_history
+                        WHERE session_id = ?
+                        ORDER BY id ASC
+                        """,
+                        (session_id,),
+                    )
+                    rows = cursor.fetchall()
+
+                for r in rows:
+                    tool_calls = None
+                    if r[5]:
+                        try:
+                            tool_calls = json.loads(r[5])
+                        except Exception:
+                            tool_calls = r[5]
+                    messages.append({
+                        "id": r[0],
+                        "session_id": r[1],
+                        "timestamp": r[2],
+                        "role": r[3],
+                        "content": r[4] or "",
+                        "tool_calls": tool_calls,
+                        "tool_call_id": r[6],
+                    })
+        except Exception as exc:
+            logger.error("Erreur lors de la lecture des messages de la session '%s' : %s", session_id, exc)
+        return messages
+
+    def update_session_title(self, session_id: str, title: str) -> bool:
+        """Modifie manuellement le titre ou sujet d'une session."""
+        clean_title = title.strip()
+        if not clean_title:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE conversation_sessions SET title = ? WHERE session_id = ?",
+                    (clean_title, session_id),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as exc:
+            logger.error("Erreur mise à jour titre de session '%s' : %s", session_id, exc)
+            return False
+
+    def delete_session(self, session_id: str) -> bool:
+        """Supprime définitivement une session et tous les messages associés."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM conversation_history WHERE session_id = ?", (session_id,))
+                cursor.execute("DELETE FROM conversation_sessions WHERE session_id = ?", (session_id,))
+                conn.commit()
+                logger.info("Session '%s' et son historique supprimés.", session_id)
+                return True
+        except Exception as exc:
+            logger.error("Erreur suppression session '%s' : %s", session_id, exc)
+            return False
+
+    def search_conversation_history(
+        self,
+        query: str,
+        limit: int = 30,
+    ) -> List[Dict[str, Any]]:
+        """Recherche dans tout l'historique des messages pour retrouver des échanges passés."""
+        clean_query = query.strip()
+        if not clean_query:
+            return []
+        limit = max(1, min(int(limit), 100))
+        results: List[Dict[str, Any]] = []
+        term = f"%{clean_query.lower()}%"
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT h.id, h.session_id, h.timestamp, h.role, h.content, s.title
+                    FROM conversation_history h
+                    LEFT JOIN conversation_sessions s ON h.session_id = s.session_id
+                    WHERE LOWER(h.content) LIKE ?
+                    ORDER BY h.id DESC
+                    LIMIT ?
+                    """,
+                    (term, limit),
+                )
+                for r in cursor.fetchall():
+                    results.append({
+                        "id": r[0],
+                        "session_id": r[1],
+                        "timestamp": r[2],
+                        "role": r[3],
+                        "content": r[4] or "",
+                        "session_title": r[5] or f"Session {r[1][:8]}",
+                    })
+        except Exception as exc:
+            logger.error("Erreur recherche historique de conversation : %s", exc)
+        return results
 
 
 # ==============================================================================

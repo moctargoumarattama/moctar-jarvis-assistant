@@ -302,5 +302,65 @@ class MainJarvisRuntimeTests(unittest.TestCase):
         self.assertFalse(wake_word_simple.should_activate_by_voice())
 
 
+    def test_listen_job_watchdog_timeout_aborts_and_releases_mic(self):
+        alive_thread = Mock()
+        alive_thread.is_alive.return_value = True
+        job = {
+            "result": None,
+            "done": False,
+            "cancelled": False,
+            "started_at": 10.0,
+            "thread": alive_thread,
+        }
+        state = {"listen_job": job}
+
+        with patch("time.monotonic", return_value=10.0 + main_jarvis.LISTEN_SAFETY_TIMEOUT + 1.0), \
+             patch("main_jarvis.release_command_microphone") as release_mic:
+            finished = main_jarvis.get_finished_listen_job(state)
+
+        self.assertIsNotNone(finished)
+        self.assertTrue(finished.get("timeout"))
+        self.assertTrue(job["cancelled"])
+        self.assertIsNone(state["listen_job"])
+        release_mic.assert_called_once_with(resume_listener=False)
+
+    def test_setup_runtime_connects_listen_cancelled(self):
+        fake_app = Mock()
+        fake_ui = Mock()
+        fake_signal = Mock()
+        cancel_signal = Mock()
+        fake_ui.listen_requested = fake_signal
+        fake_ui.manual_command_requested = Mock()
+        fake_ui.reset_requested = Mock()
+        fake_ui.listen_cancelled = cancel_signal
+
+        with patch("main_jarvis.run_ui", return_value=(fake_app, fake_ui)), \
+             patch("main_jarvis.pyttsx3.init", return_value=Mock()), \
+             patch("main_jarvis.AssistantCore", return_value=Mock()), \
+             patch("main_jarvis.start_soft_wake_listener"):
+            _app, _ui, _engine, _assistant, state = main_jarvis.setup_runtime()
+
+        cancel_signal.connect.assert_called_once()
+        cancel_handler = cancel_signal.connect.call_args.args[0]
+
+        # Simulate user cancelling while a listen job is active
+        mock_job = {"cancelled": False}
+        state["listen_job"] = mock_job
+        state["should_listen"] = True
+        state["runtime_phase"] = main_jarvis.RUNTIME_LISTENING
+
+        with patch("main_jarvis.release_command_microphone") as release_mic, \
+             patch("main_jarvis._set_listening_popup") as set_popup:
+            cancel_handler()
+
+        self.assertTrue(mock_job["cancelled"])
+        self.assertIsNone(state["listen_job"])
+        self.assertFalse(state["should_listen"])
+        self.assertEqual(main_jarvis.RUNTIME_IDLE, state["runtime_phase"])
+        release_mic.assert_called_once_with(resume_listener=False)
+        set_popup.assert_called_once_with(fake_ui, False)
+        fake_ui.set_mode.assert_called_with("idle")
+
+
 if __name__ == "__main__":
     unittest.main()

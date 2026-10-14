@@ -252,6 +252,7 @@ def build_default_registry(assistant):
     registry.register("energy_audit_template", "energy", assistant._handle_energy_plugin)
 
     registry.register("open_scheduler", "personal", assistant._handle_open_scheduler)
+    registry.register("open_history", "personal", assistant._handle_open_history)
 
     registry.register(
         "iot_status",

@@ -39,7 +39,9 @@ from wake_word_simple import (
 )
 
 
-IDLE_SLEEP_SECONDS = 0.15
+IDLE_SLEEP_SECONDS = 0.02
+BACKGROUND_POLL_INTERVAL = 8.0
+LISTEN_SAFETY_TIMEOUT = 7.5
 RUNTIME_IDLE = "IDLE"
 RUNTIME_LISTENING = "LISTENING"
 RUNTIME_PROCESSING = "PROCESSING"
@@ -338,6 +340,47 @@ def setup_runtime():
             logger.exception("Failed to open scheduler UI from button")
 
     ui.scheduler_requested.connect(open_scheduler_from_ui)
+
+    def open_history_from_ui():
+        try:
+            from conversation_history_ui import open_conversation_history
+            active_id = getattr(assistant, "get_active_session_id", lambda: "default")()
+
+            def on_resume(session_id):
+                if hasattr(assistant, "set_active_session"):
+                    assistant.set_active_session(session_id)
+                ui.update_text(f"Session '{session_id[:12]}' active. Tu peux continuer la discussion.")
+                app.processEvents()
+
+            open_conversation_history(
+                parent=None,
+                memory=getattr(assistant, "memory", None),
+                active_session_id=active_id,
+                on_resume_callback=on_resume,
+            )
+        except Exception as exc:
+            logger.exception("Failed to open conversation history UI from button")
+
+    if hasattr(ui, "history_requested"):
+        ui.history_requested.connect(open_history_from_ui)
+
+    def cancel_listen_from_ui():
+        logger.info("Listen cancelled by user from UI")
+        listen_job = state.get("listen_job")
+        if isinstance(listen_job, dict):
+            listen_job["cancelled"] = True
+        state["listen_job"] = None
+        state["should_listen"] = False
+        release_command_microphone(resume_listener=False)
+        _set_listening_popup(ui, False)
+        _set_runtime_phase(state, RUNTIME_IDLE)
+        ui.set_mode("idle")
+        ui.update_text("Écoute annulée.")
+        app.processEvents()
+
+    if hasattr(ui, "listen_cancelled"):
+        ui.listen_cancelled.connect(cancel_listen_from_ui)
+
     state["activate_listen"] = activate_listen
     ui.set_mode("idle")
     if config.ENABLE_SOFT_WAKE_WORD:
@@ -445,6 +488,7 @@ def start_listen_job(app, ui, state):
         "result": None,
         "done": False,
         "cancelled": False,
+        "started_at": time.monotonic(),
     }
 
     def _worker():
@@ -469,10 +513,23 @@ def get_finished_listen_job(state):
     if not job:
         return None
     thread = job.get("thread")
+    started_at = job.get("started_at", 0.0)
+
     if thread and thread.is_alive():
+        if started_at > 0 and (time.monotonic() - started_at) > LISTEN_SAFETY_TIMEOUT:
+            logger.warning(
+                "Listen job timed out after %.1fs. Forcing microphone release.",
+                LISTEN_SAFETY_TIMEOUT,
+            )
+            job["cancelled"] = True
+            state["listen_job"] = None
+            release_command_microphone(resume_listener=False)
+            return {"result": "", "cancelled": False, "timeout": True}
         return None
+
     state["listen_job"] = None
     if job.get("cancelled"):
+        release_command_microphone(resume_listener=False)
         return None
     return job
 
@@ -527,6 +584,7 @@ def resolve_next_command(app, ui, state):
 
 
 def run_loop(app, ui, engine, assistant, state):
+    last_bg_poll = 0.0
     while True:
         app.processEvents()
 
@@ -590,6 +648,34 @@ def run_loop(app, ui, engine, assistant, state):
                     assistant.resume_music_after_command()
                 continue
 
+            if result == "__OPEN_HISTORY__":
+                speak(engine, ui, app, "J'ouvre l'historique des conversations.", state=state)
+                try:
+                    from conversation_history_ui import open_conversation_history
+                    active_id = getattr(assistant, "get_active_session_id", lambda: "default")()
+
+                    def on_resume(session_id):
+                        if hasattr(assistant, "set_active_session"):
+                            assistant.set_active_session(session_id)
+                        ui.update_text(f"Session '{session_id[:12]}' active. Tu peux continuer la discussion.")
+                        app.processEvents()
+
+                    open_conversation_history(
+                        parent=None,
+                        memory=getattr(assistant, "memory", None),
+                        active_session_id=active_id,
+                        on_resume_callback=on_resume,
+                    )
+                except Exception as exc:
+                    logger.exception("Failed to open conversation history UI")
+                    speak(engine, ui, app, f"Impossible d'ouvrir l'historique : {exc}", state=state)
+                ui.set_mode("idle")
+                app.processEvents()
+                _set_listening_popup(ui, False)
+                if music_was_paused:
+                    assistant.resume_music_after_command()
+                continue
+
             spoken_result = format_assistant_message(result)
             speak(engine, ui, app, spoken_result, state=state)
             _set_listening_popup(ui, False)
@@ -610,14 +696,17 @@ def run_loop(app, ui, engine, assistant, state):
             time.sleep(IDLE_SLEEP_SECONDS)
             continue
 
-        try:
-            pending_messages = assistant.poll_background_messages()
-        except Exception as exc:
-            logger.exception("Background polling failed")
-            pending_messages = [f"Erreur de rappel : {exc}"]
+        now = time.monotonic()
+        if now - last_bg_poll >= BACKGROUND_POLL_INTERVAL:
+            last_bg_poll = now
+            try:
+                pending_messages = assistant.poll_background_messages()
+            except Exception as exc:
+                logger.exception("Background polling failed")
+                pending_messages = [f"Erreur de rappel : {exc}"]
 
-        for message in pending_messages:
-            speak(engine, ui, app, message, state=state)
+            for message in pending_messages:
+                speak(engine, ui, app, message, state=state)
 
         if not state["should_listen"] and not should_activate_by_voice():
             time.sleep(IDLE_SLEEP_SECONDS)

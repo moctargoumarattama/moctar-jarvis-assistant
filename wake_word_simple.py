@@ -585,11 +585,15 @@ def resume_soft_wake_listener():
     _pause_event.clear()
 
 
-def acquire_command_microphone(app=None):
+def acquire_command_microphone(app=None, timeout=2.5):
     pause_soft_wake_listener()
-    while not _microphone_lock.acquire(timeout=0.1):
+    start_time = time.monotonic()
+    while not _microphone_lock.acquire(timeout=0.08):
         if app is not None:
             app.processEvents()
+        if time.monotonic() - start_time > timeout:
+            logger.warning("Microphone acquire timed out after %.1fs", timeout)
+            break
 
 
 def release_command_microphone(*, resume_listener=True):

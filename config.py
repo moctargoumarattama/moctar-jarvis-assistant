@@ -234,11 +234,11 @@ PROJECTS = {
 
 MIC_SETTINGS = {
     "default_language": "fr-FR",
-    "timeout": int(os.getenv("JARVIS_MIC_TIMEOUT", "7")),
-    "phrase_limit": int(os.getenv("JARVIS_MIC_PHRASE_LIMIT", "10")),
-    "ambient_duration": float(os.getenv("JARVIS_MIC_AMBIENT_DURATION", "0.6")),
+    "timeout": int(os.getenv("JARVIS_MIC_TIMEOUT", "4")),
+    "phrase_limit": int(os.getenv("JARVIS_MIC_PHRASE_LIMIT", "7")),
+    "ambient_duration": float(os.getenv("JARVIS_MIC_AMBIENT_DURATION", "0.25")),
     "device_index": _optional_int_env("JARVIS_MIC_INDEX", 2),
-    "attempts": int(os.getenv("JARVIS_MIC_ATTEMPTS", "2")),
+    "attempts": int(os.getenv("JARVIS_MIC_ATTEMPTS", "1")),
     "calibration_interval": float(os.getenv("JARVIS_MIC_CALIBRATION_INTERVAL", "45")),
     "energy_threshold_ratio": float(os.getenv("JARVIS_MIC_ENERGY_RATIO", "1.15")),
     "pause_threshold": float(os.getenv("JARVIS_MIC_PAUSE_THRESHOLD", "0.8")),

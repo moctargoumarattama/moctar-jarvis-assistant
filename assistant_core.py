@@ -1,6 +1,8 @@
 import logging
 import re
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 import ai_brain
 import config
@@ -14,7 +16,7 @@ from actions import (
     system_actions,
     web_actions,
 )
-from assistant_memory import SessionMemory, UserMemoryStore
+from assistant_memory import AssistantMemory, SessionMemory, UserMemoryStore
 from assistant_plugins import build_default_registry
 from assistant_security import SecurityPolicy
 from intent_engine import detect_intent
@@ -97,7 +99,9 @@ class AssistantCore:
         self.user_memory = UserMemoryStore()
         self.local_brain = ai_brain.LocalBrain()
         self.registry = build_default_registry(self)
-        self.agent = AgentCore(self.registry, self.security)
+        self.memory = AssistantMemory()
+        self.agent = AgentCore(self.registry, self.security, memory=self.memory)
+        self.current_session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:6]}"
         self.pending_confirmation = None
         self.pending_music_request = False
         self.pending_followup = None
@@ -107,7 +111,7 @@ class AssistantCore:
 
     @staticmethod
     def _format_user_facing_response(response):
-        if response in {"__STOP__", "__OPEN_SCHEDULER__"}:
+        if response in {"__STOP__", "__OPEN_SCHEDULER__", "__OPEN_HISTORY__"}:
             return response
 
         text = (response or "").strip()
@@ -256,6 +260,48 @@ class AssistantCore:
     def _remember(self, intent, target, response):
         self.session_memory.add_turn(intent, target, response)
         self.user_memory.record_interaction(intent, target, response)
+        if hasattr(self, "memory") and self.memory:
+            try:
+                user_content = (target or "").strip() or intent
+                self.memory.add_message(self.current_session_id, role="user", content=user_content)
+                self.memory.add_message(self.current_session_id, role="assistant", content=str(response or ""))
+            except Exception as exc:
+                logger.warning("Erreur enregistrement interaction en mémoire SQLite : %s", exc)
+
+    def get_active_session_id(self) -> str:
+        """Renvoie l'identifiant de la session actuellement active."""
+        return self.current_session_id
+
+    def set_active_session(self, session_id: str) -> bool:
+        """Bascule la session active et recharge son contexte dans la mémoire court terme."""
+        if not hasattr(self, "memory") or not self.memory:
+            return False
+        clean_id = (session_id or "").strip()
+        if not clean_id:
+            return False
+
+        messages = self.memory.get_session_messages(clean_id)
+        self.current_session_id = clean_id
+        self.session_memory.clear()
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content")
+            if role in {"user", "assistant"} and content:
+                self.session_memory.add(role=role, content=content)
+        logger.info("Session active basculée sur '%s' avec %d messages rechargés.", clean_id, len(messages))
+        return True
+
+    def start_new_session(self, title: Optional[str] = None) -> str:
+        """Démarre une nouvelle session de conversation avec un identifiant unique."""
+        now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_id = f"session_{now_str}_{uuid4().hex[:6]}"
+        self.current_session_id = new_id
+        self.session_memory.clear()
+        if hasattr(self, "memory") and self.memory:
+            default_title = title or f"Nouvelle session ({datetime.now().strftime('%d/%m %H:%M')})"
+            self.memory.create_or_update_session(new_id, title=default_title)
+        logger.info("Nouvelle session de conversation démarrée : %s", new_id)
+        return new_id
 
     def expects_followup(self):
         return bool(self.pending_music_request or self.pending_followup)
@@ -266,6 +312,7 @@ class AssistantCore:
         self.pending_music_request = False
         self.pending_followup = None
         self.session_memory.clear()
+        self.start_new_session()
 
     def _begin_pending_followup(self, intent_data):
         raw = intent_data.get("raw") or intent_data.get("target", "")
@@ -915,3 +962,7 @@ class AssistantCore:
     def _handle_open_scheduler(self, _intent_data):
         """Voice command handler — signals UI to open the scheduler window."""
         return "__OPEN_SCHEDULER__"
+
+    def _handle_open_history(self, _intent_data):
+        """Voice command handler — signals UI to open the conversation history window."""
+        return "__OPEN_HISTORY__"

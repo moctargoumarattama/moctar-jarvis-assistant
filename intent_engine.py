@@ -718,6 +718,21 @@ def detect_intent(raw_text):
     ):
         return {"intent": "open_scheduler", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
 
+    if any(
+        token in text
+        for token in [
+            "historique",
+            "historique des conversations",
+            "ouvre l historique",
+            "ouvre historique",
+            "voir l historique",
+            "anciennes conversations",
+            "anciennes discussions",
+            "sujets de conversation",
+        ]
+    ):
+        return {"intent": "open_history", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
+
     if text.startswith("resume le fichier ") or text.startswith("resume fichier "):
         target = extract_after_prefix(text, ["resume le fichier ", "resume fichier "])
         return {"intent": "summarize_file", "target": target, "confidence": 95, "raw": raw_text, "slots": {}}

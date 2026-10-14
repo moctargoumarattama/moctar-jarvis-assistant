@@ -34,7 +34,7 @@ if PYQT_AVAILABLE:
 
             self.timer = QTimer()
             self.timer.timeout.connect(self.animate)
-            self.timer.start(25)
+            self.timer.start(33)
 
         def set_mode(self, mode):
             self.mode = mode
@@ -108,29 +108,80 @@ if PYQT_AVAILABLE:
 
 
     class ListeningPopup(QWidget):
-        """Small always-on-top listening indicator with animated wave rings."""
+        """Small always-on-top listening indicator with animated wave rings and one-click dismiss."""
+        cancel_requested = pyqtSignal()
+
         def __init__(self, parent=None):
             super().__init__(parent)
             self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
             self.setFixedSize(210, 210)
             self.setStyleSheet("background: #02070d; border: 2px solid #00ffb4; border-radius: 105px;")
+            self.setCursor(Qt.PointingHandCursor)
+            self.setToolTip("Écoute en cours - Cliquez pour annuler")
+
             self.core = JarvisCore()
             self.core.setMinimumSize(200, 200)
             self.core.set_mode("listening")
+            # Stopper le timer par défaut tant que la popup est masquée
+            if hasattr(self.core, "timer"):
+                self.core.timer.stop()
+            self.core.clicked.connect(self._on_dismiss)
+
             layout = QVBoxLayout(self)
             layout.setContentsMargins(4, 4, 4, 4)
             layout.addWidget(self.core)
 
+            # Petit bouton rond d'annulation en haut à droite
+            self.close_btn = QPushButton("✕", self)
+            self.close_btn.setGeometry(170, 14, 26, 26)
+            self.close_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(220, 38, 38, 0.7);
+                    color: #ffffff;
+                    border: 1px solid #ef4444;
+                    border-radius: 13px;
+                    font-size: 13px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: rgba(239, 68, 68, 0.95);
+                }
+            """)
+            self.close_btn.clicked.connect(self._on_dismiss)
+
+        def _on_dismiss(self):
+            self.cancel_requested.emit()
+            self.hide()
+
+        def mousePressEvent(self, event):
+            self._on_dismiss()
+            super().mousePressEvent(event)
+
+        def keyPressEvent(self, event):
+            if event.key() == Qt.Key_Escape:
+                self._on_dismiss()
+            else:
+                super().keyPressEvent(event)
+
         def show_for(self, parent):
             center = parent.frameGeometry().center()
             self.move(center.x() - self.width() // 2, center.y() - self.height() // 2)
+            if hasattr(self.core, "timer") and not self.core.timer.isActive():
+                self.core.timer.start(33)
             self.show()
             self.raise_()
+
+        def hide(self):
+            if hasattr(self.core, "timer") and self.core.timer.isActive():
+                self.core.timer.stop()
+            super().hide()
 
 
     class JarvisUI(QWidget):
         listen_requested = pyqtSignal()
+        listen_cancelled = pyqtSignal()
         scheduler_requested = pyqtSignal()
+        history_requested = pyqtSignal()
         ai_status_requested = pyqtSignal()
         manual_command_requested = pyqtSignal(str)
         reset_requested = pyqtSignal()
@@ -163,6 +214,7 @@ if PYQT_AVAILABLE:
             self.core.setMinimumSize(340, 340)
             self.core.clicked.connect(self.listen_requested.emit)
             self.listening_popup = ListeningPopup()
+            self.listening_popup.cancel_requested.connect(self.listen_cancelled.emit)
 
             self.label = QLabel("Clique sur le cœur pour parler")
             self.label.setAlignment(Qt.AlignCenter)
@@ -193,6 +245,25 @@ if PYQT_AVAILABLE:
                 }
             """)
             self.scheduler_btn.clicked.connect(self.scheduler_requested.emit)
+
+            self.history_btn = QPushButton("💬 Historique des conversations")
+            self.history_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #003a4a;
+                    color: #00eaff;
+                    border: 1px solid #00eaff;
+                    border-radius: 10px;
+                    padding: 10px 22px;
+                    font-size: 15px;
+                    font-weight: bold;
+                    letter-spacing: 1px;
+                }
+                QPushButton:hover {
+                    background-color: #005a6e;
+                    color: #ffffff;
+                }
+            """)
+            self.history_btn.clicked.connect(self.history_requested.emit)
 
             self.ai_status_btn = QPushButton()
             self.ai_status_btn.setStyleSheet("""
@@ -283,6 +354,7 @@ if PYQT_AVAILABLE:
             layout.addWidget(self.reset_btn)
             layout.addWidget(self.ai_status_btn)
             layout.addWidget(self.scheduler_btn)
+            layout.addWidget(self.history_btn)
             self.setLayout(layout)
 
         def _submit_manual_command(self):
