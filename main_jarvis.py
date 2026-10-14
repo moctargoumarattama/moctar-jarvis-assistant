@@ -770,6 +770,14 @@ def main():
     import sys
     import os
     configure_logging()
+    if "--web" in sys.argv:
+        logger.info("Jarvis starting Web Mission Control Server (FastAPI)")
+        import uvicorn
+        from config import Settings
+        settings = Settings.from_env()
+        uvicorn.run("main:app", host=settings.host, port=settings.port, reload=False)
+        return
+
     if "--headless" in sys.argv or "--server" in sys.argv or os.getenv("HEADLESS", "0") == "1":
         logger.info("Jarvis starting in Headless Engine mode")
         from headless_bridge import JarvisHeadlessBridge

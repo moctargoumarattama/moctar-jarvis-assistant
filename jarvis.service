@@ -1,0 +1,27 @@
+[Unit]
+Description=JARVIS - Autonomous AI Agent & Mission Control NOC
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/jarvis
+EnvironmentFile=/opt/jarvis/.env
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/jarvis/venv/bin/python /opt/jarvis/main.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+UMask=0027
+
+# Permissions et écriture pour la mémoire SQLite et les logs
+ReadWritePaths=/opt/jarvis/data /opt/jarvis/logs /opt/jarvis/notes /opt/jarvis/screenshots
+
+MemoryAccounting=true
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,33 @@
+[Unit]
+Description=Agent VPS de la tour de controle NOC
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=noc-agent
+Group=noc-agent
+WorkingDirectory=/opt/noc-agent
+EnvironmentFile=/etc/noc-vps-agent.env
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 /opt/noc-agent/vps_agent.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+UMask=0027
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryAccounting=true
+TasksMax=16
+
+[Install]
+WantedBy=multi-user.target

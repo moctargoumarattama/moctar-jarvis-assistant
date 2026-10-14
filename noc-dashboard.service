@@ -1,0 +1,40 @@
+[Unit]
+Description=Tour de controle NOC - supervision locale et VPS
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=noc-dashboard
+Group=noc-dashboard
+WorkingDirectory=/opt/noc-dashboard
+EnvironmentFile=/etc/noc-dashboard.env
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/noc-dashboard/venv/bin/python /opt/noc-dashboard/main.py
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+UMask=0027
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/opt/noc-dashboard /etc/noc-dashboard.env
+# Le répertoire privé de sudo reste accessible si la distribution l'utilise.
+ReadWritePaths=-/run/sudo -/mnt/babamarket-backups
+StateDirectory=noc-dashboard
+StateDirectoryMode=0750
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# sudo doit pouvoir obtenir uid/gid root pour les redémarrages et la sauvegarde autorisés.
+NoNewPrivileges=false
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_AUDIT_WRITE
+MemoryAccounting=true
+TasksMax=64
+LimitNOFILE=2048
+
+[Install]
+WantedBy=multi-user.target

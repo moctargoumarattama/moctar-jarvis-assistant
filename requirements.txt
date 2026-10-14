@@ -13,3 +13,12 @@ pvporcupine>=3.0.0
 pyperclip>=1.8.0
 playwright>=1.40.0
 pytest>=8.0.0
+
+# Web Mission Control & API Dashboard
+fastapi>=0.110.0
+uvicorn>=0.28.0
+httpx>=0.27.0
+sse-starlette>=2.0.0
+cryptography>=42.0.0
+cffi>=1.16.0
+

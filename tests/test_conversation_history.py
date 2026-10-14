@@ -138,9 +138,18 @@ class ConversationHistoryTests(unittest.TestCase):
         self.assertEqual("__OPEN_HISTORY__", res)
 
     def test_conversation_history_ui_entrypoint(self):
-        # En mode headless/mock, open_conversation_history ne doit pas planter
+        # En mode headless/mock, open_conversation_history ne doit pas bloquer ou planter
+        from unittest.mock import patch, MagicMock
         try:
-            conversation_history_ui.open_conversation_history(memory=self.memory)
+            if hasattr(conversation_history_ui, "ConversationHistoryWindow"):
+                with patch.object(conversation_history_ui, "ConversationHistoryWindow") as mock_win:
+                    mock_instance = MagicMock()
+                    mock_win.return_value = mock_instance
+                    conversation_history_ui.open_conversation_history(memory=self.memory)
+                    mock_win.assert_called_once()
+                    mock_instance.exec_.assert_called_once()
+            else:
+                conversation_history_ui.open_conversation_history(memory=self.memory)
         except Exception as exc:
             self.fail(f"open_conversation_history raised an unexpected exception: {exc}")
 

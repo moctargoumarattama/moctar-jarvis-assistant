@@ -1,0 +1,1580 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0f19">
+  <meta name="description" content="Supervision en temps réel du serveur central, des applications et des VPS distants.">
+  <title>Tour de contrôle · NOC</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b0f19;--panel:#111722;--panel-soft:#141c29;--line:#253043;--text:#e5edf8;--muted:#8694aa;--cyan:#5ed9ec;--green:#51dcaa;--amber:#f3bd65;--red:#ff738a;--mono:"Cascadia Code",Consolas,"Liberation Mono",monospace;--sans:Inter,"Segoe UI",Arial,sans-serif}
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:32px}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;-webkit-font-smoothing:antialiased}button,input{font:inherit}button,a,input{ -webkit-tap-highlight-color:transparent}button{cursor:pointer}a{color:inherit;text-decoration:none}button:disabled{cursor:not-allowed;opacity:.4}button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}svg{display:block}button svg{pointer-events:none}h1,h2,h3,p{margin:0}button{color:inherit}::selection{background:#236374;color:white}[hidden]{display:none!important}.icon{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.muted{color:var(--muted)}.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}.eyebrow{text-transform:uppercase;letter-spacing:.13em;font-size:10px;font-weight:700;color:var(--muted)}
+    .rail{position:fixed;inset:0 auto 0 0;width:78px;border-right:1px solid #202a3a;background:#0d121c;display:flex;align-items:center;flex-direction:column;z-index:10}.brand{width:42px;height:42px;display:grid;place-items:center;color:var(--cyan);margin:26px 0 43px;border:1px solid #315663;border-radius:12px;background:linear-gradient(140deg,#163039,#101c2a);box-shadow:0 0 25px #45bfd910}.brand .icon{width:25px;height:25px}.rail nav{display:flex;flex-direction:column;gap:15px}.nav-link,.rail-bottom{width:43px;height:43px;display:grid;place-items:center;color:#74859d;border:1px solid transparent;border-radius:10px;position:relative;transition:color .2s,background .2s}.nav-link:hover,.rail-bottom:hover{color:var(--cyan);background:#162431}.nav-link.active{color:var(--cyan);background:#132734;border-color:#244955}.nav-link.active:before{content:"";width:3px;height:22px;position:absolute;left:-18px;top:9px;background:var(--cyan);box-shadow:0 0 15px #5ed9ec55;border-radius:0 4px 4px 0}.rail-bottom{margin-top:auto;margin-bottom:23px;background:none}.tooltip{position:absolute;left:53px;padding:8px 11px;border-radius:6px;white-space:nowrap;background:#1c2a3d;border:1px solid var(--line);font-size:11px;opacity:0;pointer-events:none;transform:translateX(-4px);transition:opacity .15s,transform .15s}.nav-link:hover .tooltip,.nav-link:focus-visible .tooltip,.rail-bottom:hover .tooltip,.rail-bottom:focus-visible .tooltip{opacity:1;transform:translateX(0)}
+    .shell{margin-left:78px;min-height:100vh}.topbar{height:85px;border-bottom:1px solid #202a3a;display:flex;align-items:center;justify-content:space-between;padding:0 38px;gap:20px;background:#0c111bd9}.host-block{display:flex;align-items:center;gap:13px}.host-icon{height:39px;width:39px;background:#141d2b;border:1px solid var(--line);border-radius:9px;display:grid;place-items:center;color:#9dacbe}.host-name{font-size:15px;font-weight:650;letter-spacing:.02em;margin-top:5px;max-width:330px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.host-platform{font-weight:400;color:var(--muted);font-size:11px;margin-left:9px}.topbar-right{display:flex;align-items:center;gap:26px}.clock{font-size:15px;text-align:right;color:#c5d4e6}.clock-date{font-size:10px;color:var(--muted);margin-top:4px}.status-chip{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;display:flex;gap:9px;align-items:center;border:1px solid #305746;border-radius:6px;padding:10px 12px;color:var(--green);background:#10281f}.status-chip[data-tone="warning"]{color:var(--amber);border-color:#514332;background:#2b2419}.status-chip[data-tone="error"]{color:var(--red);border-color:#57303c;background:#2c1721}.led{height:6px;width:6px;border-radius:50%;background:currentColor;flex-shrink:0;box-shadow:0 0 10px currentColor}.status-chip[data-tone="success"] .led{animation:breathe 2.5s infinite}.status-chip[data-tone="error"] .led{animation:breathe 1s infinite}@keyframes breathe{50%{opacity:.45;box-shadow:0 0 2px currentColor}}
+    main{max-width:1690px;margin:0 auto;padding:31px 38px 22px}.page-heading{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:27px}.heading-kicker{font-size:10px;letter-spacing:.15em;color:var(--cyan);display:flex;gap:8px;align-items:center;margin-bottom:9px}.heading-kicker:before{content:"";width:15px;height:1px;background:var(--cyan)}h1{font-size:29px;font-weight:650;letter-spacing:-.8px}.subtitle{font-size:12px;color:var(--muted);margin-top:8px}.telemetry-info{text-align:right;font-size:10px;color:var(--muted);line-height:1.9}.stream-label{display:flex;align-items:center;justify-content:flex-end;gap:7px;color:var(--green);font-size:10px}.stream-label[data-tone="warning"]{color:var(--amber)}.stream-label[data-tone="error"]{color:var(--red)}.stream-label .led{width:5px;height:5px}.connection-banner{display:flex;align-items:center;gap:10px;padding:11px 14px;border:1px solid #55432b;border-radius:8px;background:#251d14;color:var(--amber);font-size:12px;margin-bottom:22px}.connection-banner .icon{width:17px;height:17px}
+    .section-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:13px;gap:15px}.section-heading h2{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#b6c5d9;display:flex;align-items:center;gap:9px}.section-heading h2 .icon{width:15px;height:15px;color:var(--muted)}.section-heading .meta{font-size:10px;color:#728198;font-family:var(--mono)}section{scroll-margin-top:25px}.hardware-grid{display:grid;grid-template-columns:1.85fr 1.17fr .9fr 1.28fr;gap:15px;margin-bottom:29px}.card{border:1px solid var(--line);border-radius:11px;background:linear-gradient(140deg,#131b29 0%,#101722 90%);min-width:0}.metric-card{padding:18px 19px;min-height:205px}.card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:19px}.card-label{font-size:11px;color:#a0b1c9;font-weight:600;display:flex;align-items:center;gap:8px}.card-label .icon{width:15px;height:15px;color:#71829b}.card-top .meta{font-size:9px;color:#75859c}.cpu-body{display:flex;gap:17px;align-items:center}.gauge{width:102px;height:102px;flex-shrink:0;border-radius:50%;display:grid;place-items:center;background:conic-gradient(from 225deg,var(--gauge-color,var(--cyan)) calc(var(--progress,0)*.75%),#273245 0 75%,transparent 0);position:relative}.gauge:before{content:"";position:absolute;inset:8px;border-radius:50%;background:#131c29}.gauge-content{position:relative;display:flex;flex-direction:column;align-items:center;margin-top:5px}.gauge-number{font-family:var(--mono);font-size:28px;line-height:1.2;letter-spacing:-1.5px}.gauge-number small{font-size:13px;letter-spacing:0;color:var(--muted);margin-left:3px}.gauge-caption{font-size:8px;letter-spacing:.1em;color:var(--muted);margin-top:5px;text-transform:uppercase}.cpu-trend{flex:1;min-width:0}.chart-caption{display:flex;justify-content:space-between;font-size:8px;color:var(--muted);gap:5px;margin-bottom:5px}.trend-svg{width:100%;height:66px;overflow:visible}.chart-grid{stroke:#263349;stroke-width:.6;stroke-dasharray:2 3}.chart-line{stroke:var(--cyan);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}.chart-area{fill:url(#cpu-fill)}.chart-end{fill:var(--cyan)}.core-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px 10px;margin-top:14px;max-height:75px;overflow-y:auto;scrollbar-width:thin}.core-item{min-width:0}.core-label{font:8px var(--mono);display:flex;justify-content:space-between;gap:3px;color:#7f91aa;margin-bottom:4px}.core-track{height:3px;background:#253044;border-radius:3px;overflow:hidden}.core-fill{height:100%;background:var(--cyan);border-radius:3px;transition:width .4s}.no-data{font-size:10px;color:var(--muted);line-height:1.7}.memory-body{display:flex;align-items:center;gap:17px}.memory-body .gauge{width:86px;height:86px;--gauge-color:var(--green)}.memory-body .gauge-number{font-size:25px}.memory-values{min-width:0}.primary-value{font-family:var(--mono);font-size:19px;letter-spacing:-.8px;white-space:nowrap}.secondary-value{font-size:10px;color:var(--muted);margin-top:7px}.swap-row{border-top:1px solid #253044;margin-top:17px;padding-top:11px}.detail-line{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:9px;color:var(--muted)}.detail-line .value{color:#acbdd3;font-family:var(--mono);font-size:9px}.progress-track{height:4px;background:#263145;border-radius:4px;overflow:hidden;margin-top:8px}.progress-fill{height:100%;background:var(--cyan);transition:width .4s;border-radius:4px;width:0}.swap-row .progress-fill{background:var(--green)}.temperature-value{font:38px var(--mono);letter-spacing:-2px;margin-top:22px}.temperature-value small{font:15px var(--mono);color:var(--muted);letter-spacing:0;margin-left:5px}.thermal-label{font-size:10px;color:var(--muted);margin-top:7px}.temperature-meter{display:flex;gap:3px;margin-top:20px;height:6px}.temperature-meter span{flex:1;border-radius:2px;background:#263246}.temperature-meter span.lit{background:var(--cyan)}.temperature-meter[data-tone="warning"] span.lit{background:var(--amber)}.temperature-meter[data-tone="error"] span.lit{background:var(--red)}.disk-row+.disk-row{margin-top:20px}.disk-label{display:flex;align-items:center;gap:7px;font:10px var(--mono);color:#becce0}.disk-label .icon{width:13px;height:13px;color:#8293ab}.disk-data{font:10px var(--mono);color:#cad6e8;margin-top:8px;display:flex;justify-content:space-between;gap:8px}.disk-data .muted{font-size:9px}.disk-sub{font-size:8px;color:#6f829c;margin-top:6px;overflow-wrap:anywhere}.disk-row.backup .progress-fill{background:#9d96eb}
+    .services-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px;margin-bottom:29px}.service-card{padding:18px 19px 14px;border-top:2px solid #2b3a4d;position:relative;overflow:hidden}.service-card[data-tone="success"]{border-top-color:#408d78}.service-card[data-tone="error"]{border-top-color:#a24c62}.service-card[data-tone="success"]:after{content:"";position:absolute;inset:0 0 auto auto;width:100px;height:85px;background:radial-gradient(at 100% 0%,#47e4ac09,transparent 75%);pointer-events:none}.service-header{display:flex;justify-content:space-between;align-items:center;gap:10px}.service-logo{width:34px;height:34px;display:grid;place-items:center;background:#1b283b;border:1px solid #30405a;border-radius:8px;color:#9aafce;font-size:10px;font-weight:700;font-family:var(--mono)}.service-name{font-size:13px;font-weight:600;margin-top:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.service-port{font:9px var(--mono);color:#8394ad;margin-top:6px}.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid #334155;border-radius:4px;color:#9baac0;font:8px var(--mono);text-transform:uppercase;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}.badge .led{width:4px;height:4px;box-shadow:none}.badge[data-tone="success"]{color:var(--green);background:#17342a55;border-color:#2e5446}.badge[data-tone="error"]{color:var(--red);background:#391e2955;border-color:#573342}.badge[data-tone="warning"]{color:var(--amber);background:#33291755;border-color:#54452b}.service-measure{display:flex;justify-content:space-between;gap:10px;align-items:flex-end;margin:18px 0 16px}.service-measure-label{font-size:9px;color:var(--muted);margin-bottom:5px}.latency{font:23px var(--mono);letter-spacing:-.6px}.latency small{font-size:10px;color:#7a8ca7;letter-spacing:0;margin-left:4px}.http-status{font:9px var(--mono);color:#9bacbf;margin-bottom:3px}.service-footer{display:flex;justify-content:space-between;align-items:center;gap:5px;border-top:1px solid #263044;padding-top:12px}.service-systemd{font:8px var(--mono);color:#7f92ad;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:65%}.restart-button{display:flex;align-items:center;gap:5px;border:0;padding:3px 0;background:none;font-size:9px;color:#9dafc7}.restart-button .icon{width:12px;height:12px}.restart-button:not(:disabled):hover{color:var(--cyan)}.service-error{color:var(--red);font-size:9px;line-height:1.5;margin-top:10px;overflow-wrap:anywhere}
+    .bottom-grid{display:grid;grid-template-columns:1.12fr 1fr;gap:21px}.network-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-bottom:20px}.network-card{padding:17px 18px}.network-top{display:flex;align-items:center;justify-content:space-between;gap:9px;margin-bottom:14px}.network-icon{width:31px;height:31px;border-radius:8px;background:#152a38;border:1px solid #294656;color:var(--cyan);display:grid;place-items:center}.network-icon.whatsapp{background:#142c25;border-color:#2a473a;color:var(--green)}.network-icon .icon{width:17px;height:17px}.network-name{font-size:12px;font-weight:550}.network-meta{font:9px var(--mono);color:var(--muted);margin-top:7px;overflow-wrap:anywhere}.network-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:13px;color:#73859e;font-size:9px}.network-footer strong{font:9px var(--mono);color:#aebed4;font-weight:400}.network-error{font-size:9px;color:var(--red);line-height:1.5;margin-top:9px;overflow-wrap:anywhere}.vps-panel{overflow:hidden;min-height:151px}.vps-empty{display:flex;gap:13px;align-items:center;padding:24px;color:var(--muted)}.vps-empty-icon{height:40px;width:40px;border:1px dashed #354359;border-radius:10px;display:grid;place-items:center;flex-shrink:0}.vps-empty strong{font-size:11px;color:#9bb0cd;font-weight:500}.vps-empty p{font-size:10px;margin-top:6px;line-height:1.7}.vps-item{padding:15px 18px}.vps-item+.vps-item{border-top:1px solid var(--line)}.vps-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:13px}.vps-host{font:11px var(--mono);overflow-wrap:anywhere}.vps-meta{font:8px var(--mono);color:var(--muted)}.vps-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.vps-stat .detail-line{font-size:8px}.vps-stat .detail-line .value{font-size:9px}.vps-services{margin-top:10px;display:flex;flex-wrap:wrap;gap:5px}.vps-services .badge{font-size:8px;max-width:none}.vps-age{font:8px var(--mono);color:#7486a0;margin-top:10px}.terminal-card{height:341px;display:flex;flex-direction:column;background:#0e1521;overflow:hidden}.terminal-header{display:flex;justify-content:space-between;align-items:center;padding:13px 17px;border-bottom:1px solid #243046;background:#121c2b}.terminal-dots{display:flex;gap:5px}.terminal-dots span{width:6px;height:6px;border-radius:50%;background:#3b4b64}.terminal-dots span:first-child{background:#95706b}.terminal-dots span:nth-child(2){background:#95855e}.terminal-dots span:nth-child(3){background:#628b7b}.terminal-name{font:9px var(--mono);color:#93a5bf}.console-controls{display:flex;align-items:center;gap:10px}.console-button{font-size:9px;color:#8194af;background:none;border:0;padding:2px}.console-button:hover{color:var(--cyan)}.events-list{overflow:auto;flex:1;padding:11px 17px 14px;scrollbar-width:thin;scrollbar-color:#2b3c54 transparent;display:flex;flex-direction:column;gap:10px}.console-empty{margin:auto 0;color:#627590;font:10px var(--mono);line-height:1.9}.event-line{font:9px/1.7 var(--mono);display:grid;grid-template-columns:52px 48px 1fr;gap:8px;color:#adbcd0;overflow-wrap:anywhere}.event-time{color:#5d7391}.event-level{color:var(--cyan);font-size:8px}.event-line[data-level="warning"] .event-level{color:var(--amber)}.event-line[data-level="error"] .event-level{color:var(--red)}.terminal-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 17px;border-top:1px solid #223048;color:#5f7796;font:8px var(--mono)}.terminal-cursor{width:5px;height:9px;background:#68bdd3;display:inline-block;margin-left:5px;vertical-align:middle;animation:cursor 1.2s steps(2) infinite}@keyframes cursor{50%{opacity:0}}footer{margin-top:26px;padding-top:15px;border-top:1px solid #1e2a3a;display:flex;justify-content:space-between;gap:12px;color:#5f718a;font:8px var(--mono);letter-spacing:.02em}.footer-left{display:flex;gap:15px;align-items:center}.footer-status{display:flex;align-items:center;gap:6px}.footer-status .led{width:4px;height:4px;box-shadow:none;color:#64788e}.footer-status[data-tone="success"] .led{color:var(--green)}
+    dialog{border:1px solid #36506a;border-radius:14px;background:#121b2a;color:var(--text);padding:30px;width:min(430px,calc(100% - 32px));box-shadow:0 30px 100px #0008}dialog::backdrop{background:#060a13ce;backdrop-filter:blur(7px)}.dialog-icon{width:43px;height:43px;background:#17313d;border:1px solid #2b5364;display:grid;place-items:center;color:var(--cyan);border-radius:10px;margin-bottom:19px}dialog h2{font-size:21px;font-weight:600;letter-spacing:-.4px}dialog p{font-size:12px;color:#8c9eb9;line-height:1.8;margin-top:10px}.dialog-label{display:block;font-size:10px;font-weight:600;color:#bdcde1;margin:23px 0 9px}dialog input{width:100%;background:#0b1320;border:1px solid #35445c;border-radius:7px;padding:12px 13px;color:var(--text);font-family:var(--mono);font-size:12px}dialog input:focus{border-color:var(--cyan)}.dialog-error{font-size:11px;color:var(--red);margin-top:12px;line-height:1.6;min-height:0}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:23px}.button{border:1px solid #32445f;padding:11px 16px;font-size:11px;border-radius:7px;background:#182439}.button:hover{background:#203149}.button.primary{color:#06171d;background:var(--cyan);border-color:var(--cyan);font-weight:650}.button.primary:hover{background:#7ee5f4}.button.danger{color:#1a0911;background:#ff8397;border-color:#ff8397}.toast{position:fixed;right:25px;bottom:24px;background:#172838;border:1px solid #36546b;box-shadow:0 8px 40px #0006;padding:14px 18px;border-radius:9px;max-width:min(440px,calc(100% - 32px));font-size:12px;line-height:1.5;z-index:30}.toast[data-tone="error"]{border-color:#783b4d;color:var(--red)}.toast[data-tone="success"]{border-color:#386451;color:var(--green)}
+    @media(min-width:1700px){.metric-card{min-height:222px}.cpu-body{gap:25px}.gauge{width:112px;height:112px}.trend-svg{height:76px}.terminal-card{height:365px}.service-card{padding:22px}}
+    @media(max-width:1250px){.topbar{padding:0 25px}main{padding:26px 25px 20px}.hardware-grid{grid-template-columns:1.5fr 1.1fr;gap:13px}.metric-card{min-height:192px}.temperature-card .temperature-value{margin-top:0}.temperature-card .temperature-meter{max-width:250px}.disk-card{display:grid;grid-template-columns:1fr 1fr;gap:20px}.disk-card .card-top{grid-column:1/-1;margin-bottom:0}.disk-row+.disk-row{margin-top:0}.services-grid{gap:12px}.service-card{padding:16px 14px}.network-card{padding:14px}.bottom-grid{grid-template-columns:1.05fr 1fr;gap:16px}.topbar-right{gap:18px}.host-platform{display:none}.status-chip{font-size:9px}}
+    @media(max-width:960px){.bottom-grid{grid-template-columns:1fr}.terminal-card{height:285px}.services-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.network-grid{grid-template-columns:1fr 1fr}.topbar{height:77px}.clock{font-size:13px}.host-name{max-width:190px;font-size:13px}.status-chip{max-width:175px;font-size:8px;line-height:1.5}.page-heading{margin-bottom:24px}h1{font-size:27px}.subtitle{font-size:11px}.telemetry-info{font-size:9px}.hardware-grid{margin-bottom:24px}}
+    @media(max-width:640px){.rail{width:55px}.brand{width:33px;height:33px;margin:22px 0 30px;border-radius:9px}.brand .icon{width:20px;height:20px}.nav-link,.rail-bottom{width:35px;height:38px}.nav-link.active:before{left:-10px}.tooltip{left:41px}.rail nav{gap:13px}.shell{margin-left:55px}.topbar{padding:0 15px;height:76px;gap:9px}.host-icon{display:none}.host-name{max-width:130px;font-size:11px}.host-block .eyebrow{font-size:8px}.topbar-right{gap:10px}.clock{font-size:11px}.clock-date{font-size:8px}.status-chip{display:none}main{padding:23px 15px 17px}.page-heading{align-items:start;margin-bottom:24px;gap:10px}h1{font-size:24px}.heading-kicker{font-size:8px}.subtitle{font-size:10px;line-height:1.7;max-width:200px}.telemetry-info{font-size:8px;max-width:100px;padding-top:2px}.stream-label{font-size:8px}.hardware-grid{grid-template-columns:1fr}.metric-card{min-height:0;padding:17px}.cpu-card{min-height:196px}.memory-body .gauge{width:82px;height:82px}.memory-card .memory-body{gap:26px}.memory-card .primary-value{font-size:25px}.memory-card .card-top{margin-bottom:13px}.temperature-card{display:grid;grid-template-columns:1fr auto;align-items:center;column-gap:12px}.temperature-card .card-top{grid-column:1/-1;margin-bottom:13px}.temperature-card .temperature-value{grid-column:2;grid-row:2;font-size:32px}.temperature-card .thermal-label{grid-column:1;grid-row:2;margin-top:0}.temperature-card .temperature-meter{grid-column:1/-1;margin-top:15px}.disk-card{gap:15px}.disk-card .card-top{margin-bottom:4px}.services-grid{gap:10px}.service-card{padding:14px 12px 12px}.service-name{font-size:11px;margin-top:12px}.service-logo{width:29px;height:29px;font-size:8px}.badge{font-size:7px;gap:4px;padding:4px;max-width:80px}.latency{font-size:20px}.service-port{font-size:8px}.service-systemd{font-size:7px;max-width:58%}.restart-button{font-size:8px;gap:3px}.http-status{font-size:8px}.service-measure{gap:5px}.service-measure-label{font-size:8px}.section-heading h2{font-size:9px;letter-spacing:.08em;gap:6px}.section-heading .meta{font-size:8px}.section-heading h2 .icon{width:13px;height:13px}.network-grid{grid-template-columns:1fr}.network-card{padding:16px}.network-top{margin-bottom:12px}.network-card .badge{font-size:8px;max-width:130px}.vps-empty{padding:20px 16px;gap:10px}.vps-empty p{font-size:9px}.vps-host{font-size:10px}.vps-row .badge{max-width:100px}.vps-item{padding:14px}.vps-stats{gap:9px}.events-list{padding:12px}.event-line{grid-template-columns:45px 39px 1fr;gap:6px;font-size:8px}.event-level{font-size:7px}.terminal-header{padding:12px}.terminal-name{font-size:8px}.terminal-footer{padding:9px 12px;font-size:7px}.terminal-card{height:300px}.footer-left{gap:9px}footer{font-size:7px;flex-wrap:wrap;line-height:1.8}.connection-banner{font-size:10px;line-height:1.7}.console-button{font-size:8px}}
+    @media(max-width:640px){.topbar{height:102px;position:relative;align-items:flex-start;padding-top:18px}.topbar .status-chip{display:flex;position:absolute;left:15px;right:15px;bottom:11px;max-width:none;justify-content:center;padding:5px 8px;font-size:8px;line-height:1.3}}
+    @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+    /* Vue de supervision : l'espace est consacré aux mesures. */
+    .rail{width:64px}
+    .brand{margin:18px 0 28px;width:38px;height:38px}
+    .rail nav{gap:10px}
+    .nav-link.active:before{left:-11px}
+    .shell{margin-left:64px}
+    .topbar{height:60px;padding:0 24px}
+    .host-icon{width:34px;height:34px}
+    .host-name{font-size:14px;margin-top:4px}
+    .topbar-right{gap:18px}
+    .status-chip{padding:8px 10px}
+    main{max-width:none;padding:14px 24px 12px}
+    .page-heading{align-items:center;gap:14px;margin-bottom:13px;min-height:24px}
+    .page-heading h1{font-size:15px;font-weight:600;letter-spacing:-.2px;color:#adbed3}
+    .telemetry-info{display:flex;align-items:center;gap:16px;line-height:1.4}
+    .telemetry-info>div+div{border-left:1px solid var(--line);padding-left:16px}
+    .connection-banner{margin-bottom:12px;padding:9px 12px}
+    .section-heading{margin-bottom:9px;min-height:16px}
+    .section-heading h2{font-size:11px;letter-spacing:.08em}
+    .hardware-grid{grid-template-columns:1.65fr 1.14fr .84fr 1.18fr;gap:14px;margin-bottom:18px}
+    .metric-card{padding:14px 16px;min-height:180px}
+    .card-top{margin-bottom:10px}
+    .cpu-body{gap:15px}
+    .gauge{width:86px;height:86px}
+    .gauge:before{inset:7px}
+    .gauge-number{font-size:26px}
+    .memory-body{gap:13px}
+    .memory-body .gauge{width:80px;height:80px}
+    .trend-svg{height:52px}
+    .core-grid{margin-top:9px;gap:5px 10px;max-height:58px}
+    .swap-row{margin-top:11px;padding-top:10px}
+    .temperature-value{margin-top:6px;font-size:34px}
+    .temperature-meter{margin-top:16px;max-width:none}
+    .disk-card{display:block}
+    .disk-row+.disk-row{margin-top:12px}
+    .disk-data{margin-top:6px}
+    .disk-sub{margin-top:5px}
+    .disk-row .progress-track{margin-top:6px}
+    .services-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:18px}
+    .service-card{padding:14px 16px 12px}
+    .service-header{gap:10px;min-height:34px}
+    .service-logo{width:30px;height:30px;flex-shrink:0}
+    .service-identity{min-width:0;flex:1}
+    .service-name{margin-top:0;font-size:13px}
+    .service-port{margin-top:5px}
+    .service-header .service-badge{flex-shrink:0}
+    .service-measure{margin:13px 0 11px}
+    .service-measure-label{margin-bottom:4px}
+    .latency{font-size:24px}
+    .service-footer{padding-top:9px}
+    .restart-button{min-height:24px}
+    .service-error{margin-top:7px;max-height:40px;overflow:auto}
+    .bottom-grid{grid-template-columns:1.2fr .88fr 1.35fr;gap:16px;align-items:start}
+    .bottom-grid section{min-width:0}
+    #infrastructure .section-heading .meta{display:none}
+    .network-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:0}
+    .network-card{padding:13px 14px;min-height:142px}
+    .network-top{margin-bottom:10px;gap:6px}
+    .network-icon{width:26px;height:26px}
+    .network-name{font-size:12px;line-height:1.4}
+    .network-meta{margin-top:6px}
+    .network-footer{margin-top:11px}
+    .network-error{margin-top:7px;max-height:38px;overflow:auto}
+    .vps-panel{min-height:0;max-height:164px;overflow:auto;scrollbar-width:thin;scrollbar-color:#2b3c54 transparent}
+    .vps-empty{padding:19px 16px;align-items:flex-start;min-height:108px}
+    .vps-empty-icon{width:30px;height:30px}
+    .vps-empty p{line-height:1.6}
+    .vps-item{padding:12px 14px}
+    .vps-row{margin-bottom:10px}
+    .terminal-card{height:164px}
+    .terminal-header{padding:10px 14px}
+    .events-list{min-height:0;padding:9px 14px;gap:7px}
+    .event-line{font-size:10px;grid-template-columns:52px 38px 1fr;gap:7px;line-height:1.6}
+    .terminal-footer{padding:7px 14px}
+    footer{margin-top:15px;padding-top:10px}
+    @media(max-width:1300px){
+      .hardware-grid{grid-template-columns:1.5fr 1.15fr .8fr 1.15fr}
+      .metric-card{padding:13px 14px}
+      .cpu-body{gap:10px}
+      .gauge{width:80px;height:80px}
+      .memory-body{gap:10px}
+      .memory-body .gauge{width:72px;height:72px}
+      .primary-value{font-size:17px}
+      .bottom-grid{grid-template-columns:1.2fr .85fr 1.2fr;gap:12px}
+      .service-card{padding:13px 14px 11px}
+      .service-logo{display:none}
+      .network-grid{grid-template-columns:1fr}
+      .network-card{display:grid;grid-template-columns:1fr auto;column-gap:10px;padding:11px 13px;min-height:0}
+      .network-top{grid-column:2;grid-row:1/3;margin:0;align-self:center}
+      .network-top .network-icon{display:none}
+      .network-name{grid-column:1;grid-row:1}
+      .network-meta{grid-column:1;grid-row:2;font-size:9px;margin-top:4px}
+      .network-footer{grid-column:1/-1;margin-top:8px}
+      .network-error{grid-column:1/-1}
+    }
+    @media(min-width:1121px) and (max-height:800px){
+      .topbar{height:56px}
+      main{padding-top:10px;padding-bottom:10px}
+      .page-heading{margin-bottom:10px}
+      .hardware-grid,.services-grid{margin-bottom:13px}
+      .metric-card{padding-top:12px;padding-bottom:12px;min-height:170px}
+      .gauge{width:80px;height:80px}
+      .memory-body .gauge{width:74px;height:74px}
+      .service-card{padding-top:12px;padding-bottom:10px}
+      .service-measure{margin:10px 0 9px}
+      .network-card{min-height:134px}
+      .terminal-card{height:146px}
+      .vps-panel{max-height:146px}
+      footer{margin-top:11px;padding-top:8px}
+    }
+    @media(min-width:1121px) and (max-width:1300px) and (max-height:800px){
+      .network-card{min-height:0}
+    }
+    @media(max-width:1120px){
+      .topbar{padding:0 20px}
+      main{padding:14px 20px}
+      .hardware-grid{grid-template-columns:1.3fr 1fr}
+      .metric-card{min-height:176px}
+      .temperature-card{min-height:148px}
+      .disk-card{display:grid;grid-template-columns:1fr 1fr;gap:14px;min-height:148px}
+      .disk-card .card-top{grid-column:1/-1;margin-bottom:0}
+      .disk-row+.disk-row{margin-top:0}
+      .service-header{flex-wrap:wrap}
+      .service-header .service-badge{margin-left:auto}
+      .bottom-grid{grid-template-columns:1.2fr 1fr}
+      #events{grid-column:1/-1}
+      .network-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .network-card{display:block;min-height:140px}
+      .network-top{display:flex;margin-bottom:10px}
+      .network-top .network-icon{display:grid}
+      .terminal-card{height:172px}
+      .vps-panel{max-height:172px}
+    }
+    @media(max-width:760px){
+      .services-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .service-header{flex-wrap:nowrap}
+      .topbar-right{gap:12px}
+      .status-chip{font-size:8px;max-width:195px}
+      .host-name{max-width:180px}
+      .telemetry-info{gap:10px}
+      .telemetry-info>div+div{padding-left:10px}
+      .collection-interval{display:none}
+      .bottom-grid{grid-template-columns:1fr}
+      #events{grid-column:auto}
+      .network-card{min-height:130px}
+      .vps-empty{min-height:0}
+      .vps-panel{max-height:210px}
+    }
+    @media(max-width:640px){
+      .rail{width:54px}
+      .shell{margin-left:54px}
+      .brand{width:32px;height:32px;margin-top:18px;margin-bottom:24px}
+      .rail .nav-link,.rail-bottom{width:36px;height:36px}
+      .nav-link.active:before{left:-9px}
+      .topbar{height:92px;padding:13px 14px 0;align-items:flex-start}
+      .host-icon{display:none}
+      .host-name{font-size:12px;max-width:160px}
+      .clock{font-size:12px}
+      .clock-date{font-size:8px}
+      .topbar .status-chip{left:14px;right:14px;bottom:11px;padding:5px 8px;max-width:none}
+      main{padding:12px 14px}
+      .page-heading{flex-wrap:wrap;gap:8px;margin-bottom:15px}
+      .page-heading h1{font-size:14px}
+      .telemetry-info{font-size:9px;width:100%;max-width:none;justify-content:space-between}
+      .telemetry-info>div+div{border-left:0;padding-left:0}
+      .stream-label{font-size:9px;white-space:nowrap}
+      .hardware-grid{grid-template-columns:1fr;gap:12px}
+      .metric-card{padding:15px 16px;min-height:0}
+      .cpu-card{min-height:181px}
+      .gauge{width:86px;height:86px}
+      .memory-body .gauge{width:80px;height:80px}
+      .temperature-card{display:grid;grid-template-columns:1fr auto;gap:8px 12px}
+      .temperature-card .card-top{grid-column:1/-1;margin-bottom:0}
+      .temperature-value{grid-column:2;grid-row:2/4;margin:0;font-size:30px}
+      .thermal-label{grid-column:1;grid-row:2;margin-top:4px}
+      .temperature-meter{grid-column:1/-1;margin-top:5px}
+      .disk-card{display:block}
+      .disk-card .card-top{margin-bottom:12px}
+      .disk-row+.disk-row{margin-top:14px}
+      .services-grid{gap:10px}
+      .service-card{padding:12px 11px}
+      .service-header{display:block}
+      .service-name{font-size:12px}
+      .service-port{font-size:8px}
+      .service-header .service-badge{margin-top:9px}
+      .latency{font-size:21px}
+      .service-footer{flex-wrap:wrap;gap:6px}
+      .service-systemd{max-width:none;font-size:8px}
+      .restart-button{font-size:10px}
+      .http-status{font-size:8px}
+      .network-grid{gap:10px}
+      .network-card{padding:12px}
+      .network-name{font-size:11px}
+      .network-top{gap:5px}
+      .network-top .network-icon{width:23px;height:23px}
+      .network-meta{font-size:8px}
+      .network-footer{font-size:8px;flex-wrap:wrap;gap:4px}
+      .network-footer strong{font-size:8px}
+      .section-heading h2{font-size:10px}
+      .section-heading .meta{font-size:9px}
+      .event-line{font-size:9px;grid-template-columns:46px 34px 1fr;gap:5px}
+      .terminal-card{height:190px}
+      footer{font-size:8px;flex-wrap:wrap;gap:8px}
+    }
+    /* Deux flux supplémentaires, dans les panneaux existants. */
+    .remote-heading{gap:8px;align-items:center}.remote-heading h2{font-size:9px;letter-spacing:.055em;line-height:1.5}.remote-heading .meta{font-size:8px;white-space:nowrap;color:var(--red)}
+    .remote-panel{height:146px;display:flex;flex-direction:column;overflow:hidden}.remote-toolbar{display:flex;align-items:center;justify-content:space-between;gap:7px;padding:7px 10px;border-bottom:1px solid var(--line);background:#131d2c;flex-shrink:0}.remote-tabs{display:flex;gap:4px}.remote-tab{padding:5px 8px;background:transparent;border:1px solid transparent;border-radius:5px;color:#7e91ad;font-size:9px}.remote-tab[aria-selected="true"]{background:#1b3442;border-color:#31535e;color:var(--cyan)}.remote-tab:hover{color:var(--cyan)}.sentinel-agent{font:8px var(--mono);display:flex;align-items:center;gap:5px;color:var(--muted);white-space:nowrap}.sentinel-agent .led{width:4px;height:4px;box-shadow:none}.sentinel-agent[data-tone="success"]{color:var(--green)}.sentinel-agent[data-tone="warning"]{color:var(--amber)}.sentinel-agent[data-tone="error"]{color:var(--red)}.remote-panel .remote-content{flex:1;min-height:0;max-height:none;overflow:auto;scrollbar-width:thin;scrollbar-color:#2b3c54 transparent;border:0;border-radius:0;background:transparent}.remote-panel .vps-empty{padding:14px 12px;min-height:0}.remote-panel .vps-empty-icon{width:26px;height:26px}.remote-panel .vps-empty strong{font-size:10px}.remote-panel .vps-empty p{font-size:9px;margin-top:5px}.sentinel-empty{padding:16px 13px;color:var(--muted);font-size:10px;line-height:1.7}.sentinel-empty strong{display:block;color:#a7bad4;font-weight:500;margin-bottom:4px}.sentinel-incident{padding:9px 12px;border-bottom:1px solid #233045}.sentinel-incident:last-child{border:0}.sentinel-line{display:flex;align-items:center;justify-content:space-between;gap:7px;font:9px var(--mono)}.sentinel-source{min-width:0;overflow-wrap:anywhere;color:#d1def0}.sentinel-source .country-flag{font-family:var(--sans);margin-right:5px;font-size:12px}.sentinel-result{font-size:7px;flex-shrink:0;color:var(--amber)}.sentinel-result[data-blocked="true"]{color:var(--green)}.sentinel-credentials{font:8px/1.6 var(--mono);color:#9aadc8;margin-top:5px;overflow-wrap:anywhere;white-space:pre-wrap}.sentinel-meta{display:flex;justify-content:space-between;gap:7px;font:7px/1.5 var(--mono);color:#6c83a2;margin-top:4px;overflow-wrap:anywhere}.sentinel-queue-warning{padding:5px 10px;border-bottom:1px solid var(--line);color:var(--amber);font-size:8px;flex-shrink:0}
+    .voice-strip{display:flex;align-items:center;gap:8px;min-height:28px;padding:6px 13px;background:#142532;border-bottom:1px solid #2a4151;flex-shrink:0}.voice-strip>.icon{width:12px;height:12px;color:var(--cyan)}.voice-trigger{background:none;border:0;text-align:left;padding:0;display:flex;align-items:center;gap:8px;min-width:0;flex:1;overflow:hidden;font-size:9px}.voice-kicker{font-size:8px;letter-spacing:.045em;color:var(--cyan);font-weight:600;white-space:nowrap}.voice-summary{color:#8fa5c1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.voice-status{font:7px var(--mono);color:var(--muted);white-space:nowrap}.voice-status[data-tone="success"]{color:var(--green)}.voice-status[data-tone="warning"]{color:var(--amber)}.voice-status[data-tone="error"]{color:var(--red)}.voice-trigger:disabled{opacity:1;cursor:default}.voice-trigger:not(:disabled):hover .voice-summary{color:#cfdfef}.voice-detail-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:26vh;overflow:auto;margin-top:8px;font-size:12px;line-height:1.8;color:#c4d2e5}.voice-detail-label{font-size:9px;text-transform:uppercase;letter-spacing:.09em;color:var(--cyan);margin-top:19px}.voice-detail-meta{font:9px/1.7 var(--mono);color:var(--muted);margin-top:11px}
+    .voice-simulation{margin-top:20px;border-top:1px solid var(--line);padding-top:15px}.voice-simulation summary{cursor:pointer;font-size:11px;color:var(--cyan);font-weight:600}.voice-simulation select{width:100%;background:#0b1320;border:1px solid #35445c;border-radius:7px;padding:11px 12px;color:var(--text);font:11px var(--mono)}.voice-simulation-note{font-size:10px!important;line-height:1.7!important;color:var(--amber)!important}.voice-simulation .dialog-label{margin-top:15px}.voice-simulation-feedback{font-size:11px;line-height:1.7;margin-top:12px;color:var(--red)}.voice-simulation-feedback[data-tone="success"]{color:var(--green)}#voice-dialog{max-height:90vh;overflow:auto}
+    #events-open{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;color:var(--cyan)}#events-open .icon{width:12px;height:12px}
+    #events-dialog{width:min(1100px,calc(100% - 32px));height:min(720px,calc(100vh - 48px));height:min(720px,calc(100dvh - 48px));max-height:calc(100vh - 32px);padding:0;overflow:hidden}#events-dialog[open]{display:flex;flex-direction:column}.events-dialog-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:22px 24px;border-bottom:1px solid var(--line);flex-shrink:0}.events-dialog-heading{min-width:0}.events-dialog-header .eyebrow{margin-bottom:7px}.events-dialog-header h2{font-size:20px}.events-dialog-header p{margin-top:5px;font-size:11px}.events-dialog-header .button{flex-shrink:0}.events-dialog-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 24px;background:#0e1724;border-bottom:1px solid var(--line);font:10px var(--mono);color:var(--muted);flex-shrink:0}#events-dialog-autoscroll{font-size:11px}#events-dialog .events-list{padding:0 24px;gap:0}#events-dialog .event-line{grid-template-columns:44px 164px 54px minmax(0,1fr);gap:12px;font:12px/1.8 var(--mono);padding:13px 0;border-bottom:1px solid #1d2b3c;flex-shrink:0}#events-dialog .event-time{font-size:11px;color:#8ea5c1}#events-dialog .event-level{font-size:10px}#events-dialog .event-id{color:#5d7391;font-size:10px}#events-dialog .event-message{white-space:pre-wrap;overflow-wrap:anywhere}#events-dialog .terminal-footer{padding:13px 24px;flex-shrink:0}#events-dialog-state[data-tone="success"]{color:var(--green)}#events-dialog-state[data-tone="warning"]{color:var(--amber)}body:has(#events-dialog[open]){overflow:hidden}
+    @media(max-width:640px){#events-dialog{width:calc(100% - 20px);height:calc(100vh - 24px);height:calc(100dvh - 24px)}.events-dialog-header{padding:16px;gap:10px}.events-dialog-header h2{font-size:16px}.events-dialog-header .button{padding:9px 11px}.events-dialog-toolbar{padding:11px 16px;font-size:9px}#events-dialog .events-list{padding:0 16px}#events-dialog .event-line{grid-template-columns:34px minmax(0,1fr) auto;gap:4px 8px;font-size:11px}#events-dialog .event-message{grid-column:1/-1;margin-top:4px}#events-dialog .terminal-footer{padding:11px 16px;font-size:8px}}
+    @media(min-width:1121px) and (max-height:800px){.remote-panel{height:146px}}
+    @media(max-width:1120px){.remote-panel{height:146px}}
+    @media(max-width:640px){.remote-heading h2{font-size:9px}.remote-panel{height:146px}.voice-strip{padding:6px 10px;gap:6px}.voice-trigger{gap:6px}.voice-kicker{font-size:7px}.voice-summary{font-size:8px}.voice-status{font-size:6px}.voice-detail-text{font-size:11px}}
+    .cyber-launch-controls{display:flex;align-items:center;gap:5px;flex-shrink:0}.cyber-counter{background:none;border:0;padding:3px 0;cursor:pointer}.cyber-counter:hover{text-decoration:underline;text-underline-offset:3px}.cyber-launch{width:25px;height:23px;border:1px solid #365363;border-radius:5px;background:#172a37;color:var(--cyan);font:10px var(--mono);padding:0}.cyber-launch:hover{background:#224355}
+    #cyberdefense-modal{width:min(1080px,calc(100% - 32px));height:min(760px,calc(100dvh - 40px));max-height:calc(100vh - 24px);padding:0;overflow:hidden;border-color:#385969;background:radial-gradient(ellipse at 90% 0%,#14303a55,transparent 55%),#0e1725}#cyberdefense-modal[open]{display:flex;flex-direction:column}#cyberdefense-modal::backdrop{background:#040911df;backdrop-filter:blur(9px)}body:has(#cyberdefense-modal[open]){overflow:hidden}.cyber-header{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:22px 25px;border-bottom:1px solid #2c4558;flex-shrink:0}.cyber-header h2{font-size:23px;letter-spacing:-.5px}.cyber-header .eyebrow{color:var(--cyan);margin-bottom:7px}.cyber-header p{font-size:11px;margin-top:6px;line-height:1.6}.cyber-header .button{flex-shrink:0}.cyber-scroll{overflow:auto;min-height:0;flex:1;padding:19px 25px;scrollbar-width:thin;scrollbar-color:#31516b transparent}.cyber-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:17px}.cyber-stat{padding:13px 15px;border:1px solid #2a3e54;border-radius:8px;background:#132234}.cyber-stat-label{font-size:9px;color:#8fa9c5;letter-spacing:.04em}.cyber-stat strong{display:block;margin-top:5px;font:25px var(--mono);color:var(--cyan)}.cyber-stat small{display:block;color:#657f9f;font-size:8px;margin-top:4px}.cyber-layout{display:grid;grid-template-columns:1.25fr 1fr;gap:17px}.cyber-column{min-width:0;display:flex;flex-direction:column;gap:16px}.cyber-panel{border:1px solid #2a3c52;border-radius:9px;background:#111d2d;padding:16px;min-width:0}.cyber-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px}.cyber-panel h3{font-size:12px;font-weight:600;color:#c7d8ec}.cyber-panel-heading .meta{font:9px var(--mono);color:#79aabd}.cyber-chart{width:100%;height:123px;display:block}.cyber-chart-grid{stroke:#2a3c52;stroke-dasharray:3 5;stroke-width:.6}.cyber-chart-bar{fill:#55c6da}.cyber-chart-labels{display:flex;justify-content:space-between;font:8px var(--mono);color:#6c86a5;margin-top:6px}.cyber-chart-note{font:9px/1.7 var(--mono);color:#7f96b4;margin-top:10px;overflow-wrap:anywhere}.cyber-panel p{font-size:10px;line-height:1.7;margin-top:7px}.cyber-form{display:flex;gap:8px;align-items:center;margin-top:13px}.cyber-form select{min-width:0;flex:1;background:#0c1523;border:1px solid #324b66;border-radius:6px;padding:10px;color:#c5d9ec;font:11px var(--mono)}.cyber-form .button{font-size:10px;padding:11px 12px;white-space:nowrap}.cyber-test-label{display:inline-flex;gap:5px;align-items:center;font:8px var(--mono);color:var(--amber);border:1px solid #604c29;background:#3d301a55;border-radius:4px;padding:4px 6px}.cyber-bans{max-height:233px;overflow:auto;scrollbar-width:thin;scrollbar-color:#31516b transparent}.cyber-ban{padding:11px 0;border-top:1px solid #253b50}.cyber-ban:first-child{border-top:0;padding-top:2px}.cyber-ban-head{display:flex;justify-content:space-between;align-items:center;gap:10px}.cyber-ban-ip{font:12px var(--mono);color:#d4e3f5;overflow-wrap:anywhere}.cyber-ban-badge{font:8px var(--mono);padding:4px 6px;border-radius:4px;background:#381e2b;border:1px solid #653449;color:var(--red);flex-shrink:0}.cyber-ban-badge[data-test="true"]{color:var(--amber);border-color:#66512e;background:#342919}.cyber-ban-reason{font-size:10px;line-height:1.6;color:#9db1cc;margin-top:5px;overflow-wrap:anywhere}.cyber-ban-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:7px}.cyber-ban-date{font:8px/1.6 var(--mono);color:#6b84a4;overflow-wrap:anywhere}.cyber-unban{background:#152b3b;border:1px solid #345367;border-radius:5px;padding:6px 9px;color:#8dd4e2;font-size:9px;white-space:nowrap}.cyber-unban:hover{background:#224053}.cyber-empty{padding:17px 0;color:#7087a5;font-size:11px;line-height:1.8}.cyber-audit-score{color:var(--cyan);font:18px var(--mono)}.cyber-audit-list{padding:0 0 0 17px;margin:11px 0;color:#9eb2cd;font-size:10px;line-height:1.8}.cyber-audit-list li+li{margin-top:5px}.cyber-rules{margin-top:12px}.cyber-rules summary{font-size:10px;color:var(--cyan);cursor:pointer}.cyber-rule{margin-top:9px;border:1px solid #28405a;border-radius:6px;padding:9px;background:#0b1625}.cyber-rule strong{display:block;color:#9abbd6;font-size:9px;font-weight:500}.cyber-rule code{display:block;font:9px/1.6 var(--mono);color:#8e9fbf;margin-top:5px;white-space:pre-wrap;overflow-wrap:anywhere}.cyber-feedback{padding:10px 12px;border:1px solid #62384a;border-radius:6px;background:#321d2a;color:var(--red);font-size:11px;line-height:1.7;margin-bottom:14px;overflow-wrap:anywhere}.cyber-feedback[data-tone="success"]{border-color:#2f604d;background:#153328;color:var(--green)}.cyber-persistence{font-size:9px;color:var(--amber);line-height:1.7;margin:0 0 12px;overflow-wrap:anywhere}.cyber-footer{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:11px 25px;border-top:1px solid #2c4359;font:9px var(--mono);color:#6f8aa9;flex-shrink:0}.cyber-footer .button{font-size:10px;padding:8px 11px}
+    @media(max-width:760px){#cyberdefense-modal{width:calc(100% - 20px);height:calc(100dvh - 24px)}.cyber-header{padding:16px}.cyber-header h2{font-size:18px}.cyber-header p{font-size:10px}.cyber-header .button{font-size:10px;padding:9px 11px}.cyber-scroll{padding:14px 16px}.cyber-layout{grid-template-columns:1fr}.cyber-stats{gap:7px}.cyber-stat{padding:11px 9px}.cyber-stat-label{font-size:8px}.cyber-stat strong{font-size:22px}.cyber-stat small{font-size:7px}.cyber-panel{padding:13px}.cyber-chart{height:105px}.cyber-form{flex-wrap:wrap}.cyber-form select{flex-basis:100%}.cyber-form .button{width:100%}.cyber-footer{padding:10px 16px;gap:8px;font-size:8px}.cyber-footer .button{font-size:9px;white-space:nowrap}.cyber-bans{max-height:205px}}
+    .cyber-footer{margin:0}.cyber-route-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:12px}.cyber-route-button{padding:9px 8px;border:1px solid #31465e;background:#0e1928;color:#849cbb;border-radius:6px;font:9px var(--mono);text-align:left;overflow-wrap:anywhere}.cyber-route-button[aria-pressed="true"]{color:var(--cyan);border-color:#41717f;background:#16323f}.cyber-route-button:hover{color:var(--cyan)}.cyber-bans-table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:9px}.cyber-bans-table th{padding:9px 5px;text-align:left;font-size:8px;font-weight:500;color:#7f97b6;border-bottom:1px solid #30475d}.cyber-bans-table td{padding:11px 5px;border-bottom:1px solid #263a4f;vertical-align:top;overflow-wrap:anywhere}.cyber-bans-table th:nth-child(1){width:23%}.cyber-bans-table th:nth-child(2){width:20%}.cyber-bans-table th:nth-child(3){width:27%}.cyber-bans-table th:nth-child(4){width:12%}.cyber-bans-table th:nth-child(5){width:18%}.cyber-bans-table .cyber-ban-ip{font-size:10px}.cyber-bans-table .cyber-ban-reason{font-size:9px;margin:0}.cyber-bans-table .cyber-ban-badge{font-size:7px;padding:3px 4px;display:inline-block}.cyber-bans-table .cyber-unban{font-size:8px;padding:5px 6px}.cyber-audit-simulation{border:1px dashed #665432;border-radius:7px;background:#2c261655;padding:11px;margin-top:15px}.cyber-audit-simulation h4{font-size:10px;color:var(--amber);font-weight:600;margin:0}.cyber-audit-simulation .cyber-audit-list{font-size:9px}.cyber-chart-bar[data-test="true"]{fill:var(--amber)}.cyber-chart-legend{display:flex;gap:12px;font-size:8px;color:#7490ae;margin-top:8px}.cyber-chart-legend span{display:flex;align-items:center;gap:4px}.cyber-chart-legend i{width:5px;height:5px;border-radius:2px;background:var(--cyan)}.cyber-chart-legend span+span i{background:var(--amber)}
+    /* JARVIS Cyberpunk HUD & Modal Styles */
+    .jarvis-strip-trigger{display:inline-flex;align-items:center;gap:7px;padding:3px 9px;border-radius:6px;background:linear-gradient(135deg,#102d38 0%,#0d1e29 100%);border:1px solid #366d7e;color:#9fe9f7;font:9px var(--mono);cursor:pointer;position:relative;transition:all .2s ease}
+    .jarvis-strip-trigger:hover{background:#173f4e;border-color:var(--cyan);box-shadow:0 0 12px rgba(94,217,236,.25)}
+    .jarvis-strip-pulse{width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan);animation:jarvis-pulse 2s infinite}
+    .jarvis-strip-label{font-weight:700;letter-spacing:.06em}
+    .jarvis-badge-status{font-size:7px;padding:1px 4px;border-radius:3px;background:rgba(94,217,236,.15);color:var(--cyan);border:1px solid rgba(94,217,236,.3)}
+    .jarvis-strip-shortcut{font-size:7px;color:#6d889b;margin-left:2px}
+    .voice-strip-divider{width:1px;height:14px;background:#253949;margin:0 4px}
+    #jarvis-modal{width:min(1140px,calc(100% - 32px));height:min(760px,calc(100dvh - 36px));max-height:calc(100vh - 24px);padding:0;overflow:hidden;border:1px solid #2d5568;border-radius:14px;background:radial-gradient(ellipse at 85% 0%,rgba(20,60,75,.4),transparent 60%),#0c1421;color:var(--text);box-shadow:0 0 60px rgba(94,217,236,.14),0 30px 90px #000c}
+    #jarvis-modal[open]{display:flex;flex-direction:column}
+    #jarvis-modal::backdrop{background:rgba(4,9,17,.88);backdrop-filter:blur(10px)}
+    body:has(#jarvis-modal[open]){overflow:hidden}
+    .jarvis-header{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:18px 24px;border-bottom:1px solid #244153;background:#0e1826;flex-shrink:0}
+    .jarvis-header-left{display:flex;align-items:center;gap:12px}
+    .jarvis-mini-reactor{width:34px;height:34px;animation:jarvis-spin-slow 20s linear infinite}
+    .jarvis-title{font-size:19px;font-weight:700;letter-spacing:.03em;color:#e5f6fa;display:flex;align-items:center;gap:8px}
+    .jarvis-title-sub{font-size:11px;font-weight:500;color:var(--cyan);font-family:var(--mono);opacity:.85}
+    .jarvis-header-badges{display:flex;align-items:center;gap:10px}
+    .jarvis-model-badge,.jarvis-tools-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:5px;font:9px var(--mono);background:#132433;border:1px solid #2d4f61;color:#9cd5e3}
+    .jarvis-model-badge .led{width:5px;height:5px;background:var(--green);box-shadow:0 0 6px var(--green)}
+    .jarvis-btn-icon{width:30px;height:30px;display:grid;place-items:center;border:1px solid #2d4757;border-radius:6px;background:#142231;color:#8da4be;cursor:pointer;transition:all .15s}
+    .jarvis-btn-icon:hover{background:#1c3447;color:var(--cyan);border-color:var(--cyan)}
+    .jarvis-body{display:grid;grid-template-columns:1fr 340px;flex:1;min-height:0;overflow:hidden}
+    .jarvis-chat-col{display:flex;flex-direction:column;min-width:0;border-right:1px solid #203546;background:#0a111c;overflow:hidden}
+    .jarvis-chat-stream{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:16px;scrollbar-width:thin;scrollbar-color:#2b455b transparent}
+    .jarvis-msg{display:flex;gap:12px;max-width:92%}
+    .jarvis-msg-user{align-self:flex-end;flex-direction:row-reverse}
+    .jarvis-msg-bot{align-self:flex-start}
+    .jarvis-msg-avatar{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;font:11px/1 var(--mono);font-weight:700;flex-shrink:0}
+    .jarvis-msg-user .jarvis-msg-avatar{background:#173847;color:var(--cyan);border:1px solid #2b5d70}
+    .jarvis-msg-bot .jarvis-msg-avatar{background:linear-gradient(135deg,#103444 0%,#0d2130 100%);color:var(--cyan);border:1px solid #3d798e;box-shadow:0 0 10px rgba(94,217,236,.2)}
+    .jarvis-msg-content{display:flex;flex-direction:column;gap:4px;min-width:0}
+    .jarvis-msg-author{font:9px var(--mono);color:#69829f;display:flex;align-items:center;gap:8px}
+    .jarvis-msg-user .jarvis-msg-author{justify-content:flex-end}
+    .jarvis-msg-text{padding:11px 15px;border-radius:9px;font-size:13px;line-height:1.6;overflow-wrap:break-word;white-space:pre-wrap}
+    .jarvis-msg-user .jarvis-msg-text{background:#172a3a;color:#e2eff8;border:1px solid #2a465c;border-top-right-radius:2px}
+    .jarvis-msg-bot .jarvis-msg-text{background:#101c2a;color:#e5f1fc;border:1px solid #22374b;border-top-left-radius:2px}
+    .jarvis-reasoning{margin-top:8px;border:1px solid #223e52;border-radius:7px;background:#0c1825;font-size:11px;overflow:hidden}
+    .jarvis-reasoning-summary{padding:7px 11px;cursor:pointer;display:flex;align-items:center;gap:7px;color:var(--cyan);font:10px var(--mono);background:#112130;user-select:none}
+    .jarvis-reasoning-summary:hover{background:#162c3e}
+    .jarvis-reasoning-content{padding:10px 12px;display:flex;flex-direction:column;gap:8px;border-top:1px solid #1c3243}
+    .jarvis-thought-step{font:10px/1.5 var(--mono);color:#92abcb;padding-left:10px;border-left:2px solid var(--cyan)}
+    .jarvis-tool-badge-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+    .jarvis-tool-badge{font:8px var(--mono);padding:2px 6px;border-radius:4px;background:#163644;border:1px solid #2f657a;color:var(--cyan);overflow-wrap:anywhere}
+    .jarvis-hud-col{display:flex;flex-direction:column;gap:16px;padding:20px;background:#0e1724;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#2b455b transparent}
+    .jarvis-reactor-card{display:flex;flex-direction:column;align-items:center;padding:18px 14px;border:1px solid #254254;border-radius:10px;background:radial-gradient(circle at center,#132d3d 0%,#0e1b29 70%);box-shadow:inset 0 0 20px rgba(94,217,236,.05)}
+    .jarvis-reactor-container{position:relative;width:140px;height:140px;display:grid;place-items:center}
+    .jarvis-reactor-svg{width:100%;height:100%;overflow:visible;filter:drop-shadow(0 0 12px rgba(94,217,236,.4));transition:filter .3s}
+    .arc-ring-outer{fill:none;stroke:#2e6277;stroke-width:3}
+    .arc-ring-dashes{fill:none;stroke:var(--cyan);stroke-width:3;stroke-dasharray:6 8;animation:jarvis-spin-slow 16s linear infinite;transform-origin:100px 100px}
+    .arc-ring-mid{fill:none;stroke:#1d4657;stroke-width:2}
+    .arc-triangle-ring{fill:none;stroke:rgba(94,217,236,.4);stroke-width:1.5}
+    .arc-inner-poly,.arc-inner-poly-2{fill:none;stroke:var(--cyan);stroke-width:1.8;opacity:.7;animation:jarvis-spin-reverse 12s linear infinite;transform-origin:100px 100px}
+    .arc-inner-poly-2{stroke:#86e4f3;animation:jarvis-spin-slow 10s linear infinite}
+    .arc-core-outer{fill:#113645;stroke:var(--cyan);stroke-width:2.5}
+    .arc-core-inner{fill:#fff;opacity:.95;filter:drop-shadow(0 0 10px #5ed9ec);animation:jarvis-core-pulse 2s ease-in-out infinite}
+    .jarvis-reactor-status{margin-top:10px;font:9px var(--mono);font-weight:700;letter-spacing:.12em;color:var(--cyan);text-transform:uppercase}
+    [data-reactor-state="thinking"] .arc-ring-dashes{animation-duration:2.5s}
+    [data-reactor-state="thinking"] .arc-inner-poly{animation-duration:1.8s}
+    [data-reactor-state="thinking"] .jarvis-reactor-svg{filter:drop-shadow(0 0 24px rgba(94,217,236,.9))}
+    [data-reactor-state="listening"] .arc-core-inner{fill:#ff9d66;filter:drop-shadow(0 0 15px #ff9d66)}
+    [data-reactor-state="listening"] .jarvis-reactor-status{color:#ffaa66}
+    .jarvis-voice-controls{display:flex;flex-direction:column;align-items:center;gap:10px;margin-top:14px;width:100%}
+    .jarvis-mic-btn{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#173847 0%,#102634 100%);border:1px solid #336e82;color:var(--cyan);display:grid;place-items:center;cursor:pointer;position:relative;transition:all .2s}
+    .jarvis-mic-btn:hover{background:#1e4d61;border-color:var(--cyan);box-shadow:0 0 18px rgba(94,217,236,.4)}
+    .jarvis-mic-btn.listening{background:#472118;border-color:#ff738a;color:#ff738a;box-shadow:0 0 20px rgba(255,115,138,.6);animation:jarvis-pulse 1s infinite}
+    .jarvis-mic-icon{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+    .jarvis-mic-hint{font:9px var(--mono);color:#728b9f;text-align:center}
+    .jarvis-tts-switch{display:flex;align-items:center;gap:8px;cursor:pointer;font:10px var(--sans);color:#9ab4cb;margin-top:4px;user-select:none}
+    .jarvis-tts-switch input{display:none}
+    .jarvis-slider{width:28px;height:15px;background:#1c2b3a;border-radius:15px;border:1px solid #324c64;position:relative;transition:.2s}
+    .jarvis-slider:before{content:"";position:absolute;width:11px;height:11px;border-radius:50%;background:#89a3be;top:1px;left:1px;transition:.2s}
+    .jarvis-tts-switch input:checked+.jarvis-slider{background:#164052;border-color:var(--cyan)}
+    .jarvis-tts-switch input:checked+.jarvis-slider:before{transform:translateX(13px);background:var(--cyan);box-shadow:0 0 6px var(--cyan)}
+    .jarvis-chips-card{border:1px solid #233748;border-radius:9px;background:#0f1926;padding:12px}
+    .jarvis-chips-title{font:9px var(--mono);font-weight:700;letter-spacing:.08em;color:#7892ac;margin-bottom:9px}
+    .jarvis-chips-list{display:flex;flex-direction:column;gap:6px}
+    .jarvis-chip{background:#121f2d;border:1px solid #243c50;border-radius:6px;padding:6px 9px;color:#a4bed8;font-size:10px;text-align:left;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .15s}
+    .jarvis-chip:hover{background:#172c3f;border-color:var(--cyan);color:var(--text)}
+    .jarvis-chip-dot{width:4px;height:4px;border-radius:50%;background:var(--cyan);flex-shrink:0}
+    .jarvis-footer{padding:14px 24px;border-top:1px solid #223c4d;background:#0d1624;display:flex;flex-direction:column;gap:8px;flex-shrink:0}
+    .jarvis-input-wrap{display:flex;align-items:center;gap:8px;background:#08101a;border:1px solid #2c4a5c;border-radius:8px;padding:5px 10px;transition:border-color .2s,box-shadow .2s}
+    .jarvis-input-wrap:focus-within{border-color:var(--cyan);box-shadow:0 0 14px rgba(94,217,236,.2)}
+    .jarvis-input-prefix{color:var(--cyan);font:14px var(--mono);font-weight:700;user-select:none}
+    .jarvis-input{flex:1;background:none;border:none;outline:none;color:#edf4fa;font-size:13px;padding:6px 0}
+    .jarvis-send-btn{width:32px;height:32px;border-radius:6px;background:var(--cyan);color:#071922;border:none;display:grid;place-items:center;cursor:pointer;transition:all .15s;flex-shrink:0}
+    .jarvis-send-btn:hover{background:#7ee5f4;box-shadow:0 0 10px var(--cyan)}
+    .jarvis-send-btn:disabled{opacity:.4;cursor:not-allowed}
+    .jarvis-footer-meta{display:flex;justify-content:space-between;font:8px var(--mono);color:#637c95}
+    .jarvis-footer-meta kbd{background:#172433;border:1px solid #283d52;border-radius:3px;padding:1px 4px;color:#92acc8}
+    @keyframes jarvis-spin-slow{100%{transform:rotate(360deg)}}
+    @keyframes jarvis-spin-reverse{100%{transform:rotate(-360deg)}}
+    @keyframes jarvis-core-pulse{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:1;transform:scale(1.1)}}
+    @keyframes jarvis-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.2);opacity:.6}}
+    @media(max-width:900px){.jarvis-body{grid-template-columns:1fr}.jarvis-hud-col{display:none}#jarvis-modal{width:calc(100% - 16px);height:calc(100dvh - 20px)}}
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#overview" style="position:absolute;left:-9999px" onfocus="this.style.left='85px';this.style.top='12px'" onblur="this.style.left='-9999px'">Aller au tableau de bord</a>
+  <aside class="rail" aria-label="Navigation principale">
+    <a class="brand" href="#overview" aria-label="NOC, tableau de bord"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9M8 5.2l8 4.5"/></svg></a>
+    <nav>
+      <a class="nav-link active" href="#overview" aria-label="Vue d’ensemble" aria-current="page"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span class="tooltip">Vue d’ensemble</span></a>
+      <a class="nav-link" href="#services" aria-label="Services et applications"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z"/><path d="m4 12 8 4.5 8-4.5M4 16.5l8 4.5 8-4.5"/></svg><span class="tooltip">Applications</span></a>
+      <a class="nav-link" href="#infrastructure" aria-label="Infrastructure et réseau"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="5" rx="1"/><rect x="2" y="16" width="7" height="5" rx="1"/><rect x="15" y="16" width="7" height="5" rx="1"/><path d="M12 8v4M5.5 16v-4h13v4"/></svg><span class="tooltip">Infrastructure</span></a>
+      <a class="nav-link" href="#events" aria-label="Journal d’événements"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg><span class="tooltip">Journal en direct</span></a>
+    </nav>
+    <button class="rail-bottom" id="refresh-button" type="button" aria-label="Actualiser les mesures"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg><span class="tooltip">Actualiser les mesures</span></button>
+  </aside>
+  <div class="shell">
+    <header class="topbar">
+      <div class="host-block"><div class="host-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M12 6.5h5M12 17.5h5"/></svg></div><div><div class="eyebrow">Serveur central / NOC</div><div class="host-name"><span id="hostname">Connexion en cours…</span><span class="host-platform" id="platform"></span></div></div></div>
+      <div class="topbar-right"><div class="clock mono"><time id="clock-time">--:--:--</time><div class="clock-date" id="clock-date">—</div></div><div class="status-chip" id="global-status" data-tone="warning" role="status"><span class="led"></span><span id="global-status-text">Initialisation</span></div></div>
+    </header>
+    <main id="overview">
+      <div class="page-heading"><h1>Tour de contrôle<span style="color:var(--cyan)">.</span></h1><div class="telemetry-info"><div class="stream-label" id="stream-state" data-tone="warning"><span class="led"></span><span id="stream-state-text">Connexion…</span></div><div class="collection-interval">Collecte <span class="mono">2 s</span></div><div>Relevé <span class="mono" id="last-update">—</span></div></div></div>
+      <div class="connection-banner" id="connection-banner" role="status" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v4M12 17h.01"/></svg><span id="connection-message"></span></div>
+      <section aria-labelledby="hardware-title">
+        <div class="section-heading"><h2 id="hardware-title"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></svg>Ressources matérielles</h2><span class="meta" id="uptime">UPTIME —</span></div>
+        <div class="hardware-grid">
+          <article class="card metric-card cpu-card"><div class="card-top"><div class="card-label"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Processeur</div><span class="meta mono" id="core-count">— CŒURS</span></div><div class="cpu-body"><div class="gauge" id="cpu-gauge" role="img" aria-label="Charge CPU non disponible"><div class="gauge-content"><div class="gauge-number"><span id="cpu-value">—</span><small>%</small></div><span class="gauge-caption">Charge CPU</span></div></div><div class="cpu-trend"><div class="chart-caption"><span>HISTORIQUE DE SESSION</span><span class="mono" id="trend-length">0 / 120</span></div><svg class="trend-svg" id="cpu-chart" viewBox="0 0 200 65" role="img" aria-label="Historique des mesures CPU" preserveAspectRatio="none"><defs><linearGradient id="cpu-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#5ed9ec" stop-opacity=".2"/><stop offset="100%" stop-color="#5ed9ec" stop-opacity="0"/></linearGradient></defs><path class="chart-grid" d="M0 8H200M0 28H200M0 48H200"/><path id="cpu-area" class="chart-area"/><path id="cpu-line" class="chart-line"/><circle id="cpu-dot" class="chart-end" r="2" hidden/></svg><div class="chart-caption"><span>0 %</span><span>100 %</span></div></div></div><div class="core-grid" id="core-grid"><span class="no-data">En attente des mesures par cœur…</span></div></article>
+          <article class="card metric-card memory-card"><div class="card-top"><div class="card-label"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18v10H3V7ZM7 10v4M11 10v4M15 10v4M7 17v3M12 17v3M17 17v3"/></svg>Mémoire</div><span class="meta mono">RAM</span></div><div class="memory-body"><div class="gauge" id="memory-gauge" role="img" aria-label="Mémoire utilisée non disponible"><div class="gauge-content"><div class="gauge-number"><span id="memory-percent">—</span><small>%</small></div><span class="gauge-caption">Utilisée</span></div></div><div class="memory-values"><div class="primary-value" id="memory-used">—</div><div class="secondary-value">sur <span class="mono" id="memory-total">—</span></div></div></div><div class="swap-row"><div class="detail-line"><span>SWAP</span><span class="value" id="swap-value">—</span></div><div class="progress-track" role="progressbar" id="swap-progress" aria-label="Mémoire SWAP" aria-valuemin="0" aria-valuemax="100"><div class="progress-fill" id="swap-fill"></div></div></div></article>
+          <article class="card metric-card temperature-card"><div class="card-top"><div class="card-label"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 14.5V5a3 3 0 0 0-6 0v9.5a5 5 0 1 0 6 0ZM11 8v10M17 5h3M17 9h2"/></svg>Température</div></div><div class="temperature-value"><span id="temperature-value">—</span><small>°C</small></div><div class="thermal-label" id="temperature-label">Capteur en attente</div><div class="temperature-meter" id="temperature-meter" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></article>
+          <article class="card metric-card disk-card"><div class="card-top"><div class="card-label"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 4-3 11v5h20v-5L19 4H5ZM2 15h20M16 18h.01M19 18h.01"/></svg>Stockage</div></div><div class="disk-row"><div class="disk-label"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 14h18M17 16.5h.01"/></svg>Disque racine <span class="muted">/</span></div><div class="disk-data"><span id="root-used">—</span><span class="muted" id="root-percent">—</span></div><div class="progress-track" role="progressbar" id="root-progress" aria-label="Espace utilisé sur le disque racine" aria-valuemin="0" aria-valuemax="100"><div class="progress-fill" id="root-fill"></div></div><div class="disk-sub" id="root-total">Capacité en attente</div></div><div class="disk-row backup"><div class="disk-label"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5V3ZM8 3v7h8M9 15v3M12 15v3M15 15v3"/></svg>Sauvegardes</div><div class="disk-data"><span id="backup-used">—</span><span class="muted" id="backup-percent">—</span></div><div class="progress-track" role="progressbar" id="backup-progress" aria-label="Espace utilisé sur le disque de sauvegarde" aria-valuemin="0" aria-valuemax="100"><div class="progress-fill" id="backup-fill"></div></div><div class="disk-sub" id="backup-total">Point de montage en attente</div></div></article>
+        </div>
+      </section>
+      <section id="services" aria-labelledby="services-title"><div class="section-heading"><h2 id="services-title"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg>Services & applications</h2><span class="meta" id="service-count">— / 4 EN LIGNE</span></div><div class="services-grid" id="services-grid"></div></section>
+      <div class="bottom-grid">
+        <section id="infrastructure" aria-labelledby="infrastructure-title"><div class="section-heading"><h2 id="infrastructure-title"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 17H6a4 4 0 0 1-.7-7.9 7 7 0 0 1 13.4 0A4 4 0 0 1 18 17h-2M12 13v8M9 18l3 3 3-3"/></svg>Infrastructure & réseau</h2><span class="meta">CONNECTIVITÉ</span></div><div class="network-grid"><article class="card network-card"><div class="network-top"><div class="network-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17a4 4 0 0 1-.6-7.8A6 6 0 0 1 16 7a5 5 0 0 1 2 10H5ZM8 13l2-2 2 2 2-2 2 2"/></svg></div><span class="badge" id="cloudflare-badge"><span class="led"></span><span>EN ATTENTE</span></span></div><h3 class="network-name">Cloudflare Tunnel</h3><p class="network-meta">cloudflared</p><div class="network-footer"><span>État systemd</span><strong id="cloudflare-state">—</strong></div><p class="network-error" id="cloudflare-error" hidden></p></article><article class="card network-card"><div class="network-top"><div class="network-icon whatsapp"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a9 9 0 0 1-13.4 7.9L3 21l1.6-4.6A9 9 0 1 1 21 11.5Z"/><path d="M8.5 7.5c-2 3 1 6 4 8l2-1.5-2-2-1 1c-1.5-1-2.5-2-3-3l1-1-1-1.5Z"/></svg></div><span class="badge" id="whatsapp-badge"><span class="led"></span><span>EN ATTENTE</span></span></div><h3 class="network-name">Passerelle WhatsApp</h3><p class="network-meta" id="whatsapp-phone">Session en attente</p><div class="network-footer"><span id="whatsapp-state">klasora-whatsapp</span><strong id="whatsapp-latency">— ms</strong></div><p class="network-error" id="whatsapp-error" hidden></p></article></div></section>
+        <section id="remote-servers" aria-labelledby="vps-title">
+          <div class="section-heading remote-heading"><h2 id="vps-title">Radar Sentinel & cyberdéfense</h2><div class="cyber-launch-controls"><button type="button" class="meta cyber-counter" id="sentinel-block-count" title="IP bloquées aujourd’hui par Sentinel · ouvrir la console de cyberdéfense" aria-haspopup="dialog" aria-controls="cyberdefense-modal">— IP BLOQUÉES</button><button type="button" class="cyber-launch" id="cyberdefense-open" aria-label="Ouvrir la console de cyberdéfense locale" aria-haspopup="dialog" aria-controls="cyberdefense-modal">&gt;_</button></div></div>
+          <div class="card remote-panel">
+            <div class="remote-toolbar"><div class="remote-tabs" role="tablist" aria-label="Serveurs distants et cyberdéfense"><button class="remote-tab" id="vps-tab" type="button" role="tab" aria-selected="false" aria-controls="vps-list" tabindex="-1"><span id="vps-count">0 VPS</span></button><button class="remote-tab" id="sentinel-tab" type="button" role="tab" aria-selected="true" aria-controls="sentinel-list">Sentinel</button></div><span class="sentinel-agent" id="sentinel-agent" data-tone="neutral"><span class="led"></span><span id="sentinel-agent-text">EN ATTENTE</span></span></div>
+            <div class="sentinel-queue-warning" id="sentinel-queue-warning" hidden></div>
+            <div class="vps-panel remote-content" id="vps-list" role="tabpanel" aria-labelledby="vps-tab" tabindex="0" hidden><div class="vps-empty"><div><strong>En attente de télémétrie</strong><p>Les VPS apparaîtront dès leur premier rapport.</p></div></div></div>
+            <div class="remote-content" id="sentinel-list" role="tabpanel" aria-labelledby="sentinel-tab" tabindex="0"><div class="sentinel-empty"><strong>En attente de Sentinel</strong>Le statut de l’agent apparaîtra au prochain relevé.</div></div>
+          </div>
+        </section>
+        <section id="events" aria-labelledby="events-title"><div class="section-heading"><h2 id="events-title"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 6 5 5-5 5M12 17h8"/></svg>Journal d’événements</h2><span class="meta" id="event-count">0 ÉVÉNEMENT</span></div><div class="card terminal-card"><div class="terminal-header"><div class="terminal-dots" aria-hidden="true"><span></span><span></span><span></span></div><span class="terminal-name">noc / live-events</span><div class="console-controls"><button class="console-button" id="autoscroll-button" type="button" aria-pressed="true">Défilement auto</button><button class="console-button" id="events-open" type="button" aria-label="Ouvrir le journal d’événements complet" aria-haspopup="dialog" aria-controls="events-dialog"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>Agrandir</button></div></div><div class="voice-strip"><button id="jarvis-open-btn" class="jarvis-strip-trigger" type="button" aria-label="Ouvrir la console JARVIS" title="Raccourci: Ctrl+Espace ou touche J" aria-haspopup="dialog" aria-controls="jarvis-modal"><span class="jarvis-strip-pulse"></span><span class="jarvis-strip-label">JARVIS AGENT</span><span class="jarvis-badge-status" id="jarvis-strip-badge">STANDBY</span><span class="jarvis-strip-shortcut">Ctrl+Espace</span></button><div class="voice-strip-divider"></div><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg><button id="voice-trigger" class="voice-trigger" type="button" aria-label="Voir la dernière commande WhatsApp" disabled><span class="voice-kicker">WHATSAPP</span><span class="voice-summary" id="voice-summary">En attente du collecteur</span></button><span class="voice-status" id="voice-status">—</span></div><div class="events-list" id="events-list" role="log" aria-label="Événements de supervision" aria-live="polite" aria-relevant="additions"><p class="console-empty" id="events-empty">Connexion au collecteur…<br>Les changements d’état s’afficheront ici.<span class="terminal-cursor" aria-hidden="true"></span></p></div><div class="terminal-footer"><span id="console-state">EN ATTENTE DU FLUX</span><span>200 événements max.</span></div></div></section>
+      </div>
+      <footer><div class="footer-left"><span>NOC <span style="color:#8194af">/</span> MISSION CONTROL</span><span class="footer-status" id="footer-status"><span class="led"></span><span id="collector-label">Collecteur en attente</span></span></div><span>Processus : <span id="process-memory">—</span> · Flux SSE</span></footer>
+    </main>
+  </div>
+  <template id="service-template"><article class="card service-card"><div class="service-header"><div class="service-logo"></div><div class="service-identity"><h3 class="service-name"></h3><p class="service-port"></p></div><span class="badge service-badge"><span class="led"></span><span class="service-badge-text">EN ATTENTE</span></span></div><div class="service-measure"><div><div class="service-measure-label">Réponse HTTP</div><div class="latency"><span class="service-latency">—</span><small>ms</small></div></div><span class="http-status">HTTP —</span></div><div class="service-footer"><span class="service-systemd">systemd : —</span><button class="restart-button" type="button" disabled><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg>Restart</button></div><p class="service-error" hidden></p></article></template>
+  <dialog id="jarvis-modal" aria-labelledby="jarvis-modal-title" aria-describedby="jarvis-modal-title">
+    <header class="jarvis-header">
+      <div class="jarvis-header-left">
+        <svg viewBox="0 0 36 36" class="jarvis-mini-reactor" aria-hidden="true">
+          <circle cx="18" cy="18" r="16" stroke="rgba(94,217,236,0.3)" stroke-width="2" fill="none"/>
+          <circle cx="18" cy="18" r="11" stroke="#5ed9ec" stroke-dasharray="3 3" stroke-width="2" fill="none"/>
+          <circle cx="18" cy="18" r="5" fill="#5ed9ec"/>
+        </svg>
+        <div>
+          <div class="eyebrow" style="color:var(--cyan);letter-spacing:.14em">NOC MISSION CONTROL · AGENT AUTONOME</div>
+          <h2 id="jarvis-modal-title" class="jarvis-title">JARVIS <span class="jarvis-title-sub">v4.0 ReAct Headless</span></h2>
+        </div>
+      </div>
+      <div class="jarvis-header-badges">
+        <span class="jarvis-model-badge" id="jarvis-model-badge"><span class="led"></span> qwen3:8b @ Ollama</span>
+        <span class="jarvis-tools-badge" id="jarvis-tools-badge">46 outils ReAct</span>
+        <button type="button" class="jarvis-btn-icon" id="jarvis-clear-btn" title="Vider l'historique">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
+        </button>
+        <button type="button" class="jarvis-btn-icon" id="jarvis-close-btn" title="Fermer la console (Échap)">✕</button>
+      </div>
+    </header>
+    <div class="jarvis-body">
+      <section class="jarvis-chat-col">
+        <div class="jarvis-chat-stream" id="jarvis-chat-stream" role="log" aria-live="polite">
+          <div class="jarvis-msg jarvis-msg-bot">
+            <div class="jarvis-msg-avatar">J</div>
+            <div class="jarvis-msg-content">
+              <div class="jarvis-msg-author">JARVIS CORE <time class="mono">Initialisé</time></div>
+              <div class="jarvis-msg-text">Bonjour monsieur. Moteur ReAct headless opérationnel, connecté à la mémoire SQLite locale et aux 46 outils de contrôle. Comment puis-je vous assister ?</div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <aside class="jarvis-hud-col">
+        <div class="jarvis-reactor-card">
+          <div class="jarvis-reactor-container" id="jarvis-reactor" data-reactor-state="idle">
+            <svg class="jarvis-reactor-svg" viewBox="0 0 200 200" aria-hidden="true">
+              <circle cx="100" cy="100" r="92" class="arc-ring-outer"/>
+              <circle cx="100" cy="100" r="78" class="arc-ring-dashes"/>
+              <circle cx="100" cy="100" r="62" class="arc-ring-mid"/>
+              <circle cx="100" cy="100" r="48" class="arc-triangle-ring"/>
+              <polygon points="100,64 131,118 69,118" class="arc-inner-poly"/>
+              <polygon points="100,136 69,82 131,82" class="arc-inner-poly-2"/>
+              <circle cx="100" cy="100" r="28" class="arc-core-outer"/>
+              <circle cx="100" cy="100" r="16" class="arc-core-inner"/>
+            </svg>
+            <div class="jarvis-reactor-status" id="jarvis-reactor-status">STANDBY</div>
+          </div>
+          <div class="jarvis-voice-controls">
+            <button type="button" class="jarvis-mic-btn" id="jarvis-mic-btn" aria-label="Activer la reconnaissance vocale" title="Parler à Jarvis (Web Speech API)">
+              <svg class="jarvis-mic-icon" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/></svg>
+            </button>
+            <div class="jarvis-mic-hint" id="jarvis-mic-hint">Microphone (Web Speech API)</div>
+            <label class="jarvis-tts-switch" title="Activer la synthèse vocale pour les réponses de Jarvis">
+              <input type="checkbox" id="jarvis-tts-toggle" checked>
+              <span class="jarvis-slider"></span>
+              <span>Synthèse vocale (TTS)</span>
+            </label>
+          </div>
+        </div>
+        <div class="jarvis-chips-card">
+          <div class="jarvis-chips-title">COMMANDES RECOMMANDÉES</div>
+          <div class="jarvis-chips-list">
+            <button type="button" class="jarvis-chip" data-prompt="Quel est l'état global du système et de l'infrastructure ?"><span class="jarvis-chip-dot"></span> État global infrastructure</button>
+            <button type="button" class="jarvis-chip" data-prompt="Vérifie la température CPU, la RAM et l'utilisation disque."><span class="jarvis-chip-dot"></span> Température & Ressources</button>
+            <button type="button" class="jarvis-chip" data-prompt="Quel est le statut de l'infrastructure IoT et des relais ?"><span class="jarvis-chip-dot"></span> Statut capteurs & IoT</button>
+            <button type="button" class="jarvis-chip" data-prompt="Vérifie le point de montage des sauvegardes et l'espace restant."><span class="jarvis-chip-dot"></span> Sauvegardes & Disques</button>
+            <button type="button" class="jarvis-chip" data-prompt="Résume les tâches et rappels en attente dans ma mémoire."><span class="jarvis-chip-dot"></span> Tâches & Rappels</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+    <footer class="jarvis-footer">
+      <form id="jarvis-form" class="jarvis-form">
+        <div class="jarvis-input-wrap">
+          <span class="jarvis-input-prefix">&gt;</span>
+          <input type="text" id="jarvis-input" class="jarvis-input" placeholder="Demandez une action ou une analyse à Jarvis... (Entrée pour envoyer)" autocomplete="off">
+          <button type="submit" id="jarvis-send-btn" class="jarvis-send-btn" aria-label="Envoyer à Jarvis">
+            <svg class="icon" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+          </button>
+        </div>
+      </form>
+      <div class="jarvis-footer-meta">
+        <span>Raccourcis : <kbd>Entrée</kbd> Envoyer · <kbd>Échap</kbd> Fermer · <kbd>Ctrl+Espace</kbd> ou <kbd>J</kbd> Basculer</span>
+        <span id="jarvis-session-id" class="mono">Session : active</span>
+      </div>
+    </footer>
+  </dialog>
+  <dialog id="events-dialog" aria-labelledby="events-dialog-title" aria-describedby="events-dialog-description">
+    <div class="events-dialog-header"><div class="events-dialog-heading"><div class="eyebrow">SUPERVISION · FLUX SSE</div><h2 id="events-dialog-title">Journal d’événements</h2><p id="events-dialog-description">Messages complets et horodatages détaillés, actualisés en direct.</p></div><button class="button" id="events-close" type="button" autofocus>Fermer</button></div>
+    <div class="events-dialog-toolbar"><span id="events-dialog-count">0 ÉVÉNEMENT</span><button class="console-button" id="events-dialog-autoscroll" type="button" aria-pressed="true">Défilement auto</button></div>
+    <div class="events-list" id="events-dialog-list" role="log" aria-label="Journal complet de supervision" aria-live="polite" aria-relevant="additions"><p class="console-empty">Aucun événement disponible pour le moment.</p></div>
+    <div class="terminal-footer"><span id="events-dialog-state" data-tone="warning">EN ATTENTE DU FLUX</span><span>200 événements max. · Échap pour fermer</span></div>
+  </dialog>
+  <dialog id="voice-dialog" aria-labelledby="voice-title">
+    <div class="eyebrow" style="margin-bottom:8px">WHATSAPP · VOICE-TO-ACTION</div><h2 id="voice-title">Module vocal</h2><div class="voice-detail-meta" id="voice-module-meta">En attente du collecteur</div><div class="voice-detail-meta" id="voice-detail-meta">Aucune commande reçue pour le moment.</div>
+    <div id="voice-command-details" hidden><div class="voice-detail-label">Transcription / message</div><div class="voice-detail-text" id="voice-transcription"></div><div class="voice-detail-label">Réponse</div><div class="voice-detail-text" id="voice-response"></div></div>
+    <details class="voice-simulation"><summary>Simuler une commande</summary><p class="voice-simulation-note">Simulation uniquement : aucune action sur les services et aucun envoi WhatsApp.</p><form id="voice-simulate-form"><label class="dialog-label" for="voice-simulate-command">Commande à tester</label><select id="voice-simulate-command" name="text"><option value="statut">statut</option><option value="restart babamarket">restart babamarket</option></select><div class="voice-simulation-feedback" id="voice-simulate-feedback" role="status" hidden></div><div class="dialog-actions"><button class="button primary" id="voice-simulate-submit" type="submit">Lancer la simulation</button></div></form></details>
+    <div class="dialog-actions"><button class="button" id="voice-close" type="button">Fermer</button></div>
+  </dialog>
+  <dialog id="cyberdefense-modal" aria-labelledby="cyberdefense-title" aria-describedby="cyberdefense-description">
+    <header class="cyber-header"><div><div class="eyebrow">NOC / DÉFENSE APPLICATIVE</div><h2 id="cyberdefense-title">Console de cyberdéfense</h2><p id="cyberdefense-description">Règles locales du dashboard · Sentinel SSH conserve son propre compteur.</p></div><button type="button" class="button" id="cyberdefense-close" autofocus>Fermer</button></header>
+    <div class="cyber-scroll">
+      <div class="cyber-feedback" id="cyber-feedback" role="status" hidden></div><div class="cyber-persistence" id="cyber-persistence-warning" hidden></div>
+      <div class="cyber-stats"><div class="cyber-stat"><div class="cyber-stat-label">BANNISSEMENTS LOCAUX</div><strong id="cyber-active-bans">—</strong><small>Actifs · réels uniquement</small></div><div class="cyber-stat"><div class="cyber-stat-label">BLOCAGES AUJOURD’HUI</div><strong id="cyber-blocked-today">—</strong><small>Nouvelles IP réelles · application</small></div><div class="cyber-stat"><div class="cyber-stat-label">SENTINEL SSH</div><strong id="cyber-sentinel-count">—</strong><small>IP bloquées · compteur séparé</small></div></div>
+      <div class="cyber-layout">
+        <div class="cyber-column">
+          <section class="cyber-panel" aria-labelledby="cyber-traffic-title"><div class="cyber-panel-heading"><h3 id="cyber-traffic-title">Trafic local · 60 minutes</h3><span class="meta" id="cyber-traffic-total">— REQUÊTES</span></div><svg class="cyber-chart" id="cyber-traffic-chart" viewBox="0 0 600 130" role="img" aria-label="Activité locale des 60 dernières minutes" preserveAspectRatio="none"><path class="cyber-chart-grid" d="M0 10H600M0 50H600M0 90H600M0 125H600"/><g id="cyber-traffic-bars"></g><text id="cyber-traffic-empty" x="300" y="66" text-anchor="middle" fill="#7188a7" font-size="11">Aucune mesure disponible</text></svg><div class="cyber-chart-labels"><span>−60 min</span><span id="cyber-traffic-peak">Pic — / min</span><span>Maintenant</span></div><div class="cyber-chart-legend"><span><i aria-hidden="true"></i>Réel</span><span><i aria-hidden="true"></i>Simulation TEST</span></div><div class="cyber-chart-note" id="cyber-latest-attempt">Les mesures réelles arrivent par le flux SSE.</div></section>
+          <section class="cyber-panel" aria-labelledby="cyber-bans-title"><div class="cyber-panel-heading"><h3 id="cyber-bans-title">Adresses bannies</h3><span class="meta" id="cyber-ban-count">— IP</span></div><div class="cyber-bans"><table class="cyber-bans-table" aria-labelledby="cyber-bans-title"><thead><tr><th scope="col">IP</th><th scope="col">Date</th><th scope="col">Motif</th><th scope="col">État</th><th scope="col">Action</th></tr></thead><tbody id="cyber-bans-list"><tr class="cyber-empty-row"><td colspan="5" class="cyber-empty">En attente de la liste des bannissements.</td></tr></tbody></table></div></section>
+        </div>
+        <div class="cyber-column">
+          <section class="cyber-panel" aria-labelledby="cyber-sentinel-title"><div class="cyber-panel-heading"><h3 id="cyber-sentinel-title">Sentinel VPS · lecture seule</h3><span class="meta" id="cyber-sentinel-agent">—</span></div><p class="muted" id="cyber-sentinel-summary">En attente de l’agent Sentinel.</p><div class="cyber-chart-note" id="cyber-sentinel-incidents"></div></section>
+          <section class="cyber-panel" aria-labelledby="cyber-simulator-title"><div class="cyber-panel-heading"><h3 id="cyber-simulator-title">Simulateur de requêtes</h3><span class="cyber-test-label">TEST · 198.51.100.x</span></div><p>Déclenche une tentative sur une IP de documentation, puis son bannissement local de test. Les tests sont exclus des compteurs réels et de l’audit principal.</p><div class="cyber-chart-note" id="cyber-simulated-bans">— bannissement(s) de test actif(s)</div><div class="cyber-route-grid" role="group" aria-label="Choisir une route à simuler"><button type="button" class="cyber-route-button" data-cyber-path="/wp-admin.php" aria-pressed="true">Simuler /wp-admin.php</button><button type="button" class="cyber-route-button" data-cyber-path="/.env" aria-pressed="false">Simuler /.env</button><button type="button" class="cyber-route-button" data-cyber-path="/phpmyadmin" aria-pressed="false">Simuler /phpmyadmin</button><button type="button" class="cyber-route-button" data-cyber-path="/api/config" aria-pressed="false">Simuler /api/config</button></div><form id="cyber-simulate-form" class="cyber-form"><select id="cyber-simulate-path" name="path" aria-label="Chemin à simuler" hidden><option value="/wp-admin.php">/wp-admin.php</option><option value="/.env">/.env</option><option value="/phpmyadmin">/phpmyadmin</option><option value="/api/config">/api/config</option></select><button type="submit" class="button primary" id="cyber-simulate-submit">Déclencher & bannir</button></form></section>
+          <section class="cyber-panel" aria-labelledby="cyber-audit-title"><div class="cyber-panel-heading"><h3 id="cyber-audit-title">Audit local heuristique</h3><span class="cyber-audit-score" id="cyber-audit-score">—</span></div><p class="muted">Analyse des requêtes et règles de cette application. Le score décrit ces vérifications locales.</p><p id="cyber-audit-summary">Aucun résultat d’audit disponible.</p><ul class="cyber-audit-list" id="cyber-audit-recommendations"></ul><button type="button" class="button" id="cyber-audit-submit">Analyser & générer les règles</button><details class="cyber-rules"><summary id="cyber-rule-count">Règles locales</summary><div id="cyber-rules-list"></div></details><div id="cyber-audit-simulation" class="cyber-audit-simulation" hidden><h4>Exercice TEST · analyse séparée</h4><p id="cyber-audit-simulation-summary"></p><ul id="cyber-audit-simulation-recommendations" class="cyber-audit-list"></ul><details class="cyber-rules"><summary>Règles proposées pour cet exercice</summary><div id="cyber-audit-simulation-rules"></div></details></div></section>
+        </div>
+      </div>
+    </div>
+    <footer class="cyber-footer"><span id="cyber-persistence-status">Mode application · en attente</span><button type="button" class="button" id="cyber-export">Exporter JSON</button></footer>
+  </dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <script>
+    'use strict';
+    (() => {
+      const $ = id => document.getElementById(id);
+      const set = (id, value) => { $(id).textContent = value; };
+      const isNumber = value => typeof value === 'number' && Number.isFinite(value);
+      const bounded = value => isNumber(value) ? Math.max(0, Math.min(100, value)) : null;
+      const numeric = (value, digits = 0) => isNumber(value) ? value.toLocaleString('fr-FR', {maximumFractionDigits: digits, minimumFractionDigits: digits}) : '—';
+      const bytes = value => {
+        if (!isNumber(value) || value < 0) return '—';
+        if (value === 0) return '0 o';
+        const units = ['o', 'Kio', 'Mio', 'Gio', 'Tio'];
+        const power = Math.min(4, Math.floor(Math.log(value) / Math.log(1024)));
+        return numeric(value / 1024 ** power, power >= 2 ? 1 : 0) + ' ' + units[power];
+      };
+      const dateValid = value => value && !Number.isNaN(new Date(value).getTime());
+      const clockFormat = new Intl.DateTimeFormat('fr-FR', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+      const shortDateFormat = new Intl.DateTimeFormat('fr-FR', {day:'2-digit', month:'short', year:'numeric'});
+      const eventDateFormat = new Intl.DateTimeFormat('fr-FR', {dateStyle:'short', timeStyle:'medium'});
+      const time = value => dateValid(value) ? clockFormat.format(new Date(value)) : '—';
+      const ageLabel = seconds => {
+        if (!isNumber(seconds) || seconds < 0) return '—';
+        if (seconds < 60) return Math.floor(seconds) + ' s';
+        if (seconds < 3600) return Math.floor(seconds / 60) + ' min';
+        if (seconds < 86400) return Math.floor(seconds / 3600) + ' h ' + Math.floor((seconds % 3600) / 60) + ' min';
+        return Math.floor(seconds / 86400) + ' j ' + Math.floor((seconds % 86400) / 3600) + ' h';
+      };
+      const serviceDefinitions = [
+        {name:'merca-market', label:'Merca-Market', port:5006, monogram:'MM'},
+        {name:'klasora', label:'Klasora', port:5005, monogram:'KL'},
+        {name:'babamarket', label:'BabaMarket', port:5002, monogram:'BM'},
+        {name:'moc-mal', label:'Moc-Mal', port:5003, monogram:'MC'}
+      ];
+      const state = {snapshot:null, stream:null, lastReceipt:0, lastTimestamp:null, history:[], seenEvents:new Set(), autoScroll:true, eventDialogAutoScroll:true, stale:true, probePending:false, lastProbe:0, restartPending:new Set(), restartCooldown:new Map(), toastTimer:null, voiceCommand:null, sentinelSignature:null, remoteTab:'sentinel', simulating:false, cyber:null, cyberPending:new Set(), cyberBanSignature:null, cyberOpener:null};
+      const serviceNodes = new Map();
+      serviceDefinitions.forEach(definition => {
+        const card = $('service-template').content.firstElementChild.cloneNode(true);
+        card.querySelector('.service-logo').textContent = definition.monogram;
+        card.querySelector('.service-name').textContent = definition.label;
+        card.querySelector('.service-port').textContent = '127.0.0.1:' + definition.port;
+        card.querySelector('.restart-button').addEventListener('click', () => openRestart(definition.name, definition.label));
+        $('services-grid').append(card);
+        serviceNodes.set(definition.name, card);
+      });
+      function setBadge(node, text, tone = 'neutral') {
+        node.dataset.tone = tone;
+        node.lastElementChild.textContent = text;
+      }
+      function setProgress(prefix, value) {
+        const percent = bounded(value);
+        $(prefix + '-fill').style.width = (percent ?? 0) + '%';
+        const progress = $(prefix + '-progress');
+        if (percent === null) { progress.removeAttribute('aria-valuenow'); progress.setAttribute('aria-valuetext', 'Non disponible'); }
+        else { progress.setAttribute('aria-valuenow', String(percent)); progress.setAttribute('aria-valuetext', numeric(percent, 1) + ' %'); }
+      }
+      function setGauge(prefix, value, label) {
+        const percent = bounded(value);
+        $(prefix + '-gauge').style.setProperty('--progress', String(percent ?? 0));
+        $(prefix + '-gauge').setAttribute('aria-label', percent === null ? label + ' non disponible' : label + ' : ' + numeric(percent) + ' %');
+        set(prefix === 'cpu' ? 'cpu-value' : 'memory-percent', numeric(percent));
+      }
+      function displayError(id, value) { const node = $(id); node.textContent = value ? String(value) : ''; node.hidden = !value; }
+      function setStream(connected, message) {
+        state.stale = !connected;
+        $('stream-state').dataset.tone = connected ? 'success' : 'warning';
+        set('stream-state-text', connected ? 'Flux en direct' : 'Flux interrompu');
+        set('console-state', connected ? 'FLUX CONNECTÉ · SSE' : 'RECONNEXION EN COURS');
+        set('events-dialog-state', connected ? 'FLUX CONNECTÉ · SSE' : 'RECONNEXION EN COURS');
+        $('events-dialog-state').dataset.tone = connected ? 'success' : 'warning';
+        $('connection-banner').hidden = connected;
+        set('connection-message', message || 'Connexion interrompue. Les dernières mesures sont conservées pendant la reconnexion.');
+        updateGlobalStatus();
+      }
+      function updateGlobalStatus() {
+        const status = state.snapshot?.global_status;
+        let label = 'Initialisation', tone = 'warning';
+        if (state.snapshot && state.stale) label = 'Données anciennes';
+        else if (status === 'operational') { label = 'Système 100% opérationnel'; tone = 'success'; }
+        else if (status === 'incident') { label = 'Incident détecté'; tone = 'error'; }
+        else if (status === 'starting') label = 'Initialisation en cours';
+        else if (state.snapshot) label = 'État indisponible';
+        $('global-status').dataset.tone = tone;
+        set('global-status-text', label);
+      }
+      function drawTrend() {
+        const values = state.history;
+        set('trend-length', values.length + ' / 120');
+        const points = values.map((value, index) => ({x:values.length > 1 ? index * 196 / (values.length - 1) + 2 : 2, y:60 - value * .52}));
+        $('cpu-line').setAttribute('d', points.map((point, index) => (index ? 'L' : 'M') + point.x.toFixed(2) + ' ' + point.y.toFixed(2)).join(' '));
+        $('cpu-area').setAttribute('d', points.length > 1 ? 'M' + points[0].x + ' 64 ' + points.map(point => 'L' + point.x.toFixed(2) + ' ' + point.y.toFixed(2)).join(' ') + ' L' + points.at(-1).x + ' 64 Z' : '');
+        const last = points.at(-1);
+        if (last) { $('cpu-dot').setAttribute('cx', String(last.x)); $('cpu-dot').setAttribute('cy', String(last.y)); $('cpu-dot').removeAttribute('hidden'); }
+        else $('cpu-dot').setAttribute('hidden', '');
+      }
+      function renderCores(cores) {
+        const container = $('core-grid');
+        container.replaceChildren();
+        if (!Array.isArray(cores) || !cores.length) {
+          const empty = document.createElement('span'); empty.className = 'no-data'; empty.textContent = 'Mesures par cœur non disponibles'; container.append(empty); return;
+        }
+        cores.forEach((value, index) => {
+          const item = document.createElement('div'); item.className = 'core-item';
+          const label = document.createElement('div'); label.className = 'core-label';
+          const name = document.createElement('span'); name.textContent = 'C' + String(index + 1).padStart(2,'0');
+          const amount = document.createElement('span'); amount.textContent = numeric(bounded(value)) + '%';
+          label.append(name, amount);
+          const track = document.createElement('div'); track.className = 'core-track';
+          const fill = document.createElement('div'); fill.className = 'core-fill'; fill.style.width = (bounded(value) ?? 0) + '%'; track.append(fill);
+          item.append(label, track); container.append(item);
+        });
+      }
+      function renderDisk(prefix, data, isBackup = false) {
+        const available = data && !data.error && (!isBackup || data.mounted === true);
+        set(prefix + '-used', available ? bytes(data.used) : '—');
+        set(prefix + '-percent', available && isNumber(data.percent) ? numeric(data.percent) + ' %' : '—');
+        setProgress(prefix, available ? data.percent : null);
+        let details = available ? bytes(data.total) + ' au total' : 'Mesure non disponible';
+        if (isBackup && data?.mounted === false) details = 'Point de montage absent';
+        if (data?.error) details = String(data.error);
+        set(prefix + '-total', details);
+        $(prefix + '-total').title = data?.path || '';
+      }
+      function renderHardware(hardware = {}) {
+        const cpu = hardware.cpu || {}, memory = hardware.memory || {}, swap = hardware.swap || {};
+        setGauge('cpu', cpu.percent, 'Charge CPU'); setGauge('memory', memory.percent, 'Mémoire utilisée');
+        set('core-count', Array.isArray(cpu.cores) && cpu.cores.length ? cpu.cores.length + ' CŒURS' : '— CŒURS');
+        renderCores(cpu.cores);
+        set('memory-used', bytes(memory.used)); set('memory-total', bytes(memory.total));
+        set('swap-value', bytes(swap.used) + ' / ' + bytes(swap.total)); setProgress('swap', swap.percent);
+        const temperature = hardware.temperature_c;
+        set('temperature-value', numeric(temperature));
+        set('temperature-label', !isNumber(temperature) ? 'Capteur non disponible' : temperature >= 85 ? 'Température élevée' : temperature >= 75 ? 'À surveiller' : 'Température normale');
+        $('temperature-meter').dataset.tone = isNumber(temperature) && temperature >= 85 ? 'error' : isNumber(temperature) && temperature >= 75 ? 'warning' : 'success';
+        const segments = $('temperature-meter').children;
+        Array.from(segments).forEach((segment, index) => segment.classList.toggle('lit', isNumber(temperature) && index < Math.min(12, Math.max(0, Math.round(temperature / 100 * 12)))));
+        renderDisk('root', hardware.disks?.root); renderDisk('backup', hardware.disks?.backup, true);
+        set('process-memory', bytes(hardware.process_rss_bytes));
+      }
+      function renderServices(services = [], restartEnabled = false) {
+        const list = Array.isArray(services) ? services : [];
+        let healthy = 0;
+        serviceDefinitions.forEach(definition => {
+          const service = list.find(item => item?.name === definition.name);
+          const card = serviceNodes.get(definition.name);
+          const known = service && typeof service.healthy === 'boolean';
+          const tone = known ? service.healthy ? 'success' : 'error' : 'neutral';
+          if (known && service.healthy) healthy++;
+          card.dataset.tone = tone;
+          setBadge(card.querySelector('.service-badge'), known ? service.healthy ? 'EN LIGNE' : 'INCIDENT' : 'EN ATTENTE', tone);
+          card.querySelector('.service-name').textContent = service?.label || definition.label;
+          card.querySelector('.service-port').textContent = '127.0.0.1:' + (service?.port ?? definition.port);
+          card.querySelector('.service-latency').textContent = numeric(service?.latency_ms, 1);
+          card.querySelector('.http-status').textContent = 'HTTP ' + (service?.http_status ?? '—');
+          card.querySelector('.service-systemd').textContent = 'systemd : ' + (service?.systemd || '—');
+          const button = card.querySelector('.restart-button');
+          const pending = state.restartPending.has(definition.name);
+          const remaining = Math.max(0, Math.ceil(((state.restartCooldown.get(definition.name) || 0) - Date.now()) / 1000));
+          button.disabled = !restartEnabled || state.stale || pending || remaining > 0;
+          button.title = !restartEnabled ? 'Redémarrage désactivé dans la configuration' : state.stale ? 'En attente du flux de supervision' : pending ? 'Redémarrage en cours' : remaining > 0 ? 'Prochain redémarrage possible dans ' + remaining + ' s' : 'Redémarrer ' + definition.label;
+          button.setAttribute('aria-busy', String(pending));
+          button.setAttribute('aria-label', 'Redémarrer ' + definition.label);
+          const error = card.querySelector('.service-error'); error.textContent = service?.error || ''; error.hidden = !service?.error;
+          card.title = service?.checked_at ? 'Dernière vérification : ' + time(service.checked_at) : '';
+        });
+        set('service-count', (list.length ? healthy : '—') + ' / 4 EN LIGNE');
+      }
+      function renderInfrastructure(infrastructure = {}) {
+        const cloud = infrastructure.cloudflared, whats = infrastructure.whatsapp;
+        const cloudKnown = cloud && typeof cloud.healthy === 'boolean';
+        setBadge($('cloudflare-badge'), cloudKnown ? cloud.healthy ? 'ACTIF' : 'INACTIF' : 'INCONNU', cloudKnown ? cloud.healthy ? 'success' : 'error' : 'neutral');
+        set('cloudflare-state', cloud?.systemd || '—'); displayError('cloudflare-error', cloud?.error);
+        const whatsappKnown = whats && typeof whats.connected === 'boolean';
+        const connected = whatsappKnown && whats.connected;
+        setBadge($('whatsapp-badge'), whatsappKnown ? connected ? 'CONNECTÉ' : 'DÉCONNECTÉ' : 'INCONNU', whatsappKnown ? connected && whats.healthy ? 'success' : 'error' : 'neutral');
+        set('whatsapp-phone', whats?.phone || (connected ? 'Session connectée · numéro indisponible' : 'Aucun numéro connecté'));
+        set('whatsapp-state', 'systemd : ' + (whats?.systemd || '—'));
+        set('whatsapp-latency', numeric(whats?.latency_ms, 1) + ' ms'); displayError('whatsapp-error', whats?.error);
+      }
+      function renderVps(servers = []) {
+        const container = $('vps-list'), list = Array.isArray(servers) ? servers : [];
+        set('vps-count', list.length + ' VPS');
+        if (!list.length) {
+          container.replaceChildren();
+          const empty = document.createElement('div'); empty.className = 'vps-empty';
+          const icon = document.createElement('div'); icon.className = 'vps-empty-icon'; icon.textContent = '+'; icon.setAttribute('aria-hidden','true');
+          const text = document.createElement('div'), title = document.createElement('strong'), note = document.createElement('p');
+          title.textContent = 'Aucun VPS connecté'; note.textContent = 'Les VPS apparaîtront dès leur premier rapport.';
+          text.append(title,note); empty.append(icon,text); container.append(empty); return;
+        }
+        const fragment = document.createDocumentFragment();
+        list.forEach(server => {
+          if (!server || typeof server !== 'object') return;
+          const item = document.createElement('article'); item.className = 'vps-item';
+          const row = document.createElement('div'); row.className = 'vps-row';
+          const hostname = document.createElement('h3'); hostname.className = 'vps-host'; hostname.textContent = server.hostname || 'VPS sans nom';
+          const badge = document.createElement('span'); badge.className = 'badge'; badge.dataset.tone = server.stale ? 'warning' : server.healthy === false ? 'error' : 'success';
+          const led = document.createElement('span'); led.className = 'led';
+          const label = document.createElement('span'); label.textContent = server.stale ? 'RAPPORT ANCIEN' : server.healthy === false ? 'INCIDENT' : 'CONNECTÉ'; badge.append(led,label); row.append(hostname,badge);
+          const stats = document.createElement('div'); stats.className = 'vps-stats';
+          [['CPU',server.cpu_percent,varColor('cyan')],['RAM',server.memory?.percent,varColor('green')],['DISQUE',server.disk?.percent,'#9d96eb']].forEach(([name, percent, color]) => {
+            const stat = document.createElement('div'); stat.className = 'vps-stat';
+            const line = document.createElement('div'); line.className = 'detail-line';
+            const title = document.createElement('span'); title.textContent = name;
+            const amount = document.createElement('span'); amount.className = 'value'; amount.textContent = numeric(bounded(percent)) + ' %'; line.append(title,amount);
+            const track = document.createElement('div'); track.className = 'progress-track'; track.setAttribute('aria-label',name + ' ' + amount.textContent);
+            const fill = document.createElement('div'); fill.className = 'progress-fill'; fill.style.width = (bounded(percent) ?? 0) + '%'; fill.style.background = color; track.append(fill); stat.append(line,track); stats.append(stat);
+          });
+          item.append(row,stats);
+          if (Array.isArray(server.services) && server.services.length) {
+            const services = document.createElement('div'); services.className = 'vps-services';
+            server.services.forEach(service => {
+              if (!service || typeof service !== 'object') return;
+              const serviceBadge = document.createElement('span'); serviceBadge.className = 'badge';
+              serviceBadge.dataset.tone = service.status === 'active' || service.status === 'up' ? 'success' : service.status === 'failed' || service.status === 'inactive' || service.status === 'down' ? 'error' : 'neutral';
+              serviceBadge.textContent = (service.name || 'Service') + ' · ' + (service.status || 'inconnu'); services.append(serviceBadge);
+            });
+            item.append(services);
+          }
+          const age = document.createElement('div'); age.className = 'vps-age';
+          age.textContent = 'Dernier rapport : ' + time(server.last_seen) + ' · il y a ' + ageLabel(server.age_seconds); item.append(age); fragment.append(item);
+        });
+        container.replaceChildren(fragment);
+      }
+      function varColor(name) { return 'var(--' + name + ')'; }
+      function selectRemoteTab(name, focus = false) {
+        state.remoteTab = name === 'vps' ? 'vps' : 'sentinel';
+        ['vps', 'sentinel'].forEach(tab => {
+          const selected = tab === state.remoteTab, button = $(tab + '-tab');
+          button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1;
+          $(tab + '-list').hidden = !selected;
+          if (focus && selected) button.focus();
+        });
+        try { localStorage.setItem('noc.remote-tab', state.remoteTab); } catch { /* Preferences are optional. */ }
+      }
+      function renderSentinel(sentinel) {
+        const data = sentinel && typeof sentinel === 'object' ? sentinel : null;
+        const configured = data?.configured === true;
+        const active = configured && data.agent_status === 'active';
+        const disconnected = configured && data.agent_status === 'disconnected';
+        const status = !data ? 'EN ATTENTE' : !configured ? 'NON CONFIGURÉ' : active ? 'AGENT ACTIF' : disconnected ? 'DÉCONNECTÉ' : 'AGENT EN ATTENTE';
+        set('sentinel-agent-text', status); $('sentinel-agent').dataset.tone = active ? 'success' : disconnected ? 'error' : configured ? 'warning' : 'neutral';
+        $('sentinel-agent').title = dateValid(data?.last_seen) ? 'Dernier rapport : ' + new Date(data.last_seen).toLocaleString('fr-FR') : 'Aucun rapport reçu';
+        set('sentinel-block-count', (data && isNumber(data.blocked_today) ? numeric(data.blocked_today) : '—') + ' IP BLOQUÉES');
+        const dropped = isNumber(data?.queue_dropped) && data.queue_dropped > 0;
+        $('sentinel-queue-warning').hidden = !dropped;
+        set('sentinel-queue-warning', dropped ? numeric(data.queue_dropped) + ' rapport(s) écarté(s) · file saturée' : '');
+        const incidents = Array.isArray(data?.incidents) ? data.incidents.filter(item => item && typeof item === 'object').slice(-200).sort((a,b) => (dateValid(b.timestamp) ? new Date(b.timestamp).getTime() : 0) - (dateValid(a.timestamp) ? new Date(a.timestamp).getTime() : 0)) : [];
+        const signature = JSON.stringify([configured, status, incidents]);
+        if (signature === state.sentinelSignature) return;
+        state.sentinelSignature = signature;
+        const list = $('sentinel-list'), previousScroll = list.scrollTop, previousHeight = list.scrollHeight;
+        const fragment = document.createDocumentFragment();
+        if (!incidents.length) {
+          const empty = document.createElement('div'); empty.className = 'sentinel-empty';
+          const title = document.createElement('strong'), note = document.createElement('span');
+          title.textContent = !data ? 'En attente de Sentinel' : !configured ? 'Sentinel non configuré' : active ? 'Aucune tentative signalée' : disconnected ? 'Agent Sentinel déconnecté' : 'En attente du premier rapport';
+          note.textContent = !data ? 'Le statut apparaîtra au prochain relevé.' : !configured ? 'Aucun agent de cyberdéfense configuré.' : active ? 'Les tentatives apparaîtront ici en direct.' : 'Aucun incident reçu par le tableau de bord.';
+          empty.append(title, note); fragment.append(empty);
+        }
+        incidents.forEach(incident => {
+          const row = document.createElement('article'); row.className = 'sentinel-incident';
+          const line = document.createElement('div'); line.className = 'sentinel-line';
+          const source = document.createElement('span'); source.className = 'sentinel-source';
+          const code = typeof incident.country_code === 'string' ? incident.country_code.toUpperCase() : '';
+          if (/^[A-Z]{2}$/.test(code)) {
+            const flag = document.createElement('span'); flag.className = 'country-flag';
+            flag.textContent = String.fromCodePoint(...Array.from(code).map(character => character.charCodeAt(0) + 127397));
+            flag.title = incident.country_name || code; source.append(flag);
+          }
+          source.append(document.createTextNode(incident.source_ip || 'IP inconnue'));
+          const result = document.createElement('span'); result.className = 'sentinel-result'; result.dataset.blocked = String(incident.blocked === true); result.textContent = incident.blocked === true ? 'IP BLOQUÉE' : 'OBSERVÉE';
+          line.append(source, result);
+          const credentials = document.createElement('div'); credentials.className = 'sentinel-credentials';
+          credentials.textContent = 'Identifiants : ' + (typeof incident.username === 'string' ? incident.username || '(vide)' : '—') + ' / ' + (typeof incident.password === 'string' ? incident.password || '(vide)' : '—');
+          const meta = document.createElement('div'); meta.className = 'sentinel-meta';
+          const country = document.createElement('span'); country.textContent = incident.country_name || (code || 'Pays inconnu');
+          const timestamp = document.createElement('time'); timestamp.textContent = time(incident.timestamp);
+          if (dateValid(incident.timestamp)) { timestamp.dateTime = incident.timestamp; timestamp.title = new Date(incident.timestamp).toLocaleString('fr-FR'); }
+          meta.append(country, timestamp); row.append(line, credentials, meta); row.title = incident.agent ? 'Agent : ' + incident.agent : ''; fragment.append(row);
+        });
+        list.replaceChildren(fragment);
+        if (previousScroll > 0) list.scrollTop = Math.max(0, previousScroll + list.scrollHeight - previousHeight);
+      }
+      const voiceStatuses = {queued:'EN FILE', processing:'EN COURS', completed:'TERMINÉ', failed:'ÉCHEC'};
+      const voiceActions = {pending:'Transcription', status:'État système', restart:'Redémarrage', backup:'Sauvegarde', unknown:'Commande non reconnue'};
+      const voiceSource = command => command?.simulated === true || command?.source === 'simulation' ? 'Simulation' : command?.source === 'voice' ? 'Vocal' : 'Texte';
+      function updateVoiceDetails() {
+        const command = state.voiceCommand;
+        $('voice-command-details').hidden = !command;
+        if (!command) { set('voice-detail-meta', 'Aucune commande reçue pour le moment.'); return; }
+        set('voice-detail-meta', voiceSource(command) + (command.simulated === true || command.source === 'simulation' ? ' · sans exécution' : '') + ' · ' + time(command.timestamp) + ' · ' + (voiceStatuses[command.status] || 'État inconnu') + '\n' + (voiceActions[command.action] || 'Action inconnue') + (command.service ? ' · ' + command.service : ''));
+        set('voice-transcription', typeof command.transcription === 'string' && command.transcription ? command.transcription : 'Aucune transcription disponible.');
+        set('voice-response', typeof command.response === 'string' && command.response ? command.response : ['queued', 'processing'].includes(command.status) ? 'Traitement en cours…' : 'Aucune réponse disponible.');
+      }
+      function renderVoice(voice) {
+        const data = voice && typeof voice === 'object' ? voice : null;
+        const command = data?.last_command && typeof data.last_command === 'object' ? data.last_command : null;
+        state.voiceCommand = command;
+        $('voice-trigger').disabled = false;
+        $('voice-trigger').setAttribute('aria-label', 'Voice-to-Action : état du module et simulation');
+        const enabled = data?.enabled === true;
+        const reason = typeof data?.reason === 'string' ? data.reason : '';
+        const status = enabled ? data?.busy === true || ['active', 'listening'].includes(data?.status) ? 'ACTIF' : 'PRÊT' : data?.status === 'missing_model' ? 'MODÈLE ABSENT' : data?.status === 'checking' ? 'VÉRIFICATION' : data ? 'DÉSACTIVÉ' : '—';
+        const moduleReason = reason || (!data ? 'En attente du collecteur' : enabled ? 'Reconnaissance vocale disponible' : data.status === 'missing_model' ? 'Modèle de reconnaissance vocale absent' : data.status === 'checking' ? 'Vérification du modèle en cours' : 'Module vocal désactivé');
+        const latest = command ? voiceSource(command) + ' · ' + (voiceStatuses[command.status] || 'État inconnu') + ' · ' + (voiceActions[command.action] || 'Action inconnue') + (command.service ? ' ' + command.service : '') + (command.transcription ? ' · ' + command.transcription : '') : '';
+        set('voice-summary', enabled ? latest || (data.webhook_configured === true ? 'WhatsApp · en attente de commande' : 'Reconnaissance prête · webhook à configurer') : moduleReason + (latest ? ' · ' + latest : ''));
+        set('voice-status', status);
+        $('voice-status').dataset.tone = enabled ? 'success' : data?.status === 'missing_model' ? 'error' : data?.status === 'checking' ? 'warning' : 'neutral';
+        const moduleDetails = status + ' · modèle ' + (data?.model || '—') + '\n' + moduleReason + '\nWebhook WhatsApp : ' + (data?.webhook_configured === true ? 'configuré' : 'non configuré');
+        $('voice-status').title = moduleDetails;
+        $('voice-trigger').title = moduleDetails + (command ? '\nDernière commande : ' + latest + '\n' + (command.response || 'Réponse en attente') : '\nCliquez pour consulter le module ou simuler une commande.');
+        set('voice-module-meta', moduleDetails);
+        if ($('voice-dialog').open) updateVoiceDetails();
+      }
+      function cyberMessage(message, tone = 'error') {
+        $('cyber-feedback').textContent = message; $('cyber-feedback').dataset.tone = tone; $('cyber-feedback').hidden = !message;
+      }
+      function updateCyberControls() {
+        [['cyber-simulate-submit','simulate'],['cyber-audit-submit','audit'],['cyber-export','export']].forEach(([id, key]) => {
+          $(id).disabled = !state.cyber || state.cyberPending.has(key) || state.cyberPending.has('load');
+          $(id).setAttribute('aria-busy', String(state.cyberPending.has(key)));
+        });
+        $('cyber-simulate-path').disabled = state.cyberPending.has('simulate');
+        document.querySelectorAll('.cyber-route-button').forEach(button => { button.disabled = state.cyberPending.has('simulate'); });
+      }
+      function renderCyberTraffic(traffic) {
+        const now = Date.now(), minute = 60000, start = Math.floor(now / minute) * minute - 59 * minute;
+        const buckets = new Map();
+        (Array.isArray(traffic) ? traffic : []).forEach(point => {
+          if (!point || !dateValid(point.timestamp) || !isNumber(point.count) || point.count < 0) return;
+          const index = Math.floor((new Date(point.timestamp).getTime() - start) / minute);
+          if (index >= 0 && index < 60) {
+            const bucket = buckets.get(index) || {count:0, simulated:0};
+            bucket.count += point.count; bucket.simulated += isNumber(point.simulated_count) ? Math.max(0,Math.min(point.count,point.simulated_count)) : 0; buckets.set(index,bucket);
+          }
+        });
+        const total = [...buckets.values()].reduce((sum, bucket) => sum + bucket.count, 0), simulated = [...buckets.values()].reduce((sum, bucket) => sum + bucket.simulated,0), peak = Math.max(0, ...[...buckets.values()].map(bucket => bucket.count));
+        const fragment = document.createDocumentFragment(), namespace = 'http://www.w3.org/2000/svg';
+        buckets.forEach((bucket, index) => {
+          const realHeight = peak > 0 ? (bucket.count - bucket.simulated) / peak * 112 : 0, testHeight = peak > 0 ? bucket.simulated / peak * 112 : 0;
+          [[realHeight,125-realHeight,false],[testHeight,125-realHeight-testHeight,true]].forEach(([height,y,test]) => {
+            if (!height) return;
+            const bar = document.createElementNS(namespace,'rect'); bar.setAttribute('class','cyber-chart-bar'); bar.dataset.test = String(test);
+            bar.setAttribute('x',String(index*10+2)); bar.setAttribute('y',String(y)); bar.setAttribute('width','6'); bar.setAttribute('height',String(height)); bar.setAttribute('rx','1');
+            const title = document.createElementNS(namespace,'title'); title.textContent = time(new Date(start+index*minute).toISOString()) + ' · ' + numeric(test ? bucket.simulated : bucket.count-bucket.simulated) + (test ? ' simulation(s) TEST' : ' requête(s) réelle(s)'); bar.append(title); fragment.append(bar);
+          });
+        });
+        $('cyber-traffic-bars').replaceChildren(fragment); $('cyber-traffic-empty').setAttribute('visibility',buckets.size > 0 ? 'hidden' : 'visible');
+        set('cyber-traffic-total', (buckets.size ? numeric(total) : '—') + ' REQUÊTES'); set('cyber-traffic-peak', 'Pic ' + (buckets.size ? numeric(peak) : '—') + ' / min');
+        $('cyber-traffic-chart').setAttribute('aria-label', buckets.size ? 'Trafic local sur les 60 dernières minutes : ' + numeric(total) + ' requêtes dont ' + numeric(simulated) + ' tests, pic de ' + numeric(peak) + ' par minute.' : 'Aucune mesure de trafic disponible sur les 60 dernières minutes.');
+      }
+      function renderCyberBans(data) {
+        const bans = Array.isArray(data.banned_ips) ? data.banned_ips.filter(ban => ban && typeof ban === 'object') : [];
+        set('cyber-ban-count', bans.length + ' IP');
+        const pending = [...state.cyberPending].filter(key => key.startsWith('unban:'));
+        const signature = JSON.stringify([bans,pending]);
+        if (state.cyberBanSignature === signature) return;
+        state.cyberBanSignature = signature;
+        const list = $('cyber-bans-list'), scrollContainer = list.parentElement?.parentElement || list, previousTop = scrollContainer.scrollTop, focusedIp = document.activeElement?.dataset?.cyberIp;
+        const fragment = document.createDocumentFragment();
+        if (!bans.length) { const empty = document.createElement('tr'); empty.className = 'cyber-empty-row'; const cell = document.createElement('td'); cell.className = 'cyber-empty'; cell.colSpan = 5; cell.textContent = 'Aucune IP bannie par cette application.'; empty.append(cell); fragment.append(empty); }
+        bans.forEach(ban => {
+          const row = document.createElement('tr');
+          const ipCell = document.createElement('td'), dateCell = document.createElement('td'), reasonCell = document.createElement('td'), badgeCell = document.createElement('td'), actionCell = document.createElement('td');
+          const ip = document.createElement('span'); ip.className = 'cyber-ban-ip'; ip.textContent = typeof ban.ip === 'string' ? ban.ip : 'IP inconnue'; ipCell.append(ip);
+          const badge = document.createElement('span'); badge.className = 'cyber-ban-badge'; badge.dataset.test = String(ban.simulated === true); badge.textContent = ban.simulated === true ? 'TEST' : 'BANNI'; badgeCell.append(badge);
+          const reason = document.createElement('div'); reason.className = 'cyber-ban-reason'; reason.textContent = (typeof ban.reason === 'string' ? ban.reason : 'Motif non renseigné') + (ban.path ? ' · ' + ban.path : '') + (isNumber(ban.hits) ? ' · ' + numeric(ban.hits) + ' tentative(s)' : ''); reasonCell.append(reason);
+          const timestamp = document.createElement('time'); timestamp.className = 'cyber-ban-date'; timestamp.textContent = dateValid(ban.timestamp) ? new Date(ban.timestamp).toLocaleString('fr-FR') : 'Date indisponible'; dateCell.append(timestamp);
+          if (dateValid(ban.timestamp)) timestamp.dateTime = ban.timestamp;
+          const button = document.createElement('button'); button.className = 'cyber-unban'; button.type = 'button'; button.textContent = 'Débannir'; button.dataset.cyberIp = typeof ban.ip === 'string' ? ban.ip : '';
+          button.disabled = !button.dataset.cyberIp || state.cyberPending.has('unban:' + ban.ip); button.setAttribute('aria-label','Débannir ' + ip.textContent); button.setAttribute('aria-busy',String(state.cyberPending.has('unban:' + ban.ip)));
+          button.addEventListener('click', () => cyberAction('unban:' + ban.ip, '/api/cyber/unban/' + encodeURIComponent(ban.ip), {method:'DELETE'}, 'Bannissement local retiré pour ' + ban.ip + '.'));
+          actionCell.append(button); row.append(ipCell,dateCell,reasonCell,badgeCell,actionCell); fragment.append(row);
+        });
+        list.replaceChildren(fragment); scrollContainer.scrollTop = previousTop;
+        if (focusedIp) [...list.querySelectorAll('.cyber-unban')].find(button => button.dataset.cyberIp === focusedIp)?.focus({preventScroll:true});
+      }
+      function renderCyberAudit(audit) {
+        const data = audit && typeof audit === 'object' ? audit : null;
+        set('cyber-audit-score', isNumber(data?.score) ? numeric(bounded(data.score)) + ' / 100' : '—');
+        set('cyber-audit-summary', typeof data?.summary === 'string' && data.summary ? data.summary : 'Aucun résultat d’audit disponible.');
+        const recommendations = document.createDocumentFragment();
+        (Array.isArray(data?.recommendations) ? data.recommendations : []).filter(item => typeof item === 'string').slice(0,50).forEach(message => { const item = document.createElement('li'); item.textContent = message; recommendations.append(item); });
+        $('cyber-audit-recommendations').replaceChildren(recommendations);
+        const rules = Array.isArray(data?.rules) ? data.rules.filter(rule => rule && typeof rule === 'object') : [], fragment = document.createDocumentFragment();
+        rules.slice(0,100).forEach(rule => { const item = document.createElement('div'); item.className = 'cyber-rule'; const title = document.createElement('strong'); title.textContent = (rule.id || 'Règle') + ' · ' + (rule.description || 'Règle locale'); const code = document.createElement('code'); code.textContent = typeof rule.pattern === 'string' ? rule.pattern : 'Motif non disponible'; item.append(title,code); fragment.append(item); });
+        if (!rules.length) { const empty = document.createElement('div'); empty.className = 'cyber-empty'; empty.textContent = 'Aucune règle disponible.'; fragment.append(empty); }
+        $('cyber-rules-list').replaceChildren(fragment); set('cyber-rule-count','Règles locales · ' + rules.length);
+        const simulation = data?.simulation && typeof data.simulation === 'object' ? data.simulation : null;
+        $('cyber-audit-simulation').hidden = !simulation;
+        set('cyber-audit-simulation-summary', typeof simulation?.summary === 'string' ? simulation.summary : 'Aucun exercice disponible.');
+        const exerciseRecommendations = document.createDocumentFragment();
+        (Array.isArray(simulation?.recommendations) ? simulation.recommendations : []).filter(item => typeof item === 'string').slice(0,50).forEach(message => { const item = document.createElement('li'); item.textContent = message; exerciseRecommendations.append(item); });
+        $('cyber-audit-simulation-recommendations').replaceChildren(exerciseRecommendations);
+        const exerciseRules = document.createDocumentFragment();
+        (Array.isArray(simulation?.rules) ? simulation.rules : []).filter(rule => rule && typeof rule === 'object').slice(0,100).forEach(rule => { const item = document.createElement('div'); item.className = 'cyber-rule'; const title = document.createElement('strong'); title.textContent = (rule.id || 'Règle TEST') + ' · ' + (rule.description || 'Règle proposée pour exercice'); const code = document.createElement('code'); code.textContent = typeof rule.pattern === 'string' ? rule.pattern : 'Motif non disponible'; item.append(title,code); exerciseRules.append(item); });
+        $('cyber-audit-simulation-rules').replaceChildren(exerciseRules);
+      }
+      function renderCyber(cyber) {
+        if (cyber && typeof cyber === 'object' && !Array.isArray(cyber)) state.cyber = cyber;
+        const data = state.cyber;
+        const sentinel = state.snapshot?.sentinel;
+        set('cyber-sentinel-count', numeric(sentinel?.blocked_today));
+        set('cyber-sentinel-agent', !sentinel ? 'EN ATTENTE' : sentinel.configured !== true ? 'NON CONFIGURÉ' : sentinel.agent_status === 'active' ? 'AGENT ACTIF' : sentinel.agent_status === 'disconnected' ? 'DÉCONNECTÉ' : 'EN ATTENTE');
+        set('cyber-sentinel-summary', !sentinel || sentinel.configured !== true ? 'Aucun agent de cyberdéfense distant configuré.' : numeric(sentinel.blocked_today) + ' IP bloquées aujourd’hui par Sentinel · dernier rapport ' + time(sentinel.last_seen) + '.');
+        const remoteIncidents = Array.isArray(sentinel?.incidents) ? sentinel.incidents.filter(item => item?.blocked === true).slice(-3).reverse() : [];
+        const remoteFragment = document.createDocumentFragment();
+        remoteIncidents.forEach(incident => { const line = document.createElement('div'); line.textContent = time(incident.timestamp) + ' · ' + (incident.source_ip || 'IP inconnue') + (incident.country_name ? ' · ' + incident.country_name : '') + ' · bloquée par Sentinel'; remoteFragment.append(line); });
+        if (!remoteIncidents.length) { const line = document.createElement('div'); line.textContent = 'Aucun blocage distant disponible dans les derniers rapports.'; remoteFragment.append(line); }
+        $('cyber-sentinel-incidents').replaceChildren(remoteFragment);
+        $('cyberdefense-open').title = 'Console de cyberdéfense locale · ' + (data && isNumber(data.active_bans) ? numeric(data.active_bans) : '—') + ' bannissement(s)';
+        updateCyberControls();
+        if (!data) return;
+        set('cyber-active-bans', numeric(data.active_bans)); set('cyber-blocked-today', numeric(data.blocked_today));
+        set('cyber-simulated-bans', numeric(data.simulated_bans) + ' bannissement(s) de test actif(s)');
+        set('cyber-persistence-status', 'Mode application · ' + (data.persistence?.status || 'état de sauvegarde indisponible'));
+        const error = typeof data.persistence?.error === 'string' ? data.persistence.error : '';
+        $('cyber-persistence-warning').hidden = !error; set('cyber-persistence-warning', error ? 'Sauvegarde locale : ' + error : '');
+        renderCyberTraffic(data.traffic); renderCyberBans(data); renderCyberAudit(data.audit);
+        const attempts = Array.isArray(data.recent_attempts) ? data.recent_attempts.filter(item => item && typeof item === 'object') : [];
+        const last = attempts[0];
+        set('cyber-latest-attempt', last ? time(last.timestamp) + ' · ' + (last.ip || 'IP inconnue') + ' → ' + (last.path || 'Chemin inconnu') + (last.simulated === true ? ' · TEST' : '') + (last.blocked === true ? ' · bloquée dans l’application' : '') : 'Aucune tentative enregistrée dans l’application.');
+      }
+      function extractCyber(body) {
+        const data = body?.cyber || body;
+        if (!data || typeof data !== 'object' || !Array.isArray(data.banned_ips)) throw new Error('Réponse de cyberdéfense invalide.');
+        return data;
+      }
+      async function loadCyber() {
+        if (state.cyberPending.has('load')) return;
+        const beforeRequest = state.cyber;
+        state.cyberPending.add('load'); updateCyberControls();
+        try { const response = await apiFetch('/api/cyber/banned-ips'); const body = await readResponse(response); if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : typeof body.detail === 'string' ? body.detail : 'Console indisponible (HTTP ' + response.status + ').'); const data = extractCyber(body); if (state.cyber === beforeRequest) renderCyber(data); }
+        catch (error) { cyberMessage(error.name === 'AbortError' ? 'La console ne répond pas. Les dernières mesures restent affichées.' : error.message || 'Impossible de charger la console.'); }
+        finally { state.cyberPending.delete('load'); updateCyberControls(); }
+      }
+      async function cyberAction(key, path, options, successMessage) {
+        if (state.cyberPending.has(key) || !state.cyber) return;
+        state.cyberPending.add(key); cyberMessage(''); updateCyberControls(); renderCyberBans(state.cyber);
+        try {
+          const response = await apiFetch(path,options); const body = await readResponse(response);
+          if (!response.ok || body.ok !== true) throw new Error(typeof body.error === 'string' ? body.error : typeof body.detail === 'string' ? body.detail : 'Action refusée (HTTP ' + response.status + ').');
+          renderCyber(extractCyber(body)); cyberMessage(successMessage,'success');
+        } catch (error) { cyberMessage(error.name === 'AbortError' ? 'Délai dépassé. Consultez le prochain relevé avant de réessayer.' : error.message || 'L’action a échoué.'); }
+        finally { state.cyberPending.delete(key); updateCyberControls(); if (state.cyber) renderCyberBans(state.cyber); }
+      }
+      async function openCyber(opener) {
+        state.cyberOpener = opener; cyberMessage(''); renderCyber(state.snapshot?.cyber);
+        if (!$('cyberdefense-modal').open) $('cyberdefense-modal').showModal();
+        await loadCyber();
+      }
+      function renderEventsDialog() {
+        // Cloner le journal borné conserve le texte intégral et évite un second flux SSE.
+        const list = $('events-dialog-list');
+        const lines = [...$('events-list').querySelectorAll('.event-line')];
+        if (!lines.length && !list.querySelector('.console-empty')) {
+          const empty = document.createElement('p'); empty.className = 'console-empty';
+          empty.textContent = 'Aucun événement disponible pour le moment.'; list.append(empty);
+        }
+        const currentIds = new Set(lines.map(line => line.dataset.eventId));
+        const previousHeight = list.scrollHeight, previousTop = list.scrollTop;
+        for (const line of list.querySelectorAll('.event-line')) {
+          if (!currentIds.has(line.dataset.eventId)) line.remove();
+        }
+        const existingIds = new Set([...list.querySelectorAll('.event-line')].map(line => line.dataset.eventId));
+        let added = false;
+        for (const line of lines) {
+          if (existingIds.has(line.dataset.eventId)) continue;
+          list.querySelector('.console-empty')?.remove();
+          const copy = line.cloneNode(true), timestamp = copy.querySelector('time');
+          if (dateValid(timestamp.dateTime)) {
+            timestamp.textContent = eventDateFormat.format(new Date(timestamp.dateTime));
+            timestamp.title = timestamp.dateTime;
+          }
+          const identifier = document.createElement('span'); identifier.className = 'event-id';
+          identifier.textContent = '#' + line.dataset.eventId;
+          copy.lastElementChild.classList.add('event-message'); copy.prepend(identifier);
+          list.append(copy); added = true;
+        }
+        set('events-dialog-count', lines.length + (lines.length > 1 ? ' ÉVÉNEMENTS' : ' ÉVÉNEMENT'));
+        if (added && state.eventDialogAutoScroll) list.scrollTop = list.scrollHeight;
+        else if (!state.eventDialogAutoScroll && list.scrollHeight < previousHeight) list.scrollTop = Math.max(0, previousTop - (previousHeight - list.scrollHeight));
+      }
+      function renderEvents(events = []) {
+        if (!Array.isArray(events)) return;
+        const list = $('events-list');
+        const ordered = [...events].filter(event => event && Number.isInteger(event.id)).sort((a,b) => a.id - b.id);
+        let added = false;
+        for (const event of ordered) {
+          if (state.seenEvents.has(event.id)) continue;
+          state.seenEvents.add(event.id);
+          if ($('events-empty')) $('events-empty').remove();
+          const line = document.createElement('div'); line.className = 'event-line'; line.dataset.level = ['info','warning','error'].includes(event.level) ? event.level : 'info'; line.dataset.eventId = String(event.id);
+          const timestamp = document.createElement('time'); timestamp.className = 'event-time'; timestamp.textContent = time(event.timestamp);
+          if (dateValid(event.timestamp)) timestamp.dateTime = event.timestamp;
+          const level = document.createElement('span'); level.className = 'event-level'; level.textContent = line.dataset.level === 'warning' ? 'WARN' : line.dataset.level === 'error' ? 'ERROR' : 'INFO';
+          const message = document.createElement('span'); message.textContent = typeof event.message === 'string' ? event.message : 'Événement sans description'; line.append(timestamp,level,message); list.append(line); added = true;
+        }
+        while (list.children.length > 200) list.firstElementChild.remove();
+        // IDs remain in memory only, bounded even during long browser sessions.
+        if (state.seenEvents.size > 1000) state.seenEvents = new Set(Array.from(state.seenEvents).slice(-500));
+        const count = list.querySelectorAll('.event-line').length;
+        set('event-count', count + (count > 1 ? ' ÉVÉNEMENTS' : ' ÉVÉNEMENT'));
+        if (added && state.autoScroll) list.scrollTop = list.scrollHeight;
+        if ($('events-dialog').open) renderEventsDialog();
+      }
+      function render(snapshot, live = true) {
+        if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) throw new Error('Réponse du collecteur invalide.');
+        const firstSnapshot = !state.snapshot;
+        state.snapshot = snapshot; state.lastReceipt = Date.now();
+        if (live) setStream(true);
+        set('hostname', snapshot.hostname || 'Serveur central'); set('platform', snapshot.platform || '');
+        set('last-update', time(snapshot.timestamp)); set('uptime', 'UPTIME ' + ageLabel(snapshot.uptime_seconds));
+        renderHardware(snapshot.hardware); renderServices(snapshot.services, snapshot.actions?.restart_enabled === true);
+        renderInfrastructure(snapshot.infrastructure); renderVps(snapshot.vps); renderEvents(snapshot.events);
+        renderSentinel(snapshot.sentinel); renderVoice(snapshot.voice); renderCyber(snapshot.cyber);
+        if (snapshot.timestamp !== state.lastTimestamp) {
+          const cpu = bounded(snapshot.hardware?.cpu?.percent);
+          if (cpu !== null) { state.history.push(cpu); if (state.history.length > 120) state.history.shift(); drawTrend(); }
+          state.lastTimestamp = snapshot.timestamp;
+        }
+        const collectorError = snapshot.collector?.error;
+        set('collector-label', collectorError ? 'Erreur du collecteur' : 'Collecteur actif');
+        $('footer-status').dataset.tone = collectorError ? 'error' : 'success';
+        if (collectorError) { $('connection-banner').hidden = false; set('connection-message', 'Collecte dégradée : ' + collectorError); }
+        if (firstSnapshot && !(snapshot.events?.length)) {
+          const empty = $('events-empty'); if (empty) empty.firstChild.textContent = 'Collecteur connecté. Aucun événement pour le moment.';
+        }
+        updateGlobalStatus();
+      }
+      function toast(message, tone = 'neutral') {
+        clearTimeout(state.toastTimer); $('toast').textContent = message; $('toast').dataset.tone = tone; $('toast').hidden = false;
+        state.toastTimer = setTimeout(() => { $('toast').hidden = true; }, 6000);
+      }
+      async function apiFetch(path, options = {}, timeout = 10000) {
+        const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeout);
+        try { return await fetch(path, {...options, credentials:'same-origin', cache:'no-store', signal:controller.signal}); }
+        finally { clearTimeout(timer); }
+      }
+      async function readResponse(response) {
+        try { return await response.json(); } catch { return {}; }
+      }
+      async function loadSnapshot() {
+        try {
+          const response = await apiFetch('/api/snapshot');
+          if (!response.ok) throw new Error('Le collecteur est indisponible (HTTP ' + response.status + ').');
+          render(await response.json());
+          return true;
+        } catch (error) {
+          setStream(false, error.name === 'AbortError' ? 'Le collecteur ne répond pas. Nouvelle tentative automatique en cours.' : error.message || 'Impossible de joindre le collecteur.');
+          return false;
+        }
+      }
+      function startStream() {
+        if (state.stream) state.stream.close();
+        const stream = new EventSource('/api/stream'); state.stream = stream;
+        stream.addEventListener('snapshot', event => {
+          try { render(JSON.parse(event.data)); }
+          catch { setStream(false, 'Une mesure invalide a été reçue. En attente du prochain relevé.'); }
+        });
+        stream.onopen = () => { if (state.snapshot && Date.now() - state.lastReceipt < 7500) setStream(true); };
+        stream.onerror = () => { setStream(false); renderServices(state.snapshot?.services, state.snapshot?.actions?.restart_enabled === true); probeSnapshot(); };
+      }
+      async function probeSnapshot() {
+        if (state.probePending || Date.now() - state.lastProbe < 10000) return;
+        state.probePending = true; state.lastProbe = Date.now();
+        try {
+          const response = await apiFetch('/api/snapshot', {}, 5000);
+          if (!response.ok) throw new Error('Le collecteur est indisponible (HTTP ' + response.status + ').');
+          render(await response.json(), false);
+        } catch (error) {
+          if (error.name !== 'AbortError') setStream(false, error.message || 'Impossible de joindre le collecteur.');
+          // EventSource owns retry scheduling; last measurements remain visible.
+        }
+        finally { state.probePending = false; }
+      }
+      async function openRestart(name, label) {
+        if (!state.snapshot?.actions?.restart_enabled || state.stale || !serviceNodes.has(name) || state.restartPending.has(name) || (state.restartCooldown.get(name) || 0) > Date.now()) return;
+        const startedAt = Date.now();
+        state.restartPending.add(name);
+        renderServices(state.snapshot.services, state.snapshot.actions.restart_enabled === true);
+        try {
+          const response = await apiFetch('/api/service/' + encodeURIComponent(name) + '/restart', {method:'POST'}, 20000);
+          const body = await readResponse(response);
+          if (response.status === 429) state.restartCooldown.set(name, Date.now() + 30000);
+          if (!response.ok || body.ok !== true) throw new Error(typeof body.detail === 'string' ? body.detail : typeof body.message === 'string' ? body.message : 'Redémarrage refusé (HTTP ' + response.status + ').');
+          state.restartCooldown.set(name, startedAt + 30000);
+          toast(body.message || 'Redémarrage demandé pour ' + label + '.', 'success');
+        } catch (error) {
+          toast(error.name === 'AbortError' ? 'Délai dépassé. Vérifiez le prochain relevé avant de réessayer.' : error.message || 'Le redémarrage a échoué.', 'error');
+        } finally {
+          state.restartPending.delete(name);
+          renderServices(state.snapshot?.services, state.snapshot?.actions?.restart_enabled === true);
+        }
+      }
+      ['vps', 'sentinel'].forEach(tab => {
+        $(tab + '-tab').addEventListener('click', () => selectRemoteTab(tab));
+        $(tab + '-tab').addEventListener('keydown', event => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault();
+          selectRemoteTab(event.key === 'Home' ? 'vps' : event.key === 'End' ? 'sentinel' : state.remoteTab === 'vps' ? 'sentinel' : 'vps', true);
+        });
+      });
+      let savedRemoteTab = 'sentinel';
+      try { savedRemoteTab = localStorage.getItem('noc.remote-tab') || 'sentinel'; } catch { /* Storage can be unavailable. */ }
+      selectRemoteTab(savedRemoteTab);
+      $('cyberdefense-open').addEventListener('click', () => openCyber($('cyberdefense-open')));
+      $('sentinel-block-count').addEventListener('click', () => openCyber($('sentinel-block-count')));
+      $('cyberdefense-close').addEventListener('click', () => $('cyberdefense-modal').close());
+      $('cyberdefense-modal').addEventListener('close', () => state.cyberOpener?.focus({preventScroll:true}));
+      $('cyberdefense-modal').addEventListener('click', event => {
+        if (event.target !== $('cyberdefense-modal')) return;
+        const rectangle = $('cyberdefense-modal').getBoundingClientRect();
+        if (event.clientX < rectangle.left || event.clientX > rectangle.right || event.clientY < rectangle.top || event.clientY > rectangle.bottom) $('cyberdefense-modal').close();
+      });
+      $('cyber-simulate-form').addEventListener('submit', event => {
+        event.preventDefault();
+        cyberAction('simulate','/api/cyber/simulate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:$('cyber-simulate-path').value})},'Simulation enregistrée : IP de documentation bannie localement (TEST).');
+      });
+      document.querySelectorAll('.cyber-route-button').forEach(button => button.addEventListener('click', () => {
+        if (state.cyberPending.has('simulate')) return;
+        $('cyber-simulate-path').value = button.dataset.cyberPath;
+        document.querySelectorAll('.cyber-route-button').forEach(item => item.setAttribute('aria-pressed',String(item === button)));
+      }));
+      $('cyber-audit-submit').addEventListener('click', () => cyberAction('audit','/api/cyber/audit',{method:'POST'},'Audit heuristique local terminé. Les règles de l’application sont affichées.'));
+      $('cyber-export').addEventListener('click', async () => {
+        if (state.cyberPending.has('export') || !state.cyber) return;
+        state.cyberPending.add('export'); updateCyberControls(); cyberMessage('');
+        try {
+          const response = await apiFetch('/api/cyber/export');
+          if (!response.ok) { const body = await readResponse(response); throw new Error(typeof body.error === 'string' ? body.error : typeof body.detail === 'string' ? body.detail : 'Export refusé (HTTP ' + response.status + ').'); }
+          const blob = await response.blob(), url = URL.createObjectURL(blob), link = document.createElement('a');
+          link.href = url; link.download = 'noc-cyberdefense-' + new Date().toISOString().slice(0,10) + '.json'; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url),1000);
+          cyberMessage('Export JSON téléchargé.','success');
+        } catch (error) { cyberMessage(error.name === 'AbortError' ? 'L’export ne répond pas. Réessayez dans quelques instants.' : error.message || 'L’export a échoué.'); }
+        finally { state.cyberPending.delete('export'); updateCyberControls(); }
+      });
+      $('voice-trigger').disabled = false;
+      $('voice-trigger').addEventListener('click', () => { updateVoiceDetails(); $('voice-dialog').showModal(); });
+      $('voice-close').addEventListener('click', () => $('voice-dialog').close());
+      $('voice-simulate-form').addEventListener('submit', async event => {
+        event.preventDefault();
+        if (state.simulating) return;
+        const text = $('voice-simulate-command').value;
+        state.simulating = true;
+        $('voice-simulate-submit').disabled = true; $('voice-simulate-command').disabled = true; $('voice-simulate-feedback').hidden = true;
+        try {
+          const response = await apiFetch('/api/voice/simulate', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text})}, 10000);
+          const body = await readResponse(response);
+          if (response.status !== 202) throw new Error(typeof body.detail === 'string' ? body.detail : typeof body.message === 'string' ? body.message : 'Simulation refusée (HTTP ' + response.status + ').');
+          set('voice-simulate-feedback', typeof body.message === 'string' ? body.message : 'Simulation acceptée. Le résultat sera affiché dans le flux, sans action sur les services.');
+          $('voice-simulate-feedback').dataset.tone = 'success'; $('voice-simulate-feedback').hidden = false;
+          await loadSnapshot();
+        } catch (error) {
+          set('voice-simulate-feedback', error.name === 'AbortError' ? 'Délai dépassé. Consultez le dernier résultat avant de réessayer.' : error.message || 'La simulation a échoué.');
+          $('voice-simulate-feedback').dataset.tone = 'error'; $('voice-simulate-feedback').hidden = false;
+        } finally { state.simulating = false; $('voice-simulate-submit').disabled = false; $('voice-simulate-command').disabled = false; }
+      });
+      $('refresh-button').addEventListener('click', async () => {
+        $('refresh-button').disabled = true;
+        try {
+          await loadSnapshot();
+          startStream();
+        } finally { $('refresh-button').disabled = false; }
+      });
+      $('autoscroll-button').addEventListener('click', () => {
+        state.autoScroll = !state.autoScroll;
+        $('autoscroll-button').setAttribute('aria-pressed', String(state.autoScroll));
+        $('autoscroll-button').textContent = state.autoScroll ? 'Défilement auto' : 'Défilement en pause';
+        if (state.autoScroll) $('events-list').scrollTop = $('events-list').scrollHeight;
+      });
+      $('events-open').addEventListener('click', () => {
+        $('events-dialog').showModal(); renderEventsDialog();
+      });
+      $('events-close').addEventListener('click', () => $('events-dialog').close());
+      $('events-dialog').addEventListener('close', () => {
+        $('events-dialog-list').replaceChildren(); $('events-open').focus({preventScroll:true});
+      });
+      $('events-dialog-autoscroll').addEventListener('click', () => {
+        state.eventDialogAutoScroll = !state.eventDialogAutoScroll;
+        $('events-dialog-autoscroll').setAttribute('aria-pressed', String(state.eventDialogAutoScroll));
+        $('events-dialog-autoscroll').textContent = state.eventDialogAutoScroll ? 'Défilement auto' : 'Reprendre le défilement';
+        if (state.eventDialogAutoScroll) $('events-dialog-list').scrollTop = $('events-dialog-list').scrollHeight;
+      });
+      document.querySelectorAll('.nav-link').forEach(link => link.addEventListener('click', () => {
+        document.querySelectorAll('.nav-link').forEach(item => { item.classList.remove('active'); item.removeAttribute('aria-current'); });
+        link.classList.add('active'); link.setAttribute('aria-current','page');
+      }));
+      function updateClock() { const now = new Date(); set('clock-time', clockFormat.format(now)); $('clock-time').dateTime = now.toISOString(); set('clock-date', shortDateFormat.format(now).toUpperCase()); }
+      updateClock(); setInterval(updateClock, 1000);
+      setInterval(() => {
+        if (state.snapshot && Date.now() - state.lastReceipt > 7500) {
+          setStream(false, 'Aucun nouveau relevé depuis ' + ageLabel((Date.now() - state.lastReceipt) / 1000) + '. Reconnexion automatique en cours.');
+          renderServices(state.snapshot.services, state.snapshot.actions?.restart_enabled === true);
+          probeSnapshot();
+        }
+      }, 2000);
+      /* ============================================================
+         INTEGRATION JARVIS AUTONOMOUS AGENT CORE (ReAct + Web Speech)
+         ============================================================ */
+      const jarvisState = {
+        available: false,
+        status: null,
+        historyLoaded: false,
+        busy: false,
+        recognition: null,
+        isListening: false
+      };
+
+      async function fetchJarvisStatus() {
+        try {
+          const res = await apiFetch('/api/jarvis/status', {}, 5000);
+          if (res.ok) {
+            const data = await res.json();
+            jarvisState.status = data;
+            jarvisState.available = data.available !== false;
+            const badge = $('jarvis-strip-badge');
+            if (badge) {
+              if (data.status === 'ok') {
+                badge.textContent = 'JARVIS EN LIGNE';
+                badge.style.color = 'var(--green)';
+                badge.style.borderColor = 'rgba(81, 220, 170, 0.4)';
+              } else if (data.status === 'degraded') {
+                badge.textContent = 'STANDBY (LOCAL)';
+                badge.style.color = 'var(--amber)';
+                badge.style.borderColor = 'rgba(243, 189, 101, 0.4)';
+              } else {
+                badge.textContent = 'HORS LIGNE';
+                badge.style.color = 'var(--red)';
+                badge.style.borderColor = 'rgba(255, 115, 138, 0.4)';
+              }
+            }
+            if ($('jarvis-model-badge')) {
+              set('jarvis-model-badge', (data.model || 'qwen3:8b') + ' @ Ollama');
+            }
+            if ($('jarvis-tools-badge')) {
+              set('jarvis-tools-badge', (data.tools_count || 46) + ' outils ReAct');
+            }
+            if ($('jarvis-session-id') && data.active_session) {
+              set('jarvis-session-id', 'Session: ' + data.active_session.slice(-12));
+            }
+          }
+        } catch (e) {
+          console.warn('Erreur verification Jarvis:', e);
+        }
+      }
+
+      async function openJarvisModal() {
+        const modal = $('jarvis-modal');
+        if (!modal) return;
+        modal.showModal();
+        await fetchJarvisStatus();
+        if (!jarvisState.historyLoaded) {
+          await loadJarvisHistory();
+        }
+        setTimeout(() => $('jarvis-input')?.focus(), 50);
+      }
+
+      function closeJarvisModal() {
+        const modal = $('jarvis-modal');
+        if (modal?.open) {
+          modal.close();
+        }
+        stopJarvisListening();
+        window.speechSynthesis?.cancel();
+        $('jarvis-open-btn')?.focus({preventScroll: true});
+      }
+
+      async function loadJarvisHistory() {
+        try {
+          const res = await apiFetch('/api/jarvis/history?limit=25', {}, 6000);
+          if (res.ok) {
+            const data = await res.json();
+            jarvisState.historyLoaded = true;
+            if (Array.isArray(data.messages) && data.messages.length > 0) {
+              const stream = $('jarvis-chat-stream');
+              stream.replaceChildren();
+              data.messages.forEach(msg => {
+                appendChatMessage(msg.role, msg.content, null, null, msg.timestamp);
+              });
+              stream.scrollTop = stream.scrollHeight;
+            }
+          }
+        } catch (e) {
+          console.warn('Erreur chargement historique Jarvis:', e);
+        }
+      }
+
+      function appendChatMessage(role, text, thoughtChain = null, toolsUsed = null, timestamp = null) {
+        const stream = $('jarvis-chat-stream');
+        if (!stream) return;
+        const isUser = role === 'user';
+        const msg = document.createElement('div');
+        msg.className = 'jarvis-msg ' + (isUser ? 'jarvis-msg-user' : 'jarvis-msg-bot');
+
+        const avatar = document.createElement('div');
+        avatar.className = 'jarvis-msg-avatar';
+        avatar.textContent = isUser ? 'U' : 'J';
+
+        const content = document.createElement('div');
+        content.className = 'jarvis-msg-content';
+
+        const author = document.createElement('div');
+        author.className = 'jarvis-msg-author';
+        const authorName = document.createElement('span');
+        authorName.textContent = isUser ? 'UTILISATEUR' : 'JARVIS RE-ACT CORE';
+        const timeNode = document.createElement('time');
+        timeNode.className = 'mono';
+        timeNode.textContent = timestamp ? time(timestamp) : clockFormat.format(new Date());
+        author.append(authorName, timeNode);
+
+        const body = document.createElement('div');
+        body.className = 'jarvis-msg-text';
+        body.textContent = text;
+        content.append(author, body);
+
+        if (!isUser && ((Array.isArray(thoughtChain) && thoughtChain.length > 0) || (Array.isArray(toolsUsed) && toolsUsed.length > 0))) {
+          const details = document.createElement('details');
+          details.className = 'jarvis-reasoning';
+
+          const summary = document.createElement('summary');
+          summary.className = 'jarvis-reasoning-summary';
+          summary.innerHTML = '<svg class="icon" viewBox="0 0 24 24" style="width:12px;height:12px"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg><span>Processus de Réflexion & Outils ReAct</span>';
+          if (Array.isArray(toolsUsed) && toolsUsed.length > 0) {
+            const count = document.createElement('span');
+            count.className = 'jarvis-tool-badge';
+            count.textContent = toolsUsed.length + ' action(s)';
+            summary.append(count);
+          }
+
+          const wrap = document.createElement('div');
+          wrap.className = 'jarvis-reasoning-content';
+
+          if (Array.isArray(thoughtChain) && thoughtChain.length > 0) {
+            thoughtChain.forEach(step => {
+              const th = document.createElement('div');
+              th.className = 'jarvis-thought-step';
+              th.textContent = '🧠 ' + step;
+              wrap.append(th);
+            });
+          }
+
+          if (Array.isArray(toolsUsed) && toolsUsed.length > 0) {
+            const row = document.createElement('div');
+            row.className = 'jarvis-tool-badge-row';
+            toolsUsed.forEach(t => {
+              const bd = document.createElement('span');
+              bd.className = 'jarvis-tool-badge';
+              const name = typeof t === 'string' ? t : (t.tool || t.name || JSON.stringify(t));
+              bd.textContent = '⚙ ' + name;
+              row.append(bd);
+            });
+            wrap.append(row);
+          }
+
+          details.append(summary, wrap);
+          content.append(details);
+        }
+
+        msg.append(avatar, content);
+        stream.append(msg);
+        stream.scrollTop = stream.scrollHeight;
+      }
+
+      async function sendJarvisPrompt(promptText, source = 'web_text') {
+        const text = promptText.trim();
+        if (!text || jarvisState.busy) return;
+        jarvisState.busy = true;
+
+        $('jarvis-input').value = '';
+        $('jarvis-send-btn').disabled = true;
+        $('jarvis-input').disabled = true;
+
+        appendChatMessage('user', text, null, null);
+
+        const reactor = $('jarvis-reactor');
+        if (reactor) reactor.dataset.reactorState = 'thinking';
+        set('jarvis-reactor-status', 'RÉFLEXION RE-ACT...');
+
+        try {
+          const res = await apiFetch('/api/jarvis/query', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({prompt: text, source: source})
+          }, 60000);
+
+          const data = await readResponse(res);
+          if (res.ok && data.status === 'success') {
+            appendChatMessage('assistant', data.reply || 'Action exécutée, monsieur.', data.thought_chain, data.tools_used, data.timestamp);
+            if (data.session_id && $('jarvis-session-id')) {
+              set('jarvis-session-id', 'Session: ' + data.session_id.slice(-12));
+            }
+            speakJarvisText(data.reply || '');
+          } else {
+            const errReply = (typeof data.reply === 'string' && data.reply) ? data.reply : (typeof data.detail === 'string' ? data.detail : 'Erreur lors de l’exécution.');
+            appendChatMessage('assistant', '⚠️ ' + errReply, data.thought_chain, data.tools_used);
+            speakJarvisText(errReply);
+          }
+        } catch (err) {
+          const errMsg = err.name === 'AbortError' ? 'Délai d’attente dépassé pour la réponse du modèle IA.' : (err.message || 'Erreur réseau vers le moteur Jarvis.');
+          appendChatMessage('assistant', '⚠️ ' + errMsg);
+        } finally {
+          jarvisState.busy = false;
+          $('jarvis-send-btn').disabled = false;
+          $('jarvis-input').disabled = false;
+          $('jarvis-input').focus();
+          if (reactor) reactor.dataset.reactorState = 'idle';
+          set('jarvis-reactor-status', 'PRÊT');
+        }
+      }
+
+      function speakJarvisText(text) {
+        if (!('speechSynthesis' in window) || !$('jarvis-tts-toggle')?.checked) return;
+        try {
+          window.speechSynthesis.cancel();
+          const clean = text
+            .replace(/```[\s\S]*?```/g, '')
+            .replace(/`([^`]+)`/g, '$1')
+            .replace(/[*_#>[\]()]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (!clean) return;
+
+          const utterance = new SpeechSynthesisUtterance(clean);
+          utterance.lang = 'fr-FR';
+          utterance.rate = 1.05;
+          utterance.pitch = 1.0;
+          const voices = window.speechSynthesis.getVoices();
+          const frVoice = voices.find(v => v.lang.startsWith('fr') && (v.name.includes('Thomas') || v.name.includes('Google') || v.name.includes('France') || v.name.includes('Hortense')));
+          if (frVoice) utterance.voice = frVoice;
+
+          utterance.onstart = () => {
+            const reactor = $('jarvis-reactor');
+            if (reactor && reactor.dataset.reactorState === 'idle') {
+              reactor.dataset.reactorState = 'speaking';
+              set('jarvis-reactor-status', 'SYNTHÈSE VOCALE');
+            }
+          };
+          utterance.onend = () => {
+            const reactor = $('jarvis-reactor');
+            if (reactor && reactor.dataset.reactorState === 'speaking') {
+              reactor.dataset.reactorState = 'idle';
+              set('jarvis-reactor-status', 'PRÊT');
+            }
+          };
+          window.speechSynthesis.speak(utterance);
+        } catch (e) {
+          console.warn('TTS error:', e);
+        }
+      }
+
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        jarvisState.recognition = new SpeechRecognition();
+        jarvisState.recognition.lang = 'fr-FR';
+        jarvisState.recognition.continuous = false;
+        jarvisState.recognition.interimResults = true;
+
+        jarvisState.recognition.onstart = () => {
+          jarvisState.isListening = true;
+          $('jarvis-mic-btn')?.classList.add('listening');
+          const reactor = $('jarvis-reactor');
+          if (reactor) reactor.dataset.reactorState = 'listening';
+          set('jarvis-reactor-status', 'ÉCOUTE VOCALE...');
+          set('jarvis-mic-hint', 'Parlez maintenant... (Français)');
+        };
+
+        jarvisState.recognition.onresult = (e) => {
+          let transcript = '';
+          for (let i = 0; i < e.results.length; i++) {
+            transcript += e.results[i][0].transcript;
+          }
+          if ($('jarvis-input')) $('jarvis-input').value = transcript;
+        };
+
+        jarvisState.recognition.onerror = (e) => {
+          console.warn('Reconnaissance vocale erreur:', e);
+          stopJarvisListening();
+          set('jarvis-mic-hint', 'Erreur micro: ' + (e.error || 'inconnue'));
+        };
+
+        jarvisState.recognition.onend = () => {
+          const finalPrompt = $('jarvis-input')?.value.trim();
+          stopJarvisListening();
+          if (finalPrompt) {
+            sendJarvisPrompt(finalPrompt, 'web_voice');
+          }
+        };
+      }
+
+      function toggleJarvisListening() {
+        if (!jarvisState.recognition) {
+          alert('La reconnaissance vocale Web Speech API n’est pas supportée par ce navigateur (utilisez Chrome, Edge ou Brave).');
+          return;
+        }
+        if (jarvisState.isListening) {
+          stopJarvisListening();
+        } else {
+          try {
+            jarvisState.recognition.start();
+          } catch (e) {
+            console.warn('Erreur start speech recognition:', e);
+            stopJarvisListening();
+          }
+        }
+      }
+
+      function stopJarvisListening() {
+        jarvisState.isListening = false;
+        $('jarvis-mic-btn')?.classList.remove('listening');
+        const reactor = $('jarvis-reactor');
+        if (reactor && reactor.dataset.reactorState === 'listening') {
+          reactor.dataset.reactorState = 'idle';
+          set('jarvis-reactor-status', 'PRÊT');
+        }
+        set('jarvis-mic-hint', 'Microphone (Web Speech API)');
+        try { jarvisState.recognition?.stop(); } catch { }
+      }
+
+      $('jarvis-open-btn')?.addEventListener('click', openJarvisModal);
+      $('jarvis-close-btn')?.addEventListener('click', closeJarvisModal);
+      $('jarvis-mic-btn')?.addEventListener('click', toggleJarvisListening);
+
+      $('jarvis-clear-btn')?.addEventListener('click', async () => {
+        if (!confirm('Vider l’historique de conversation de Jarvis ?')) return;
+        try {
+          await apiFetch('/api/jarvis/history/clear', {method: 'DELETE'});
+          const stream = $('jarvis-chat-stream');
+          stream.replaceChildren();
+          appendChatMessage('assistant', 'Historique réinitialisé, monsieur. Mémoire de travail prête.');
+        } catch (e) {
+          console.warn('Erreur reset history:', e);
+        }
+      });
+
+      $('jarvis-form')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const text = $('jarvis-input')?.value || '';
+        sendJarvisPrompt(text, 'web_text');
+      });
+
+      document.querySelectorAll('.jarvis-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const p = chip.dataset.prompt;
+          if (p) {
+            sendJarvisPrompt(p, 'web_text');
+          }
+        });
+      });
+
+      document.addEventListener('keydown', (e) => {
+        const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+        if ((e.ctrlKey && (e.code === 'Space' || e.key === ' ')) || (!isInput && (e.key === 'j' || e.key === 'J'))) {
+          e.preventDefault();
+          const modal = $('jarvis-modal');
+          if (modal?.open) {
+            closeJarvisModal();
+          } else {
+            openJarvisModal();
+          }
+        }
+      });
+
+      setTimeout(fetchJarvisStatus, 1500);
+
+      window.addEventListener('pagehide', () => { if (state.stream) state.stream.close(); });
+      (async () => { await loadSnapshot(); startStream(); })();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+[Unit]
+Description=Sentinelle VPS NOC - piege TELNET et blocage cible
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/noc-sentinel
+EnvironmentFile=/etc/noc-sentinel.env
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/noc-sentinel/venv/bin/python /opt/noc-sentinel/vps_sentinel.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+StateDirectory=noc-sentinel
+StateDirectoryMode=0700
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# UFW conserve ses regles dans /etc/ufw ; iptables utilise /run/xtables.lock.
+ReadWritePaths=/var/lib/noc-sentinel /run -/etc/ufw
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+MemoryAccounting=true
+TasksMax=48
+LimitNOFILE=256
+
+[Install]
+WantedBy=multi-user.target
