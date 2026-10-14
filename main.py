@@ -27,7 +27,7 @@ from config import RESTART_ALLOWLIST, Settings
 from cyberdefense import CyberDefenseManager, TRAP_PATHS
 from sentinel import SentinelManager
 from vps_registry import VPSRegistry
-from whatsapp import AUDIO_MIME_TYPES, WhatsAppController, parse_message
+from whatsapp import AUDIO_MIME_TYPES, WhatsAppController
 
 LOGGER = logging.getLogger("noc-dashboard")
 BASE_DIR = Path(__file__).resolve().parent
@@ -445,8 +445,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def require_gateway(request: Request) -> None:
         same_origin(request)
-        if not settings.admin_phone_number or not settings.whatsapp_webhook_token:
-            raise HTTPException(503, "Commandes WhatsApp non configurées : ADMIN_PHONE_NUMBER et NOC_WHATSAPP_WEBHOOK_TOKEN requis")
+        if not application.state.runtime.whatsapp.webhook_configured:
+            raise HTTPException(503, "Commandes WhatsApp non configurées : WHATSAPP_ADMIN_NUMBERS et NOC_WHATSAPP_WEBHOOK_TOKEN requis")
         if not token_matches(request.headers.get("x-gateway-secret"), settings.whatsapp_webhook_token):
             raise HTTPException(403, "Requête non autorisée")
 
@@ -491,8 +491,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     payload = enriched
         try:
             return await application.state.runtime.whatsapp.accept(payload)
-        except PermissionError:
-            raise HTTPException(403, "Émetteur non autorisé") from None
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from None
         except ValueError:
             raise HTTPException(422, "Message invalide : fournir l'ID Baileys stable (id, messageId ou X-Message-Id) et un texte valide") from None
         except asyncio.QueueFull:
@@ -519,14 +519,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if request.headers.get("x-sender-pn"):
             payload["senderPn"] = request.headers["x-sender-pn"]
         try:
-            parse_message(payload, settings.admin_phone_number)
-            if payload["sessionId"] != settings.whatsapp_session_id:
-                raise PermissionError()
-        except PermissionError:
-            raise HTTPException(403, "Émetteur ou session non autorisé") from None
+            controller.authorize(payload)
+        except PermissionError as exc:
+            with contextlib.suppress(Exception):
+                await controller._publish()
+            raise HTTPException(403, str(exc)) from None
         except ValueError:
             raise HTTPException(422, "Headers X-WhatsApp-From (ou X-Sender) et X-Message-Id valides requis") from None
-        if controller.uploading >= 2 or controller.queue.full():
+        if controller.uploading >= 2 or controller.conversation_queue.full():
             raise HTTPException(429, "File de commandes pleine", headers={"Retry-After": "5"})
         limit = settings.whatsapp_max_audio_bytes
         length = request.headers.get("content-length")
@@ -556,8 +556,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             result = await controller.accept(payload, uploaded_audio=path)
             owned_by_worker = result.get("accepted") is True and not result.get("duplicate")
             return result
-        except PermissionError:
-            raise HTTPException(403, "Émetteur non autorisé") from None
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from None
         except ValueError:
             raise HTTPException(422, "Message audio invalide") from None
         except TimeoutError:

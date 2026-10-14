@@ -78,6 +78,15 @@ class OutgoingDeployTests(unittest.TestCase):
         self.assertIn('ADMIN_PHONE_NUMBER=""', updated)
         self.assertIn('PORT=3001', updated)
 
+    def test_multiple_admins_are_synced_and_explicit_empty_revokes_previous_list(self):
+        updated = gateway_environment('PORT=3001\n', {
+            'ADMIN_PHONE_NUMBER': '', 'WHATSAPP_ADMIN_NUMBERS': '+212600000001,+22790000000',
+        }, 'private-outgoing-test')
+        self.assertIn('WHATSAPP_ADMIN_NUMBERS="212600000001,22790000000"', updated)
+        revoked = gateway_environment(updated, {'WHATSAPP_ADMIN_NUMBERS': ''}, 'private-outgoing-test')
+        self.assertIn('WHATSAPP_ADMIN_NUMBERS=""', revoked)
+        self.assertNotIn('212600000001', revoked)
+
     def test_configured_incoming_relay_is_checked_after_restart(self):
         with patch('tools.deploy_dashboard_update.systemctl', return_value=SimpleNamespace(returncode=0)), \
              patch('tools.deploy_dashboard_update.http', return_value={'status': 'ok'}), \

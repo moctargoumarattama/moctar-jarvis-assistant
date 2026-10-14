@@ -336,6 +336,7 @@ class JarvisHeadlessBridge:
             actions.execute_tool = hooked_execute_tool
 
             def local_fallback() -> str:
+                nonlocal status
                 if telemetry_result is not None:
                     return _format_telemetry_report(telemetry_result)
                 from intent_engine import detect_intent
@@ -349,12 +350,13 @@ class JarvisHeadlessBridge:
                     from actions.system_actions import get_date_response
                     res = get_date_response()
                     return res.get("message") if isinstance(res, dict) else str(res)
-                elif intent in {"greetings", "hello"}:
+                elif intent in {"greetings", "hello"} or ai_brain.normalize_prompt(user_input) in {"bonjour", "bonsoir", "salut", "hello", "coucou"}:
                     return "Bonjour monsieur. Je suis prêt. En quoi puis-je vous aider ?"
                 elif intent and intent in actions.TOOL_DISPATCHER:
                     tool_res = actions.execute_tool(intent, detected.get("slots") or {})
                     return tool_res.get("message") if isinstance(tool_res, dict) else str(tool_res)
-                return "Bonjour monsieur. Je suis prêt et à votre écoute."
+                status = "error"
+                return "Le moteur IA est indisponible pour cette demande. Vérifiez le serveur et le modèle configurés, puis réessayez."
 
             status = "success"
             try:
@@ -452,7 +454,7 @@ class JarvisHeadlessBridge:
         }
 
     def get_history(self, limit: int = 20, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Renvoie les dernières interactions enregistrées dans la base SQLite."""
+        """Historique public ; les conversations WhatsApp restent privées."""
         target_session = session_id or self.active_session_id
         items: List[Dict[str, Any]] = []
         try:
@@ -463,7 +465,7 @@ class JarvisHeadlessBridge:
                         """
                         SELECT id, session_id, timestamp, role, content, tool_calls, tool_call_id
                         FROM conversation_history
-                        WHERE session_id = ?
+                        WHERE session_id = ? AND session_id NOT LIKE 'whatsapp:%'
                         ORDER BY id DESC
                         LIMIT ?
                         """,
@@ -474,6 +476,7 @@ class JarvisHeadlessBridge:
                         """
                         SELECT id, session_id, timestamp, role, content, tool_calls, tool_call_id
                         FROM conversation_history
+                        WHERE session_id NOT LIKE 'whatsapp:%'
                         ORDER BY id DESC
                         LIMIT ?
                         """,

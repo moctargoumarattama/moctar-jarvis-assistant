@@ -162,11 +162,19 @@ test('invalid recipient or body never reaches Baileys', async context => {
     { to: `${administrator}:bad@s.whatsapp.net`, text: 'reply' },
     { to: 'http://example.com', text: 'reply' },
     { to: '123', text: 'reply' }, { to: administrator, text: ' ' },
-    { to: administrator, text: 'x'.repeat(1001) }, { to: administrator, text: 42 },
+    { to: administrator, text: 'x'.repeat(4097) }, { to: administrator, text: 42 },
   ]) {
     assert.equal((await post(body)).status, 400);
   }
   assert.equal(socket.sent.length, 0);
+});
+
+test('full infrastructure status fits the bounded WhatsApp response payload', async context => {
+  const socket = mockSocket();
+  const { post } = await gateway(context, { sessions: new Map([['1', socket]]) });
+  const text = 'x'.repeat(4096);
+  assert.equal((await post({to: administrator, text})).status, 200);
+  assert.equal(socket.sent[0].content.text, text);
 });
 
 test('idempotent registration preserves existing gateway routes', async context => {

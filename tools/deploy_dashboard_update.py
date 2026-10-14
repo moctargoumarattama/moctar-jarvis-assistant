@@ -23,7 +23,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config import Settings
+from config import Settings, parse_whatsapp_admin_numbers
 from tools.repair_whatsapp_contract import (Change, checked_file, http, read_env,
                                            relay_ready, systemctl, update_env, write_atomic)
 
@@ -135,6 +135,9 @@ def gateway_environment(original: str, config: dict[str, str], secret: str) -> s
     phone = re.sub(r'\D', '', config.get('ADMIN_PHONE_NUMBER', '212770010264'))
     values = {'NOC_GATEWAY_SECRET': secret,
               'NOC_WHATSAPP_SESSION_ID': config.get('NOC_WHATSAPP_SESSION_ID', '1')}
+    admins = parse_whatsapp_admin_numbers(config.get('WHATSAPP_ADMIN_NUMBERS', config.get('ADMIN_PHONE_NUMBER', '212770010264')))
+    if admins:
+        values['WHATSAPP_ADMIN_NUMBERS'] = ','.join(admins)
     if phone:
         values['ADMIN_PHONE_NUMBER'] = phone
     token = config.get('NOC_WHATSAPP_WEBHOOK_TOKEN', '')
@@ -143,6 +146,9 @@ def gateway_environment(original: str, config: dict[str, str], secret: str) -> s
             raise ValueError('NOC_WHATSAPP_WEBHOOK_TOKEN invalide ; aucune modification')
         values['NOC_WHATSAPP_WEBHOOK_TOKEN'] = token
     updated = update_env(original, values)
+    if not admins:
+        updated = '\n'.join(line for line in updated.splitlines()
+                            if not re.match(r'\s*WHATSAPP_ADMIN_NUMBERS\s*=', line)) + '\nWHATSAPP_ADMIN_NUMBERS=""\n'
     if not phone:
         # Une valeur vide désactive explicitement les commandes ; ne pas garder
         # un ancien numéro ni élargir update_env aux secrets vides.
@@ -184,6 +190,7 @@ def main() -> int:
         raise ValueError('La configuration NOC doit appartenir à root et ne pas être modifiable par groupe/autres')
     config = read_env(env_path)
     admin_phone = re.sub(r'\D', '', config.get('ADMIN_PHONE_NUMBER', '212770010264'))
+    admins = parse_whatsapp_admin_numbers(config.get('WHATSAPP_ADMIN_NUMBERS', config.get('ADMIN_PHONE_NUMBER', '212770010264')))
     secret = config.get('NOC_GATEWAY_SECRET', Settings.__dataclass_fields__['gateway_secret'].default)
     if not re.fullmatch(r'[!-~]{1,512}', secret):
         raise ValueError('NOC_GATEWAY_SECRET vide ou invalide ; aucune modification')
@@ -191,9 +198,11 @@ def main() -> int:
     esm = json.loads(checked_file(package_json)).get('type') == 'module' if package_json.exists() else False
     changed_server = patch_send_alias(checked_file(server), esm=esm)
     require_relay = ('NOC_GATEWAY_RELAY_V2' in changed_server and
-                     bool(admin_phone and config.get('NOC_WHATSAPP_WEBHOOK_TOKEN')))
+                     bool(admins and config.get('NOC_WHATSAPP_WEBHOOK_TOKEN')))
     changes = [Change(app / relative, checked_file(source / relative)) for relative in (
-        'config.py', 'collector.py', 'main.py', 'cyberdefense.py', 'whatsapp.py', 'static/index.html',
+        'config.py', 'collector.py', 'main.py', 'cyberdefense.py', 'whatsapp.py', 'system_manager.py',
+        'ai_brain.py', 'headless_bridge.py',
+        'vps_registry.py', 'static/index.html', 'static/live_metrics.js', 'static/live_metrics.css',
         'integrations/baileys-send-alias.cjs', 'integrations/baileys-noc.cjs',
         'vps_agent.py', 'vps-agent.service', 'tools/deploy_dashboard_update.py', 'tools/repair_whatsapp_contract.py')]
     changes += [Change(server, changed_server), Change(MODULE, checked_file(source / 'integrations/baileys-send-alias.cjs')),

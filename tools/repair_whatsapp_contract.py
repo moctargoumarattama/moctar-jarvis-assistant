@@ -89,6 +89,7 @@ def gateway_replacement(package: str) -> str:
     detachNoc = (bridge.attachNocWebhook || bridge.default.attachNocWebhook)(sock, {{
       downloadMediaMessage: media,
       adminPhone: process.env.ADMIN_PHONE_NUMBER,
+      adminNumbers: process.env.WHATSAPP_ADMIN_NUMBERS,
       sessionId: process.env.NOC_WHATSAPP_SESSION_ID || "1",
       webhookToken: process.env.NOC_WHATSAPP_WEBHOOK_TOKEN,
       baseUrl: "http://127.0.0.1:5050",

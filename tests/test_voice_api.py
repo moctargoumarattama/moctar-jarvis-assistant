@@ -139,6 +139,7 @@ class VoiceAPITests(unittest.TestCase):
     def drain(self):
         async def join():
             await asyncio.wait_for(self.controller.queue.join(), 2)
+            await asyncio.wait_for(self.controller.conversation_queue.join(), 2)
         self.client.portal.call(join)
 
     def audio_headers(self, **changes):
@@ -231,6 +232,31 @@ class VoiceAPITests(unittest.TestCase):
         self.drain()
         headers["X-WhatsApp-From"] = "212770010265@s.whatsapp.net"
         self.assertEqual(self.client.post("/api/voice/process", content=b"OggSaudio", headers=headers).status_code, 403)
+
+    def test_explicit_admin_list_works_without_legacy_admin_number(self):
+        second = "212770010265"
+        self.controller.settings = replace(self.settings, admin_phone_number="", whatsapp_admin_numbers=(ADMIN, second))
+        body = {"id": "second-admin", "from": second, "text": "statut"}
+        response = self.client.post("/api/whatsapp/webhook", json=body, headers={"X-Gateway-Secret": "webhook-secret"})
+        self.assertEqual(response.status_code, 200)
+        self.drain()
+        self.assertEqual(self.reply.await_args.args[1], second)
+        self.controller._transcribe = AsyncMock(return_value="statut")
+        response = self.client.post("/api/voice/process", content=b"OggSaudio", headers=self.audio_headers(
+            **{"X-WhatsApp-From": second, "X-Message-Id": "second-audio"}))
+        self.assertEqual(response.status_code, 202)
+        self.drain()
+        self.assertEqual(self.reply.await_args.args[1], second)
+
+    def test_non_admin_error_is_alert_and_published_in_collector(self):
+        with patch.object(self.runtime.collector, "add_event") as event:
+            body = {"id": "unauthorized", "from": "212770010266", "text": "restart jarvis"}
+            response = self.client.post("/api/whatsapp/webhook", json=body,
+                                        headers={"X-Gateway-Secret": "webhook-secret"})
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("ALERTE", response.json()["detail"])
+        event.assert_called_once()
+        self.restart.assert_not_awaited()
 
     def test_audio_authentication_precedes_file_creation(self):
         with patch("main.tempfile.mkstemp") as create:

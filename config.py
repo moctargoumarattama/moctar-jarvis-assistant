@@ -381,6 +381,32 @@ def _noc_boolean(name: str, default: bool) -> bool:
     return raw in {"true", "1", "yes"}
 
 
+def parse_whatsapp_admin_numbers(raw: str) -> tuple[str, ...]:
+    """Numéros internationaux explicites ; une liste vide désactive les commandes."""
+    if not isinstance(raw, str):
+        raise ValueError("WHATSAPP_ADMIN_NUMBERS doit être une liste de numéros séparés par des virgules")
+    if not raw.strip():
+        return ()
+    numbers = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not re.fullmatch(r"\+?[0-9 .()-]+", item):
+            raise ValueError("WHATSAPP_ADMIN_NUMBERS contient un numéro invalide")
+        number = re.sub(r"\D", "", item)
+        if not 8 <= len(number) <= 15:
+            raise ValueError("WHATSAPP_ADMIN_NUMBERS exige des numéros internationaux de 8 à 15 chiffres")
+        if number not in numbers:
+            numbers.append(number)
+    if len(numbers) > 32:
+        raise ValueError("WHATSAPP_ADMIN_NUMBERS accepte au maximum 32 administrateurs")
+    return tuple(numbers)
+
+
+WHATSAPP_ADMIN_NUMBERS = parse_whatsapp_admin_numbers(os.environ.get(
+    "WHATSAPP_ADMIN_NUMBERS", os.environ.get("ADMIN_PHONE_NUMBER", "212770010264")
+))
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     host: str = "127.0.0.1"
@@ -400,6 +426,7 @@ class Settings:
     max_streams: int = 32
     event_limit: int = 200
     admin_phone_number: str = "212770010264"
+    whatsapp_admin_numbers: tuple[str, ...] | None = None
     whatsapp_webhook_token: str = ""
     whatsapp_session_id: str = "1"
     whatsapp_send_url: str = "http://127.0.0.1:3001/message/send"
@@ -441,6 +468,9 @@ class Settings:
             max_vps=int(_noc_number("NOC_MAX_VPS", 128, 1, 1024)),
             max_streams=int(_noc_number("NOC_MAX_STREAMS", 32, 1, 128)),
             admin_phone_number=re.sub(r"\D", "", os.environ.get("ADMIN_PHONE_NUMBER", "212770010264")),
+            whatsapp_admin_numbers=parse_whatsapp_admin_numbers(os.environ.get(
+                "WHATSAPP_ADMIN_NUMBERS", os.environ.get("ADMIN_PHONE_NUMBER", "212770010264")
+            )),
             whatsapp_webhook_token=os.environ.get("NOC_WHATSAPP_WEBHOOK_TOKEN", ""),
             whatsapp_session_id=os.environ.get("NOC_WHATSAPP_SESSION_ID", "1"),
             whatsapp_send_url=os.environ.get("NOC_WHATSAPP_SEND_URL", "http://127.0.0.1:3001/message/send"),

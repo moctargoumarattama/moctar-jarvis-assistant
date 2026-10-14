@@ -114,6 +114,8 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         self.settings = Settings(admin_phone_number=ADMIN, whatsapp_webhook_token="test-secret")
         self.runtime = runtime()
         self.restart = AsyncMock(return_value={"ok": True})
+        self.service_restart = self.enterContext(patch(
+            "whatsapp.system_manager.restart_system_service", return_value={"ok": True, "state": "active"}))
         self.controller = WhatsAppController(self.settings, self.runtime, self.restart)
         self.addAsyncCleanup(self.controller.close)
 
@@ -145,10 +147,10 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
     async def test_status_uses_existing_snapshot_without_new_probe(self) -> None:
         response, success = await self.controller._execute("status", None)
         self.assertTrue(success)
-        self.assertIn("Klasora (5005)", response)
-        self.assertIn("WhatsApp (3001)", response)
+        self.assertIn("Klasora : systemd", response)
+        self.assertIn("127.0.0.1:5005", response)
         self.assertIn("12.5 %", response)
-        self.assertIn("1.0/8.0 Gio", response)
+        self.assertIn("1.0/8.0 Go", response)
         self.restart.assert_not_awaited()
 
     async def test_worker_restarts_only_allowlisted_service_and_publishes(self) -> None:
@@ -157,7 +159,8 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         self.controller.worker = worker
         await self.controller.accept(message("redémarre klasora"))
         await asyncio.wait_for(self.controller.queue.join(), 2)
-        self.restart.assert_awaited_once_with("klasora")
+        self.service_restart.assert_called_once_with("klasora")
+        self.restart.assert_not_awaited()
         state = self.controller.snapshot()["last_command"]
         self.assertEqual(state["action"], "restart")
         self.assertEqual(state["service"], "klasora")
@@ -167,7 +170,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(ADMIN, json.dumps(self.controller.snapshot()))
 
     async def test_worker_recovers_after_failed_restart(self) -> None:
-        self.restart.side_effect = RuntimeError("secret must not leak")
+        self.service_restart.side_effect = RuntimeError("secret must not leak")
         self.controller._send_reply = AsyncMock(return_value=True)
         self.controller.worker = asyncio.create_task(self.controller._worker())
         await self.controller.accept(message("redémarre klasora"))
@@ -239,12 +242,15 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             return "statut"
         self.controller._transcribe = transcribe
         self.controller.worker = asyncio.create_task(self.controller._worker())
+        self.controller.conversation_worker = asyncio.create_task(
+            self.controller._worker(self.controller.conversation_queue))
         payload = message()
         payload["audio"] = {"path": "voice.ogg"}
         await self.controller.accept(payload)
         await asyncio.wait_for(entered.wait(), 1)
         await self.controller.close()
         await asyncio.wait_for(self.controller.queue.join(), 1)
+        await asyncio.wait_for(self.controller.conversation_queue.join(), 1)
         self.assertFalse(self.controller.busy)
 
     async def test_reply_uses_exact_gateway_contract_and_never_reads_body(self) -> None:

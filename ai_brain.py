@@ -12,6 +12,7 @@ from pathlib import Path
 import socket
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -310,18 +311,22 @@ def get_ai_status():
             payload = json.loads(response.read().decode("utf-8"))
         models = payload.get("models") if isinstance(payload, dict) else []
         available_models = {
-            (item or {}).get("name", "").strip()
+            str(item.get("name") or "").strip()
             for item in models
             if isinstance(item, dict)
         }
-        is_online = model in available_models or bool(available_models)
+        # An available server does not mean that the configured model is installed.
+        requested_model = model if ":" in model.rsplit("/", 1)[-1] else f"{model}:latest"
+        is_online = model in available_models or requested_model in available_models
         mode = "ollama" if is_online else "local"
-        label = f"IA: {'Ollama' if is_online else 'Local'} | {model}"
+        label = f"IA: {'Ollama' if is_online else 'Modele absent'} | {model}"
         return {
             "mode": mode,
             "model": model,
             "base_url": base_url,
             "online": is_online,
+            "server_online": True,
+            "model_available": is_online,
             "label": label,
         }
     except Exception:
@@ -330,6 +335,8 @@ def get_ai_status():
             "model": model,
             "base_url": base_url,
             "online": False,
+            "server_online": False,
+            "model_available": False,
             "label": f"IA: Local | {model}",
         }
 
@@ -1264,32 +1271,29 @@ class AIBrain:
     ) -> None:
         load_dotenv()
         env_model, env_base_url = _ollama_settings()
-
-        self.base_url = (
-            base_url
-            or os.getenv("OPENAI_BASE_URL")
-            or os.getenv("OLLAMA_BASE_URL")
-            or env_base_url
-            or DEFAULT_BASE_URL
-        ).rstrip("/")
-        self.model = (
-            model
-            or os.getenv("OPENAI_MODEL")
-            or os.getenv("OLLAMA_MODEL")
-            or env_model
-            or DEFAULT_MODEL
-        ).strip()
+        requested_type = api_type.lower()
+        # Explicit Ollama configuration must not inherit the cloud API settings.
+        default_base_url = (
+            env_base_url
+            if requested_type == "ollama"
+            else os.getenv("OPENAI_BASE_URL") or env_base_url
+        )
+        self.base_url = (base_url or default_base_url or DEFAULT_BASE_URL).rstrip("/")
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.timeout = float(timeout or os.getenv("LLM_TIMEOUT_SECONDS") or OLLAMA_TIMEOUT_SECONDS)
 
         # Détection automatique du type de backend
-        if api_type == "auto":
-            if "/v1" in self.base_url or "openai.com" in self.base_url or (self.api_key and "localhost" not in self.base_url):
+        if requested_type == "auto":
+            is_loopback = urlsplit(self.base_url).hostname in {"localhost", "127.0.0.1", "::1"}
+            if "/v1" in self.base_url or "openai.com" in self.base_url or (self.api_key and not is_loopback):
                 self.api_type = "openai"
             else:
                 self.api_type = "ollama"
         else:
-            self.api_type = api_type.lower()
+            self.api_type = requested_type
+
+        backend_model = os.getenv("OPENAI_MODEL") if self.api_type == "openai" else env_model
+        self.model = (model or backend_model or env_model or DEFAULT_MODEL).strip()
 
         logger.info(
             "AIBrain initialisé [type=%s, model=%s, base_url=%s, timeout=%ss]",

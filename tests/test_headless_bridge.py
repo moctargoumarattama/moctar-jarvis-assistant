@@ -77,6 +77,19 @@ class JarvisHeadlessBridgeTests(unittest.TestCase):
         self.assertEqual("Il est 15:30.", result["reply"])
         collect.assert_not_called()
 
+    def test_offline_ai_reports_unavailability_instead_of_an_unrelated_greeting(self):
+        with patch.object(self.bridge.agent, "_call_llm", side_effect=TimeoutError("offline")):
+            result = self.bridge.execute_prompt("Explique pourquoi les étoiles brillent")
+        self.assertEqual("error", result["status"])
+        self.assertIn("moteur IA est indisponible", result["reply"])
+        self.assertNotIn("Bonjour", result["reply"])
+
+    def test_offline_greeting_still_works_locally(self):
+        with patch.object(self.bridge.agent, "_call_llm", side_effect=TimeoutError("offline")):
+            result = self.bridge.execute_prompt("bonjour")
+        self.assertEqual("success", result["status"])
+        self.assertIn("Bonjour", result["reply"])
+
     def test_general_prompt_exposes_five_tools_and_status_words_select_telemetry(self):
         self.assertEqual(5, len(select_tools_for_prompt("Bonjour !")))
         for prompt in ("État global", "statut", "système", "infrastructure", "cpu", "ram"):
@@ -186,6 +199,21 @@ class JarvisHeadlessBridgeTests(unittest.TestCase):
         res = self.bridge.clear_history(session_id="session_test")
         self.assertEqual("success", res["status"])
         self.assertEqual([], self.bridge.get_history(limit=5, session_id="session_test"))
+
+    def test_public_history_excludes_whatsapp_before_limiting_and_preserves_private_storage(self):
+        public_session = "session_web_public"
+        private_session = "whatsapp:1:212770010264"
+        self.bridge.memory.add_message(public_session, "user", "Message web public")
+        self.bridge.memory.add_message(private_session, "user", "Question WhatsApp privée")
+        self.bridge.memory.add_message(private_session, "assistant", "Réponse confidentielle")
+        history = self.bridge.get_history(limit=1)
+        self.assertEqual(1, len(history))
+        self.assertEqual(history[0]["content"], "Message web public")
+        self.assertEqual(history[0]["session_id"], public_session)
+        self.assertEqual([], self.bridge.get_history(limit=20, session_id=private_session))
+        with self.bridge.memory._get_connection() as connection:
+            count = connection.execute("SELECT COUNT(*) FROM conversation_history WHERE session_id = ?", (private_session,)).fetchone()[0]
+        self.assertEqual(2, count)
 
     def test_execute_prompt_captures_tool_calls(self):
         def fake_run(*args, **kwargs):

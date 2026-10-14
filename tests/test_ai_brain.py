@@ -33,6 +33,102 @@ class AiBrainConfigTests(unittest.TestCase):
         self.assertEqual("qwen3:8b", status["model"])
         self.assertIn("Ollama", status["label"])
 
+    def test_get_ai_status_rejects_a_missing_configured_model(self):
+        response = Mock()
+        response.read.return_value = b'{"models":[{"name":"qwen2.5:1.5b"}]}'
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=None)
+
+        with patch("ai_brain._ollama_settings", return_value=("qwen3:8b", "http://localhost:11434")):
+            with patch("ai_brain.urlopen", return_value=response):
+                status = ai_brain.get_ai_status()
+
+        self.assertFalse(status["online"])
+        self.assertTrue(status["server_online"])
+        self.assertFalse(status["model_available"])
+        self.assertIn("Modele absent", status["label"])
+
+    def test_get_ai_status_accepts_the_implicit_latest_tag(self):
+        response = Mock()
+        response.read.return_value = b'{"models":[{"name":"qwen3:latest"}]}'
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=None)
+
+        with patch("ai_brain._ollama_settings", return_value=("qwen3", "http://localhost:11434")):
+            with patch("ai_brain.urlopen", return_value=response):
+                status = ai_brain.get_ai_status()
+
+        self.assertTrue(status["online"])
+        self.assertTrue(status["model_available"])
+
+    def test_ollama_uses_its_model_when_openai_is_also_configured(self):
+        with patch("ai_brain.load_dotenv"), patch.dict(
+            os.environ,
+            {"OLLAMA_MODEL": "qwen2.5:1.5b", "OPENAI_MODEL": "gpt-4o-mini"},
+            clear=True,
+        ):
+            brain = ai_brain.AIBrain()
+
+        self.assertEqual("ollama", brain.api_type)
+        self.assertEqual("qwen2.5:1.5b", brain.model)
+
+    def test_explicit_ollama_ignores_openai_base_url(self):
+        with patch("ai_brain.load_dotenv"), patch.dict(
+            os.environ,
+            {
+                "OLLAMA_MODEL": "qwen2.5:1.5b",
+                "OLLAMA_BASE_URL": "http://localhost:11434",
+                "OPENAI_BASE_URL": "https://api.openai.com/v1",
+                "OPENAI_MODEL": "gpt-4o-mini",
+            },
+            clear=True,
+        ):
+            brain = ai_brain.AIBrain(api_type="ollama")
+
+        self.assertEqual("http://localhost:11434", brain.base_url)
+        self.assertEqual("qwen2.5:1.5b", brain.model)
+
+    def test_openai_backend_preserves_its_model(self):
+        with patch("ai_brain.load_dotenv"), patch.dict(
+            os.environ,
+            {
+                "OLLAMA_MODEL": "qwen2.5:1.5b",
+                "OPENAI_BASE_URL": "https://api.openai.com/v1",
+                "OPENAI_MODEL": "gpt-4o-mini",
+            },
+            clear=True,
+        ):
+            brain = ai_brain.AIBrain()
+
+        self.assertEqual("openai", brain.api_type)
+        self.assertEqual("gpt-4o-mini", brain.model)
+
+    def test_explicit_model_overrides_backend_environment(self):
+        with patch("ai_brain.load_dotenv"), patch.dict(
+            os.environ,
+            {"OLLAMA_MODEL": "qwen3:8b", "OPENAI_MODEL": "gpt-4o-mini"},
+            clear=True,
+        ):
+            brain = ai_brain.AIBrain(model="qwen2.5:1.5b")
+
+        self.assertEqual("qwen2.5:1.5b", brain.model)
+
+    def test_cloud_api_key_does_not_switch_loopback_ollama_backend(self):
+        with patch("ai_brain.load_dotenv"), patch.dict(
+            os.environ,
+            {
+                "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
+                "OLLAMA_MODEL": "qwen2.5:1.5b",
+                "OPENAI_API_KEY": "test-key",
+                "OPENAI_MODEL": "gpt-4o-mini",
+            },
+            clear=True,
+        ):
+            brain = ai_brain.AIBrain()
+
+        self.assertEqual("ollama", brain.api_type)
+        self.assertEqual("qwen2.5:1.5b", brain.model)
+
     def test_ask_ollama_posts_to_chat_endpoint(self):
         response = Mock()
         response.read.return_value = b'{"message":{"content":"bonjour"}}'
@@ -90,6 +186,20 @@ class AiBrainConfigTests(unittest.TestCase):
         request_payload = json.loads(open_mock.call_args.args[0].data.decode("utf-8"))
         self.assertEqual(tools, request_payload["tools"])
         self.assertFalse(request_payload["think"])
+        self.assertGreaterEqual(request_payload["options"]["num_predict"], 512)
+
+    def test_universal_ollama_chat_keeps_enough_tokens_for_tool_arguments(self):
+        response = Mock()
+        response.read.return_value = b'{"message":{"content":"bonjour"}}'
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=None)
+        brain = ai_brain.AIBrain(api_type="ollama", model="qwen2.5:1.5b")
+
+        with patch("ai_brain.urlopen", return_value=response) as open_mock:
+            brain.chat([{"role": "user", "content": "bonjour"}])
+
+        payload = json.loads(open_mock.call_args.args[0].data.decode("utf-8"))
+        self.assertGreaterEqual(payload["options"]["num_predict"], 512)
 
     def test_chat_ollama_reports_timeout_explicitly(self):
         with patch("ai_brain.urlopen", side_effect=TimeoutError("timed out")):

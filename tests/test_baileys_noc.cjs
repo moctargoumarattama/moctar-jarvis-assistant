@@ -105,6 +105,39 @@ test('LID alternate phone and device-specific administrator JIDs remain supporte
   assert.equal(f.received[0].headers['x-whatsapp-from'], '212770010264@s.whatsapp.net');
 });
 
+test('multiple administrators keep their real identities and independent message IDs', async t => {
+  const second = '22790000000';
+  const f = await fixture(t, {adminNumbers: `+212 770-010-264,${second}`});
+  f.sock.ev.emit('messages.upsert', event([
+    incoming('SAME_ID', {conversation: 'statut'}),
+    incoming('SAME_ID', {conversation: 'status'}, {remoteJid: `${second}@s.whatsapp.net`}),
+    incoming('MIXED_ADMINS', {conversation: 'restart klasora'}, {remoteJidAlt: `${second}@s.whatsapp.net`}),
+  ]));
+  await until(() => f.received.length === 2);
+  assert.deepEqual(f.received.map(row => JSON.parse(row.body).data.from), ['212770010264@s.whatsapp.net', `${second}@s.whatsapp.net`]);
+  assert.equal(f.received[1].headers['x-whatsapp-from'], `${second}@s.whatsapp.net`);
+});
+
+test('LID resolved to the second administrator forwards that identity', async t => {
+  const second = '22790000000';
+  const f = await fixture(t, {adminNumbers: ['212770010264', second]});
+  f.sock.signalRepository = {lidMapping: {getPNForLID: async () => `${second}@s.whatsapp.net`}};
+  f.sock.ev.emit('messages.upsert', event([
+    incoming('SECOND_LID', {conversation: 'statut'}, {remoteJid: '7654321@lid'}),
+  ]));
+  await until(() => f.received.length === 1);
+  assert.equal(JSON.parse(f.received[0].body).data.from, `${second}@s.whatsapp.net`);
+});
+
+test('an explicit empty or malformed administrator list fails closed', () => {
+  const sock = {ev: new EventEmitter()};
+  const options = {adminPhone: '212770010264', webhookToken: 'private-mock-token', downloadMediaMessage: async () => Readable.from([])};
+  for (const adminNumbers of ['', [], '212770010264,,22790000000', '212770010264@g.us']) {
+    assert.throws(() => attachNocWebhook(sock, {...options, adminNumbers}), /configuration_identity/);
+  }
+  assert.equal(sock.ev.listenerCount('messages.upsert'), 0);
+});
+
 test('public plaintext targets and invalid credentials fail before attaching', () => {
   const sock = { ev: new EventEmitter() };
   const config = { adminPhone: '212770010264', webhookToken: 'private-mock-token', downloadMediaMessage: async () => Readable.from([]) };
@@ -266,7 +299,7 @@ test('supplied conflicting alternate JIDs are rejected instead of using the mapp
   ]));
   await sleep(100);
   assert.equal(f.received.length, 0);
-  assert.equal(f.logs.length, 0);
+  assert.ok(f.logs.every(line => line === 'NOC bridge: unauthorized_sender'));
 });
 
 test('one unresolved LID mapping pauses the bounded queue without disturbing gateway listeners', async t => {

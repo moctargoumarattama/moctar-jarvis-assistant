@@ -24,10 +24,10 @@ from typing import Any, Awaitable, Callable
 from urllib.parse import unquote, urlsplit
 
 import httpx
-from starlette.exceptions import HTTPException
 
 from collector import utc_now
-from config import RESTART_ALLOWLIST, Settings
+from config import Settings
+import system_manager
 
 AUDIO_MIME_TYPES = frozenset({"audio/ogg", "audio/opus", "application/ogg",
                               "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav"})
@@ -77,7 +77,14 @@ def validate_media_url(value: Any) -> str:
     return value
 
 
-def parse_message(payload: dict[str, Any], admin_phone_number: str) -> dict[str, Any] | None:
+def admin_numbers(settings: Settings) -> tuple[str, ...]:
+    """Une liste explicite vide refuse tout accès; None conserve la configuration historique."""
+    configured = getattr(settings, "whatsapp_admin_numbers", None)
+    values = (settings.admin_phone_number,) if configured is None else configured
+    return tuple(dict.fromkeys(normalize_phone(value) for value in values if value))
+
+
+def parse_message(payload: dict[str, Any], admin_phone_number: str | tuple[str, ...]) -> dict[str, Any] | None:
     """Normaliser le format documenté et les enveloppes usuelles des passerelles.
 
     Format stable: {id, from, text} ou {id, from, audio:{path|url,mimetype}}.
@@ -101,7 +108,8 @@ def parse_message(payload: dict[str, Any], admin_phone_number: str) -> dict[str,
     if data.get("fromMe") is True or key.get("fromMe") is True:
         return None  # Éviter les boucles avec nos propres réponses.
     try:
-        admin = normalize_phone(admin_phone_number)
+        configured = (admin_phone_number,) if isinstance(admin_phone_number, str) else admin_phone_number
+        admins = {normalize_phone(number) for number in configured}
         # Vérifier TOUS les champs explicites : un alias autorisé ne doit pas
         # dissimuler un autre numéro, un groupe ou un identifiant invalide.
         senders = [item[name] for item, name in ((data, "from"), (data, "sender"), (key, "remoteJid"))
@@ -120,7 +128,7 @@ def parse_message(payload: dict[str, Any], admin_phone_number: str) -> dict[str,
         if has_lid and not associated:
             raise ValueError("LID sans numéro personnel associé")
         phones.extend(normalize_phone(sender) for sender in associated)
-        if not phones or any(phone != admin for phone in phones):
+        if not phones or phones[0] not in admins or any(phone != phones[0] for phone in phones):
             raise ValueError("Émetteur non autorisé ou contradictoire")
     except ValueError as exc:
         raise PermissionError("Émetteur non autorisé") from exc
@@ -162,7 +170,7 @@ def parse_message(payload: dict[str, Any], admin_phone_number: str) -> dict[str,
         audio = {"path": path, "url": url, "mimetype": mimetype}
     elif not text.strip():
         raise ValueError("Texte ou note vocale obligatoire")
-    return {"id": message_id, "text": text.strip(), "audio": audio,
+    return {"id": message_id, "sender": phones[0], "text": text.strip(), "audio": audio,
             "source": "voice" if audio else "text"}
 
 
@@ -178,11 +186,28 @@ def parse_intent(text: str) -> tuple[str, str | None]:
     if normalized in {"aide", "help"}:
         return "help", None
     match = re.fullmatch(r"(?:redemarre|restart) ([a-z0-9-]+)", normalized)
-    if match and match[1] in RESTART_ALLOWLIST:
+    if match and match[1] in system_manager.SERVICES_ALLOWLIST:
         return "restart", match[1]
+    match = re.fullmatch(r"(?:arrete|stop) ([a-z0-9-]+)", normalized)
+    if match and match[1] in system_manager.SERVICES_ALLOWLIST:
+        return "stop", match[1]
+    if normalized == "reboot":
+        return "reboot", None
+    if normalized == "confirmer reboot":
+        return "confirm_reboot", None
     if normalized == "sauvegarde babamarket":
         return "backup", "babamarket"
     return "unknown", None
+
+
+def is_control_message(text: str) -> bool:
+    """Les commandes ambiguës ou niées ne doivent jamais devenir des actions ReAct."""
+    normalized = "".join(char for char in unicodedata.normalize("NFKD", text.casefold())
+                         if not unicodedata.combining(char))
+    return bool(re.search(r"\b(?:restart|redemarr\w*|stop|arret\w*|reboot|systemctl|sudo|sauvegarde|shutdown|poweroff)\b", normalized)
+                or re.match(r"\s*(?:help|aide|confirmer)\b", normalized)
+                or (re.match(r"\s*(?:status|statut|etat)\b", normalized)
+                    and re.search(r"[;&|`$<>]", normalized)))
 
 
 async def run_process(arguments: list[str], timeout: float, capture: bool = False) -> tuple[int, bytes]:
@@ -219,15 +244,21 @@ class WhatsAppController:
     def __init__(self, settings: Settings, runtime: Any,
                  restart: Callable[[str], Awaitable[dict[str, Any]]]):
         self.settings, self.runtime, self.restart = settings, runtime, restart
+        self.system_manager = system_manager.SystemManager(runtime, settings)
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=4)
+        # Deux workers fixes : une inférence lente ne retarde pas les commandes opérateur.
+        self.conversation_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=4)
         self.client: httpx.AsyncClient | None = None
         self.remote_client: httpx.AsyncClient | None = None
         self.worker: asyncio.Task[None] | None = None
+        self.conversation_worker: asyncio.Task[None] | None = None
         self.readiness_task: asyncio.Task[None] | None = None
         self.last_command: dict[str, Any] | None = None
         self.busy = False
         self.uploading = 0
-        self._seen: OrderedDict[str, float] = OrderedDict()
+        self._seen: OrderedDict[tuple[str, str, str], float] = OrderedDict()
+        self._pending_reboot: dict[tuple[str, str], float] = {}
+        self._active_commands = 0
         self._check_lock = asyncio.Lock()
         self._voice = {"status": "checking" if settings.voice_enabled else "disabled",
                        "model": settings.whisper_model, "model_path": None,
@@ -242,11 +273,11 @@ class WhatsAppController:
 
     @property
     def webhook_configured(self) -> bool:
-        return bool(self.settings.admin_phone_number and self.settings.whatsapp_webhook_token)
+        return bool(admin_numbers(self.settings) and self.settings.whatsapp_webhook_token)
 
     async def start(self) -> None:
         if self.webhook_configured:
-            normalize_phone(self.settings.admin_phone_number)
+            admin_numbers(self.settings)
             send = urlsplit(self.settings.whatsapp_send_url)
             if (send.scheme != "http" or send.hostname not in {"127.0.0.1", "::1"}
                     or send.port != 3001 or send.username or send.password or send.fragment):
@@ -271,6 +302,8 @@ class WhatsAppController:
             )
         # La simulation et le moteur vocal fonctionnent aussi avant de relier WhatsApp.
         self.worker = asyncio.create_task(self._worker(), name="noc-whatsapp")
+        self.conversation_worker = asyncio.create_task(
+            self._worker(self.conversation_queue), name="noc-whatsapp-conversation")
         self.readiness_task = asyncio.create_task(self._readiness_loop(), name="noc-voice-readiness")
 
     async def _readiness_loop(self) -> None:
@@ -331,41 +364,58 @@ class WhatsAppController:
             with contextlib.suppress(asyncio.CancelledError):
                 await self.readiness_task
             self.readiness_task = None
-        if self.worker:
-            self.worker.cancel()
+        for worker in (self.worker, self.conversation_worker):
+            if not worker:
+                continue
+            worker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await self.worker
-            self.worker = None
+                await worker
+        self.worker = self.conversation_worker = None
+        self._pending_reboot.clear()
         for client in (self.client, self.remote_client):
             if client:
                 await client.aclose()
         self.client = self.remote_client = None
-        while not self.queue.empty():
-            message = self.queue.get_nowait()
-            self._remove_upload(message)
-            self.queue.task_done()
+        for queue in (self.queue, self.conversation_queue):
+            while not queue.empty():
+                message = queue.get_nowait()
+                self._remove_upload(message)
+                queue.task_done()
 
     def snapshot(self) -> dict[str, Any]:
+        command = dict(self.last_command) if self.last_command else None
+        if command is not None:
+            private = command.pop("_private", command.get("simulated") is not True
+                                  and command.get("source") in {"text", "voice"}
+                                  and command.get("action") in {"pending", "unknown"})
+            if private:
+                # Le tableau de bord public ne révèle ni conversation ni ID Baileys.
+                command.update(id="private-whatsapp", transcription="Conversation WhatsApp privée",
+                               response="Conversation WhatsApp privée", service=None)
         return {**self._voice, "enabled": self.enabled,
                 "status": "active" if self.enabled and self.busy else self._voice["status"],
                 "webhook_configured": self.webhook_configured,
                 "webhook_status": "configured" if self.webhook_configured else "missing_configuration",
-                "busy": self.busy, "queued": self.queue.qsize(),
-                "last_command": dict(self.last_command) if self.last_command else None}
+                "busy": self.busy, "queued": self.queue.qsize() + self.conversation_queue.qsize(),
+                "last_command": command}
 
     async def accept(self, payload: dict[str, Any], *, uploaded_audio: Path | None = None) -> dict[str, Any]:
         if not self.webhook_configured:
             raise RuntimeError("Commandes WhatsApp non configurées")
-        if ("sessionId" in payload
-                and str(payload["sessionId"]) != self.settings.whatsapp_session_id):
-            raise PermissionError("Session WhatsApp non autorisée")
-        message = parse_message(payload, self.settings.admin_phone_number)
+        try:
+            message = self.authorize(payload)
+        except PermissionError:
+            with contextlib.suppress(Exception):
+                await self._publish()
+            raise
         if message is None:
             return {"accepted": False, "ignored": True}
+        message["session"] = self.settings.whatsapp_session_id
         now = time.monotonic()
         while self._seen and now - next(iter(self._seen.values())) > 86400:
             self._seen.popitem(last=False)
-        if message["id"] in self._seen:
+        identity = (message["sender"], message["session"], message["id"])
+        if identity in self._seen:
             return {"accepted": True, "duplicate": True}
         if uploaded_audio is not None:
             # Seul le routeur peut fournir ce chemin, jamais le JSON reçu.
@@ -373,11 +423,28 @@ class WhatsAppController:
                 raise ValueError("Audio obligatoire")
             message["audio"] = {"upload_path": str(uploaded_audio)}
         # QueueFull laisse l'identifiant réessayable; aucun effet si non accepté.
-        self.queue.put_nowait(message)
-        self._seen[message["id"]] = now
+        action, _ = parse_intent(message["text"])
+        queue = (self.conversation_queue if message["audio"] or (
+            action == "unknown" and not is_control_message(message["text"])) else self.queue)
+        queue.put_nowait(message)
+        self._seen[identity] = now
         if len(self._seen) > 256:
             self._seen.popitem(last=False)
         return {"accepted": True, "duplicate": False}
+
+    def authorize(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Vérifier les identités avant toute mise en file, transcription ou exécution."""
+        try:
+            data = payload.get("data", payload)
+            sessions = [item["sessionId"] for item in (payload, data)
+                        if isinstance(item, dict) and "sessionId" in item]
+            if any(str(session) != self.settings.whatsapp_session_id for session in sessions):
+                raise PermissionError("Session WhatsApp non autorisée")
+            return parse_message(payload, admin_numbers(self.settings))
+        except PermissionError:
+            self.runtime.collector.add_event(
+                "warning", "ALERTE WhatsApp : ordre rejeté, émetteur ou session non autorisé.")
+            raise PermissionError("ALERTE : commande refusée, numéro administrateur ou session non autorisé.") from None
 
     async def simulate(self, text: str) -> dict[str, Any]:
         """Tester le parser et le SSE sans commande systemd, sauvegarde ou envoi WhatsApp."""
@@ -397,92 +464,132 @@ class WhatsAppController:
     async def _publish(self) -> None:
         await self.runtime.publish_module_update()
 
-    async def _worker(self) -> None:
+    async def _worker(self, queue: asyncio.Queue[dict[str, Any]] | None = None) -> None:
+        queue = self.queue if queue is None else queue
         while True:
-            message = await self.queue.get()
+            message = await queue.get()
+            self._active_commands += 1
             self.busy = True
-            self.last_command = {
+            command = {
                 "id": message["id"], "timestamp": utc_now(), "source": message["source"],
                 "transcription": message["text"][:1000], "action": "pending", "service": None,
                 "status": "processing", "response": "", "reply_sent": False,
                 "simulated": message.get("simulated") is True,
+                "_private": message.get("simulated") is not True and (
+                    bool(message["audio"]) or parse_intent(message["text"])[0] == "unknown"),
             }
+            self.last_command = command
             try:
                 try:
                     await self._publish()
                     text = await self._transcribe(message["audio"]) if message["audio"] else message["text"]
                     action, service = parse_intent(text)
-                    self.last_command.update(transcription=text[:1000], action=action, service=service)
+                    command.update(transcription=text[:1000], action=action, service=service)
+                    command["_private"] = message.get("simulated") is not True and action == "unknown"
                     await self._publish()
                     if message.get("simulated"):
                         if action == "status":
                             response, success = await self._execute(action, service)
                             response = "SIMULATION · " + response
-                        elif action in {"restart", "backup"}:
-                            response, success = f"SIMULATION · {action} {service} reconnu. Aucune action exécutée.", True
+                        elif action in {"restart", "stop", "backup", "reboot", "confirm_reboot"}:
+                            response, success = f"SIMULATION · {action} {service or ''} reconnu. Aucune action exécutée.", True
                         else:
-                            response, success = "SIMULATION · Commande non reconnue.", False
+                            response, success = "SIMULATION · Commande non reconnue. Aucune inférence exécutée.", False
                     else:
-                        response, success = await self._execute(action, service)
-                    self.last_command.update(response=response[:1000], status="completed" if success else "failed", timestamp=utc_now())
+                        response, success = await self._execute(action, service, {**message, "text": text})
+                    if len(response) > 4096:
+                        response = response[:4050] + "\n… Réponse abrégée (limite WhatsApp)."
+                    command.update(response=response, status="completed" if success else "failed", timestamp=utc_now())
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    # Les chemins, les secrets et les erreurs HTTP brutes ne sont pas publiés.
+                    # Ne publier ni chemins, ni secrets, ni erreurs natives.
                     response = "Commande impossible : " + (
                         str(exc) if isinstance(exc, ValueError) else type(exc).__name__
                     )[:180]
-                    self.last_command.update(response=response, status="failed", timestamp=utc_now())
-                # Publier le résultat avant d'attendre la réponse de la passerelle.
+                    command.update(response=response, status="failed", timestamp=utc_now())
+                self.last_command = command
                 await self._publish()
                 if message.get("simulated"):
-                    self.runtime.collector.add_event("info", f"Simulation vocale · {self.last_command['action']} · {self.last_command['status']}")
-                    self.busy = False
-                    await self._publish()
+                    self.runtime.collector.add_event("info", f"Simulation vocale · {command['action']} · {command['status']}")
                     continue
-                self.last_command["reply_sent"] = await self._send_reply(self.last_command["response"])
-                level = "info" if self.last_command["status"] == "completed" and self.last_command["reply_sent"] else "warning"
-                delivery = "" if self.last_command["reply_sent"] else " · réponse non livrée"
-                self.runtime.collector.add_event(level, f"WhatsApp · {self.last_command['action']} · {self.last_command['status']}{delivery}")
-                self.busy = False
+                command["reply_sent"] = await self._send_reply(command["response"], message["sender"])
+                level = "info" if command["status"] == "completed" and command["reply_sent"] else "warning"
+                delivery = "" if command["reply_sent"] else " · réponse non livrée"
+                self.runtime.collector.add_event(level, f"WhatsApp · {command['action']} · {command['status']}{delivery}")
+                self.last_command = command
                 await self._publish()
             except asyncio.CancelledError:
                 raise
             except Exception:
-                self.busy = False
+                pass
             finally:
-                self.busy = False
+                self._active_commands -= 1
+                self.busy = self._active_commands > 0
                 self._remove_upload(message)
-                self.queue.task_done()
+                queue.task_done()
+                with contextlib.suppress(Exception):
+                    await self._publish()
 
-    async def _execute(self, action: str, service: str | None) -> tuple[str, bool]:
+    async def _execute(self, action: str, service: str | None,
+                       message: dict[str, Any] | None = None) -> tuple[str, bool]:
+        if action in {"restart", "stop", "reboot", "confirm_reboot"} and not self.settings.enable_restart:
+            self._pending_reboot.clear()
+            return "Commandes système désactivées par NOC_ENABLE_RESTART.", False
         if action == "help":
-            return ("Commandes : statut (ou status) ; redémarre klasora (ou merca-market, babamarket, moc-mal) ; sauvegarde babamarket ; aide.", True)
+            return ("Commandes : statut ; restart/redémarre <service> ; stop/arrête <service> ; "
+                    "reboot puis CONFIRMER REBOOT (60 s) ; sauvegarde babamarket ; aide. "
+                    "Services : merca-market, klasora, babamarket, moc-mal, jarvis. "
+                    "Les autres questions sont transmises à M.O.C.T.A.R.", True)
         if action == "status":
-            latest = self.runtime.latest or {}
-            lines = ["🛰 État de l'infrastructure"]
-            for item in latest.get("services", []):
-                lines.append(f"{'🟢' if item.get('healthy') else '🔴'} {item.get('label', item.get('name', '?'))} ({item.get('port', '?')})")
-            gateway = latest.get("infrastructure", {}).get("whatsapp", {})
-            lines.append(f"{'🟢' if gateway.get('healthy') else '🔴'} WhatsApp (3001)")
-            hardware = latest.get("hardware", {})
-            cpu, memory = hardware.get("cpu", {}), hardware.get("memory", {})
-            cpu_value = cpu.get("percent")
-            used, total = memory.get("used"), memory.get("total")
-            lines.append(f"CPU Dell : {cpu_value:g} %" if isinstance(cpu_value, (int, float)) else "CPU Dell : indisponible")
-            lines.append(f"RAM Dell : {used / 2**30:.1f}/{total / 2**30:.1f} Gio" if isinstance(used, (int, float)) and isinstance(total, (int, float)) else "RAM Dell : indisponible")
-            lines.append("Relevé : " + str(latest.get("timestamp", "en attente")))
-            return "\n".join(lines), True
-        if action == "restart" and service in RESTART_ALLOWLIST:
-            try:
-                result = await self.restart(service)
-            except HTTPException as exc:
-                return f"❌ {service} : {str(exc.detail)[:180]}", False
+            return await asyncio.to_thread(self.system_manager.get_full_infrastructure_status), True
+        if action in {"restart", "stop"} and service in system_manager.SERVICES_ALLOWLIST:
+            operation = (system_manager.restart_system_service if action == "restart"
+                         else system_manager.stop_system_service)
+            result = await asyncio.to_thread(operation, service)
             success = result.get("ok") is True
-            return (f"✅ {service} : redémarrage demandé." if success else f"❌ {service} : redémarrage refusé ou en échec."), success
+            if success:
+                return (f"Service {service} redémarré avec succès (actif)." if action == "restart"
+                        else f"Service {service} arrêté avec succès (inactif)."), True
+            return f"Service {service} : {str(result.get('message', 'opération échouée'))[:240]}", False
+        if action in {"reboot", "confirm_reboot"}:
+            if message and message.get("source") != "text":
+                return "Sécurité : envoyez REBOOT puis CONFIRMER REBOOT par messages texte, sans note vocale.", False
+            if not message or message.get("sender") not in admin_numbers(self.settings):
+                return "ALERTE : redémarrage refusé, administrateur non authentifié.", False
+            identity = (message["sender"], message["session"])
+            now = time.monotonic()
+            self._pending_reboot = {key: expires for key, expires in self._pending_reboot.items()
+                                    if expires > now}
+            if action == "reboot":
+                self._pending_reboot[identity] = now + 60
+                return ("ATTENTION : Confirmez le redémarrage du serveur hôte en envoyant "
+                        "'CONFIRMER REBOOT' dans les 60 secondes.", True)
+            # Consommer AVANT l'appel : répétitions et échecs ne relancent jamais le reboot.
+            expires = self._pending_reboot.pop(identity, None)
+            if expires is None or expires <= now:
+                return "Redémarrage refusé : aucune demande REBOOT en attente, ou confirmation expirée.", False
+            self.runtime.collector.add_event("warning", "WhatsApp · redémarrage hôte confirmé par un administrateur.")
+            await self._send_reply("Confirmation reçue : redémarrage du serveur hôte en cours.", message["sender"])
+            result = await asyncio.to_thread(system_manager.reboot_host)
+            success = result.get("ok") is True
+            return ("Redémarrage du serveur hôte demandé." if success
+                    else "Redémarrage du serveur hôte refusé ou en échec."), success
         if action == "backup":
             return await self._backup()
-        return ("Commande non reconnue. Envoyez : statut ; redémarre klasora (ou merca-market, babamarket, moc-mal) ; sauvegarde babamarket ; aide.", False)
+        if action == "unknown" and message and not is_control_message(message["text"]):
+            jarvis = getattr(self.runtime, "jarvis", None)
+            if jarvis is None:
+                return "M.O.C.T.A.R indisponible. Les commandes opérateur restent disponibles : statut, restart, stop, aide.", False
+            result = await jarvis.execute_prompt_async(
+                user_input=message["text"],
+                source="whatsapp_voice" if message["source"] == "voice" else "whatsapp_text",
+                session_id=f"whatsapp:{message['session']}:{message['sender']}",
+            )
+            if not isinstance(result, dict) or not isinstance(result.get("reply"), str):
+                return "M.O.C.T.A.R n'a pas fourni de réponse exploitable.", False
+            return result["reply"], result.get("status") != "error"
+        return ("Commande système refusée ou non reconnue. Envoyez aide pour la syntaxe exacte et les services autorisés.", False)
 
     async def _backup(self) -> tuple[str, bool]:
         configured = self.settings.backup_script
@@ -512,12 +619,12 @@ class WhatsAppController:
         code, _ = await run_process(arguments, self.settings.backup_timeout)
         return ("✅ Sauvegarde BabaMarket terminée." if code == 0 else "❌ Échec du script de sauvegarde BabaMarket."), code == 0
 
-    async def _send_reply(self, response: str) -> bool:
+    async def _send_reply(self, response: str, recipient: str | None = None) -> bool:
         if self.client is None:
             return False
         payload = {
-            self.settings.whatsapp_send_to_field: normalize_phone(self.settings.admin_phone_number),
-            self.settings.whatsapp_send_text_field: response[:1000],
+            self.settings.whatsapp_send_to_field: normalize_phone(recipient or self.settings.admin_phone_number),
+            self.settings.whatsapp_send_text_field: response[:4096],
         }
         try:
             async with asyncio.timeout(self.settings.whatsapp_send_timeout):

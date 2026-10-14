@@ -130,7 +130,7 @@ function attachMessageSendAlias(app, options = {}) {
     const jid = personalJid(body.to);
     const rawText = body.text || body.message;
     const text = typeof rawText === 'string' ? rawText.trim() : '';
-    if (!jid || !text || text.length > 1000) {
+    if (!jid || !text || text.length > 4096) {
       return response.status(400).json({ ok: false, error: 'message_recipient_or_text_invalid' });
     }
     const expires = Date.now() + timeoutMs;

@@ -32,6 +32,26 @@ class EnvironmentConfigTests(unittest.TestCase):
         with patch.dict(os.environ, {'NOC_VPS_TOKEN':'private-test-vps'}, clear=True):
             self.assertEqual(Settings.from_env().vps_token, 'private-test-vps')
 
+    def test_multiple_whatsapp_admins_are_normalized_and_deduplicated(self):
+        with patch.dict(os.environ, {
+            'WHATSAPP_ADMIN_NUMBERS': '+212 600-000-001,+227.900.000.00,212600000001',
+            'ADMIN_PHONE_NUMBER': '212600000002',
+        }, clear=True):
+            self.assertEqual(Settings.from_env().whatsapp_admin_numbers, ('212600000001', '22790000000'))
+
+    def test_explicit_empty_admin_list_disables_legacy_fallback(self):
+        with patch.dict(os.environ, {'WHATSAPP_ADMIN_NUMBERS': '', 'ADMIN_PHONE_NUMBER': '212600000001'}, clear=True):
+            self.assertEqual(Settings.from_env().whatsapp_admin_numbers, ())
+        with patch.dict(os.environ, {'ADMIN_PHONE_NUMBER': '+212600000001'}, clear=True):
+            self.assertEqual(Settings.from_env().whatsapp_admin_numbers, ('212600000001',))
+
+    def test_invalid_admin_list_is_rejected_without_exposing_contents(self):
+        for value in ('212600000001,,22790000000', '123', '212600000001@g.us', '212600000001;reboot'):
+            with self.subTest(value=value), patch.dict(os.environ, {'WHATSAPP_ADMIN_NUMBERS': value}, clear=True):
+                with self.assertRaises(ValueError) as error:
+                    Settings.from_env()
+                self.assertNotIn(value, str(error.exception))
+
     def test_vps_state_uses_systemd_state_directory_or_explicit_override(self):
         with tempfile.TemporaryDirectory() as directory:
             with patch.dict(os.environ, {"STATE_DIRECTORY": directory}, clear=True):

@@ -98,10 +98,13 @@ function post(url, headers, body, signal, timeoutMs, maximum) {
 /** Attach one isolated messages.upsert listener and return an idempotent detach(). */
 function attachNocWebhook(sock, options = {}) {
   if (!sock || !sock.ev || typeof sock.ev.on !== 'function' || typeof options.downloadMediaMessage !== 'function') throw new BridgeError('configuration_socket');
-  const adminPhone = String(options.adminPhone || process.env.ADMIN_PHONE_NUMBER || '').replace(/\D/g, '');
+  const configuredAdmins = options.adminNumbers ?? process.env.WHATSAPP_ADMIN_NUMBERS ?? options.adminPhone ?? process.env.ADMIN_PHONE_NUMBER ?? '';
+  const rawAdmins = Array.isArray(configuredAdmins) ? configuredAdmins : String(configuredAdmins).split(',');
+  if (!rawAdmins.length || rawAdmins.length > 32 || rawAdmins.some(value => typeof value !== 'string' || !/^\+?[0-9 .()-]+$/.test(value.trim()))) throw new BridgeError('configuration_identity');
+  const adminPhones = new Set(rawAdmins.map(value => value.replace(/\D/g, '')));
   const sessionId = String(options.sessionId || process.env.NOC_WHATSAPP_SESSION_ID || '1');
   const token = options.webhookToken || process.env.NOC_WHATSAPP_WEBHOOK_TOKEN || '';
-  if (!/^\d{8,15}$/.test(adminPhone) || !/^[A-Za-z0-9_.:-]{1,64}$/.test(sessionId) || !/^[\x21-\x7e]{1,512}$/.test(token)) throw new BridgeError('configuration_identity');
+  if ([...adminPhones].some(value => !/^\d{8,15}$/.test(value)) || !/^[A-Za-z0-9_.:-]{1,64}$/.test(sessionId) || !/^[\x21-\x7e]{1,512}$/.test(token)) throw new BridgeError('configuration_identity');
   const base = destination(options.baseUrl || 'http://127.0.0.1:5050');
   const maximum = Math.min(MAX_AUDIO_BYTES, Math.max(1, Number(options.maxAudioBytes) || MAX_AUDIO_BYTES));
   const timeoutMs = Math.min(30000, Math.max(1000, Number(options.timeoutMs) || 15000));
@@ -147,8 +150,10 @@ function attachNocWebhook(sock, options = {}) {
       throw error instanceof BridgeError ? error : new BridgeError('lid_mapping_failed');
     } finally { clearTimeout(timer); }
     if (jid === null || jid === undefined) throw new BridgeError('lid_mapping_unknown');
-    if (phoneOf(jid) !== adminPhone) throw new BridgeError('lid_mapping_not_admin');
+    const phone = phoneOf(jid);
+    if (!adminPhones.has(phone)) throw new BridgeError('lid_mapping_not_admin');
     if (detached || currentController?.signal.aborted) throw new BridgeError('lid_mapping_cancelled');
+    item.phone = phone;
   }
 
   async function download(item, signal) {
@@ -182,7 +187,7 @@ function attachNocWebhook(sock, options = {}) {
   }
 
   async function send(item, signal) {
-    const headers = { 'X-Gateway-Secret': token, 'X-WhatsApp-From': `${adminPhone}@s.whatsapp.net`, 'X-Message-Id': item.id, 'X-Session-Id': sessionId };
+    const headers = { 'X-Gateway-Secret': token, 'X-WhatsApp-From': `${item.phone}@s.whatsapp.net`, 'X-Message-Id': item.id, 'X-Session-Id': sessionId };
     if (item.audio) {
       const stream = await download(item, signal);
       if (!stream || typeof stream.pipe !== 'function') throw new BridgeError('download_stream');
@@ -190,7 +195,7 @@ function attachNocWebhook(sock, options = {}) {
       await post(new URL('/api/voice/process', base), headers, stream, signal, timeoutMs, maximum);
     } else {
       const body = Buffer.from(JSON.stringify({ event: 'messages.upsert', sessionId, data: {
-        from: `${adminPhone}@s.whatsapp.net`, fromMe: false, id: item.id,
+        from: `${item.phone}@s.whatsapp.net`, fromMe: false, id: item.id,
         messageType: 'conversation', text: item.text, timestamp: item.timestamp
       } }));
       headers['Content-Type'] = 'application/json';
@@ -236,12 +241,17 @@ function attachNocWebhook(sock, options = {}) {
       const key = message?.key;
       if (!key || key.fromMe === true || (key.fromMe !== undefined && typeof key.fromMe !== 'boolean') || typeof key.remoteJid !== 'string' || key.remoteJid.endsWith('@g.us') || key.participant) continue;
       let lid = null;
+      let phone = null;
       if (isLid(key.remoteJid)) {
         if (key.remoteJidAlt === undefined || key.remoteJidAlt === null) lid = key.remoteJid;
-        else if (phoneOf(key.remoteJidAlt) !== adminPhone) continue;
+        else {
+          phone = phoneOf(key.remoteJidAlt);
+          if (!adminPhones.has(phone)) { notify('unauthorized_sender'); continue; }
+        }
       } else {
-        if (phoneOf(key.remoteJid) !== adminPhone) continue;
-        if (key.remoteJidAlt !== undefined && key.remoteJidAlt !== null && !isLid(key.remoteJidAlt) && phoneOf(key.remoteJidAlt) !== adminPhone) continue;
+        phone = phoneOf(key.remoteJid);
+        if (!adminPhones.has(phone)) { notify('unauthorized_sender'); continue; }
+        if (key.remoteJidAlt !== undefined && key.remoteJidAlt !== null && !isLid(key.remoteJidAlt) && phoneOf(key.remoteJidAlt) !== phone) continue;
       }
       if (typeof key.id !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(key.id)) continue;
       const content = unwrap(message.message);
@@ -250,12 +260,12 @@ function attachNocWebhook(sock, options = {}) {
       if (!audio && (typeof text !== 'string' || !text.trim() || text.length > 1000)) continue;
       const mimetype = String(audio?.mimetype || 'audio/ogg').split(';', 1)[0].trim().toLowerCase();
       if (audio && (!['audio/ogg', 'audio/opus', 'audio/mpeg', 'audio/wav', 'application/octet-stream'].includes(mimetype) || Number(audio.fileLength) > maximum || Number(audio.seconds) > 60)) continue;
-      const dedup = `${sessionId}:${key.id}`;
+      const dedup = `${sessionId}:${phone || lid}:${key.id}`;
       if (seen.has(dedup)) continue;
       if (queue.length >= maxQueued) { notify('queue_full'); continue; }
       seen.set(dedup, true);
       while (seen.size > 256) seen.delete(seen.keys().next().value);
-      queue.push({ message, lid, id: key.id, audio: Boolean(audio), mimetype, text, timestamp: Number(message.messageTimestamp) || Math.floor(Date.now() / 1000) });
+      queue.push({ message, lid, phone, id: key.id, audio: Boolean(audio), mimetype, text, timestamp: Number(message.messageTimestamp) || Math.floor(Date.now() / 1000) });
       void pump();
     }
   }
