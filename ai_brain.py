@@ -1121,7 +1121,7 @@ def chat_ollama(
     *,
     tools=None,
     model=None,
-    max_predict=64,
+    max_predict=512,
     temperature=0.2,
     think=False,
 ):
@@ -1186,7 +1186,7 @@ def ask_ollama(
     images=None,
     system_prompt=None,
     model=None,
-    max_predict=64,
+    max_predict=512,
     temperature=0.2,
     tools=None,
     think=False,
@@ -1408,6 +1408,7 @@ class AIBrain:
             "messages": list(messages),
             "stream": False,
             "options": {
+                "num_predict": 512,
                 "temperature": temperature,
                 "top_p": 0.9,
             },
@@ -1475,6 +1476,7 @@ class AIBrain:
             "model": self.model,
             "messages": list(messages),
             "temperature": temperature,
+            "max_tokens": 512,
         }
         if tools:
             payload["tools"] = list(tools)

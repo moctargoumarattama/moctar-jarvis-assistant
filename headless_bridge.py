@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 """
-Bridge headless pour JARVIS.
+Bridge headless pour M.O.C.T.A.R / JARVIS.
 
 Fournit une interface Python propre, asynchrone et thread-safe pour exécuter
 l'agent autonome ReAct sans aucune dépendance à PyQt5.
@@ -7,14 +9,12 @@ Conçu pour intégration directe dans des serveurs web (FastAPI, Flask, etc.)
 ou des daemons d'arrière-plan.
 """
 
-from __future__ import annotations
-
 import asyncio
 from datetime import datetime
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 import actions
@@ -26,6 +26,91 @@ from assistant_security import SecurityPolicyEngine
 import config
 
 logger = logging.getLogger("jarvis.headless")
+
+
+def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
+    """Sélectionne un ensemble pertinent et réduit d'outils selon l'intention du prompt.
+
+    Évite de saturer les modèles légers locaux (ex: qwen2.5:1.5b sur CPU) avec les 46 outils.
+    """
+    p = (prompt or "").lower()
+    tools: set[str] = set()
+
+    # Mots-clés Énergie / Solaire / Batterie
+    if any(k in p for k in ("energie", "énergie", "solaire", "panneau", "batterie", "consommation", "kw", "kwh", "onduleur", "autonomie", "audit")):
+        tools.update([
+            "calculate_solar_sizing",
+            "calculate_battery_sizing",
+            "calculate_inverter_sizing",
+            "calculate_consumption",
+            "calculate_energy_cost",
+        ])
+
+    # Mots-clés IoT / Domotique / Capteurs / Relais
+    if any(k in p for k in ("iot", "capteur", "relais", "salon", "lumiere", "lumière", "temperature", "température", "domotique", "switch")):
+        tools.update([
+            "get_iot_status",
+            "get_iot_temperature",
+            "set_relay_state",
+        ])
+
+    # Mots-clés Maintenance / Git / Projets / Code
+    if any(k in p for k in ("git", "commit", "push", "pull", "branche", "projet", "vscode", "serveur", "code", "repo", "maintenance")):
+        tools.update([
+            "git_status",
+            "git_pull",
+            "git_log",
+            "prepare_commit",
+            "open_project",
+            "maintenance_checklist",
+        ])
+
+    # Mots-clés Tâches / Notes / Rappels / Mémoire
+    if any(k in p for k in ("tache", "tâche", "todo", "note", "rappel", "rappelle", "agenda", "memoire", "mémoire", "souviens", "recherche")):
+        tools.update([
+            "create_note",
+            "add_todo",
+            "list_todos",
+            "list_todos_for_day",
+            "search_personal_data",
+            "schedule_reminder",
+            "get_upcoming_reminders",
+            "store_memory_fact",
+            "search_memory_facts",
+        ])
+
+    # Mots-clés Système / Heure / Date / Volume / Apps
+    if any(k in p for k in ("heure", "date", "jour", "volume", "son", "ouvre", "ferme", "capture", "ecran", "écran")):
+        tools.update([
+            "get_time_response",
+            "get_date_response",
+            "get_battery_response",
+            "open_app",
+            "close_app",
+            "change_volume",
+        ])
+
+    # Mots-clés Web / Musique / Recherche
+    if any(k in p for k in ("musique", "chanson", "youtube", "google", "cherche", "site", "web")):
+        tools.update([
+            "play_music",
+            "control_music",
+            "search_google",
+            "search_youtube",
+            "open_site",
+        ])
+
+    # Si aucun domaine spécifique détecté, restreindre aux 5 outils les plus courants
+    if not tools:
+        return (
+            "get_time_response",
+            "get_date_response",
+            "get_iot_status",
+            "search_personal_data",
+            "list_todos",
+        )
+
+    return tuple(sorted(tools))
 
 
 class JarvisHeadlessBridge:
@@ -159,9 +244,11 @@ class JarvisHeadlessBridge:
 
         status = "success"
         try:
+            targeted_tools = select_tools_for_prompt(user_input)
             agent_result = self.agent.run(
                 prompt=user_input,
                 session_id=current_session,
+                tool_names=targeted_tools,
                 fallback=local_fallback,
             )
             if hasattr(agent_result, "response"):
