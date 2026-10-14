@@ -1421,7 +1421,8 @@
             jarvisState.available = data.available !== false;
             const badge = $('jarvis-strip-badge');
             if (badge) {
-              if (data.status === 'ok') {
+              const isOnline = data.status === 'ready' || data.status === 'ok' || data.available === true;
+              if (isOnline) {
                 badge.textContent = 'MOCTAR EN LIGNE';
                 badge.style.color = 'var(--green)';
                 badge.style.borderColor = 'rgba(81, 220, 170, 0.4)';

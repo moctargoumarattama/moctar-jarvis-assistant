@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sse_starlette.sse import EventSourceResponse
 
 import collector
@@ -41,10 +41,19 @@ except Exception as _jarvis_err:
 
 
 class Metrics(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
     used: Annotated[int, Field(ge=0, le=2**60, strict=True)]
     total: Annotated[int, Field(gt=0, le=2**60, strict=True)]
     percent: Annotated[float, Field(ge=0, le=100, strict=True)]
+
+    @field_validator("used", "total", mode="before")
+    @classmethod
+    def coerce_to_int(cls, v: Any) -> Any:
+        if isinstance(v, bool):
+            raise ValueError("Les booléens ne sont pas acceptés")
+        if isinstance(v, (int, float)):
+            return int(round(v))
+        return v
 
     @model_validator(mode="after")
     def consistent(self) -> Metrics:
@@ -62,7 +71,7 @@ class RemoteService(BaseModel):
 
 
 class VPSReport(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
     hostname: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")]
     cpu_percent: Annotated[float, Field(ge=0, le=100, strict=True)]
     memory: Metrics

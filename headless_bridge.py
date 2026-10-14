@@ -80,7 +80,7 @@ def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
         ])
 
     # Mots-clés Télémétrie matérielle / Système / CPU / RAM / Disques / Ressources
-    if any(k in p for k in ("systeme", "système", "cpu", "ram", "disque", "ressource", "infrastructure", "materiel", "matériel")):
+    if any(k in p for k in ("systeme", "système", "cpu", "ram", "disque", "stockage", "temperature", "température", "ressource", "infrastructure", "materiel", "matériel")):
         tools.add("get_system_telemetry")
 
     # Mots-clés Système / Heure / Date / Volume / Apps

@@ -171,11 +171,26 @@ class APITests(unittest.TestCase):
         unknown_service = remote_report()
         unknown_service["services"][0]["status"] = "<script>alert(1)</script>"
         invalid.append(unknown_service)
-        invalid.append({**remote_report(), "unexpected": "field"})
         for payload in invalid:
             with self.subTest(payload=payload):
                 self.assertEqual(self.report(payload).status_code, 422)
         self.assertEqual(self.runtime.vps, {})
+
+    def test_vps_report_accepts_extra_fields_and_float_metrics(self) -> None:
+        payload = remote_report()
+        payload["unexpected"] = "field"
+        payload["memory"]["free"] = 75
+        payload["memory"]["used"] = 25.0
+        payload["memory"]["total"] = 100.0
+        payload["disk"]["free"] = 90.0
+        payload["disk"]["used"] = 10.0
+        payload["disk"]["total"] = 100.0
+        response = self.report(payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("vps-one", self.runtime.vps)
+        stored_mem = self.runtime.vps["vps-one"]["report"]["memory"]
+        self.assertEqual(stored_mem["used"], 25)
+        self.assertIsInstance(stored_mem["used"], int)
 
     def test_vps_numeric_ranges_and_consistency_are_enforced(self) -> None:
         invalid = []
