@@ -510,6 +510,9 @@ class AssistantCore:
     def _handle_battery(self, _intent_data):
         return system_actions.get_battery_response()
 
+    def _handle_system_telemetry(self, _intent_data=None):
+        return system_actions.get_system_telemetry()
+
     def _handle_screenshot(self, _intent_data):
         return system_actions.capture_screenshot()
 

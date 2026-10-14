@@ -143,6 +143,14 @@ def build_default_registry(assistant):
         parameters=_object_parameters(),
         ai_enabled=True,
     )
+    registry.register(
+        "get_system_telemetry",
+        "system",
+        assistant._handle_system_telemetry,
+        description="Récupère les métriques matérielles en temps réel du serveur hôte : pourcentage CPU, température CPU, RAM utilisée/totale, et espace disque restant.",
+        parameters=_object_parameters(),
+        ai_enabled=True,
+    )
     registry.register("screenshot", "system", assistant._handle_screenshot)
     registry.register("analyze_screen", "system", assistant._handle_analyze_screen)
     registry.register("volume_up", "system", assistant._handle_volume_up)

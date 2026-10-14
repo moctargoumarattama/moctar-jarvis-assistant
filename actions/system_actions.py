@@ -177,6 +177,110 @@ def get_battery_response(battery_provider: Any = psutil.sensors_battery) -> Dict
         )
 
 
+def get_system_telemetry(_psutil_module: Any = psutil) -> Dict[str, Any]:
+    """Récupère les métriques matérielles en temps réel du serveur hôte : pourcentage CPU, température CPU, RAM utilisée/totale, et espace disque restant.
+
+    Critères d'utilisation:
+        - L'agent DOIT appeler cet outil dès que l'utilisateur demande l'état du matériel,
+          l'utilisation CPU, la RAM, l'espace disque, la température ou les ressources du système
+          (ex: 'Donne-moi la télémétrie', 'Quelle est la charge CPU ?', 'Combien de RAM reste-t-il ?', 'Espace disque restant', 'Température CPU', 'État matériel').
+
+    Returns:
+        Dict[str, Any]: Résultat standardisé contenant les métriques matérielles :
+            - success (bool): True si la télémétrie a été collectée.
+            - action (str): 'get_system_telemetry'.
+            - message (str): Résumé formaté et lisible pour l'utilisateur.
+            - data (dict): Métadonnées structurées {'cpu_percent': float, 'temperature_c': float | None, 'memory': dict, 'disk': dict}.
+            - error (str | None): Détail en cas d'erreur.
+    """
+    action_name = "get_system_telemetry"
+    try:
+        # CPU
+        cpu_pct = _psutil_module.cpu_percent(interval=0.1) if hasattr(_psutil_module, "cpu_percent") else 0.0
+
+        # Memory
+        mem = _psutil_module.virtual_memory() if hasattr(_psutil_module, "virtual_memory") else None
+        if mem:
+            mem_total_gb = round(mem.total / (1024 ** 3), 1)
+            mem_used_gb = round((mem.total - mem.available) / (1024 ** 3), 1)
+            mem_percent = mem.percent
+        else:
+            mem_total_gb = 0.0
+            mem_used_gb = 0.0
+            mem_percent = 0.0
+
+        # Disk
+        path = os.path.abspath(os.sep) if os.name == "nt" else "/"
+        try:
+            disk = _psutil_module.disk_usage(path) if hasattr(_psutil_module, "disk_usage") else None
+        except Exception:
+            disk = _psutil_module.disk_usage("/") if hasattr(_psutil_module, "disk_usage") else None
+
+        if disk:
+            disk_total_gb = round(disk.total / (1024 ** 3), 1)
+            disk_free_gb = round(disk.free / (1024 ** 3), 1)
+            disk_percent = disk.percent
+        else:
+            disk_total_gb = 0.0
+            disk_free_gb = 0.0
+            disk_percent = 0.0
+
+        # Thermal sensors
+        temperature = None
+        if hasattr(_psutil_module, "sensors_temperatures"):
+            try:
+                sensors = _psutil_module.sensors_temperatures()
+                cpu_readings = [
+                    reading.current
+                    for name, readings in (sensors or {}).items()
+                    if any(part in name.lower() for part in ("coretemp", "k10temp", "cpu", "zenpower"))
+                    for reading in readings
+                    if reading.current is not None and -20 <= reading.current <= 150
+                ]
+                if cpu_readings:
+                    temperature = round(max(cpu_readings), 1)
+            except (AttributeError, OSError, RuntimeError):
+                pass
+
+        temp_str = f"{temperature}°C" if temperature is not None else "N/A"
+        message = (
+            f"Télémétrie système : CPU {cpu_pct}%, Température {temp_str}, "
+            f"RAM {mem_used_gb}/{mem_total_gb} Go ({mem_percent}%), "
+            f"Disque restant {disk_free_gb}/{disk_total_gb} Go ({100 - disk_percent:.1f}% libre)."
+        )
+
+        data = {
+            "cpu_percent": cpu_pct,
+            "temperature_c": temperature,
+            "memory": {
+                "used_gb": mem_used_gb,
+                "total_gb": mem_total_gb,
+                "percent": mem_percent,
+            },
+            "disk": {
+                "free_gb": disk_free_gb,
+                "total_gb": disk_total_gb,
+                "percent_used": disk_percent,
+            },
+        }
+
+        return format_action_result(
+            action=action_name,
+            success=True,
+            message=message,
+            data=data,
+            error=None,
+        )
+    except Exception as exc:
+        return format_action_result(
+            action=action_name,
+            success=False,
+            message=f"Impossible de lire la télémétrie matérielle : {exc}",
+            data=None,
+            error=str(exc),
+        )
+
+
 def capture_screenshot(pyautogui_module: Any = pyautogui) -> Dict[str, Any]:
     """Capture une capture d'écran de l'affichage principal et l'enregistre sur le disque local.
 

@@ -27,6 +27,7 @@ TIER_1_READ_ONLY: Set[str] = {
     # Système & OS
     "get_time_response",
     "time",
+    "get_system_telemetry",
     "get_system_metrics",
     "system_metrics",
     "read_file",

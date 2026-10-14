@@ -67,6 +67,78 @@ class TestJarvisAPI(unittest.TestCase):
                 self.assertEqual(len(data["thought_chain"]), 1)
                 self.assertEqual(len(data["tools_used"]), 1)
 
+    def test_get_system_telemetry_action(self) -> None:
+        import actions
+        from actions.system_actions import get_system_telemetry
+        from agent_core import AgentCore
+
+        # 1. Vérification dans TOOL_DISPATCHER
+        self.assertIn("get_system_telemetry", actions.TOOL_DISPATCHER)
+
+        # 2. Exécution directe
+        result = get_system_telemetry()
+        self.assertTrue(result["success"])
+        self.assertEqual(result["action"], "get_system_telemetry")
+        self.assertIn("data", result)
+        self.assertIn("cpu_percent", result["data"])
+        self.assertIn("memory", result["data"])
+        self.assertIn("disk", result["data"])
+        self.assertIn("temperature_c", result["data"])
+
+        # 3. Exécution via execute_tool
+        exec_result = actions.execute_tool("get_system_telemetry", {})
+        self.assertTrue(exec_result["success"])
+        self.assertEqual(exec_result["action"], "get_system_telemetry")
+
+        # 4. Présence dans la liste des outils AgentCore
+        with self.client as client:
+            tool_names = [t.get("function", {}).get("name") for t in self.app.state.runtime.jarvis.agent.tools]
+            self.assertIn("get_system_telemetry", tool_names)
+
+    def test_select_tools_for_telemetry_prompt(self) -> None:
+        from headless_bridge import select_tools_for_prompt
+
+        test_queries = [
+            "Quel est l'état du système et de l'infrastructure ?",
+            "Vérifie la charge cpu et la ram",
+            "Combien d'espace disque reste-t-il ?",
+            "Ressource matérielle serveur",
+            "Analyse le matériel hôte",
+        ]
+
+        for query in test_queries:
+            with self.subTest(query=query):
+                selected = select_tools_for_prompt(query)
+                self.assertIn(
+                    "get_system_telemetry",
+                    selected,
+                    f"'get_system_telemetry' doit être sélectionné pour le prompt '{query}'",
+                )
+
+    def test_jarvis_query_system_telemetry(self) -> None:
+        with self.client as client:
+            with patch.object(
+                self.app.state.runtime.jarvis,
+                "execute_prompt",
+                return_value={
+                    "status": "success",
+                    "reply": "Télémétrie : CPU 12%, RAM 4.2/16 Go, Disque 52 Go libre.",
+                    "thought_chain": ["Appel de get_system_telemetry"],
+                    "tools_used": [{"tool": "get_system_telemetry", "result": {"cpu_percent": 12.0}}],
+                    "timestamp": "2026-10-14T18:05:00",
+                    "session_id": "test_telemetry_session",
+                    "source": "web_text",
+                },
+            ):
+                response = client.post(
+                    "/api/jarvis/query",
+                    json={"prompt": "Vérifie les ressources CPU et l'espace disque du système."},
+                )
+                self.assertEqual(response.status_code, 200)
+                data = response.json()
+                self.assertEqual(data["status"], "success")
+                self.assertIn("get_system_telemetry", [t["tool"] for t in data["tools_used"]])
+
 
 if __name__ == "__main__":
     unittest.main()
