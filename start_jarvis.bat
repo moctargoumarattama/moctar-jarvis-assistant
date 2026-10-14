@@ -1,5 +1,5 @@
 @echo off
-cd /d C:\Users\hp\Jarvis
+cd /d "%~dp0"
 call venv\Scripts\activate
-python main_jarvis.py
-pause
+python main_jarvis.py %*
+pause
