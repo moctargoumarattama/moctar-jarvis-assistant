@@ -144,6 +144,7 @@ def build_default_registry(assistant):
         ai_enabled=True,
     )
     registry.register("screenshot", "system", assistant._handle_screenshot)
+    registry.register("analyze_screen", "system", assistant._handle_analyze_screen)
     registry.register("volume_up", "system", assistant._handle_volume_up)
     registry.register("volume_down", "system", assistant._handle_volume_down)
     registry.register("mute", "system", assistant._handle_mute)

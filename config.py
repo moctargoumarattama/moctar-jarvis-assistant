@@ -246,6 +246,14 @@ MIC_SETTINGS = {
     "non_speaking_duration": float(os.getenv("JARVIS_MIC_NON_SPEAKING_DURATION", "0.3")),
 }
 
+TTS_SETTINGS = {
+    "engine": os.getenv("JARVIS_TTS_ENGINE", "edge-tts").strip().lower() or "edge-tts",
+    "voice": os.getenv("JARVIS_EDGE_TTS_VOICE", "fr-FR-HenriNeural").strip() or "fr-FR-HenriNeural",
+    "rate": os.getenv("JARVIS_TTS_RATE", "+0%").strip() or "+0%",
+    "pitch": os.getenv("JARVIS_TTS_PITCH", "+0Hz").strip() or "+0Hz",
+    "fallback_to_pyttsx3": True,
+}
+
 MIC_INDEX = MIC_SETTINGS["device_index"]
 ENABLE_SOFT_WAKE_WORD = os.getenv("ENABLE_SOFT_WAKE_WORD", "true").strip().lower() not in {
     "0",

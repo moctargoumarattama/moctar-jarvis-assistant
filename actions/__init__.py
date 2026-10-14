@@ -41,6 +41,7 @@ from .iot_actions import (
 
 # 3. System Actions
 from .system_actions import (
+    analyze_screen,
     capture_screenshot,
     change_volume,
     close_app,
@@ -125,6 +126,7 @@ TOOL_DISPATCHER: Dict[str, Callable[..., Any]] = {
     "get_date_response": get_date_response,
     "get_battery_response": get_battery_response,
     "capture_screenshot": capture_screenshot,
+    "analyze_screen": analyze_screen,
     "change_volume": change_volume,
     "open_app": open_app,
     "close_app": close_app,

@@ -563,6 +563,9 @@ def detect_intent(raw_text):
     if any(token in text for token in ["batterie", "niveau batterie", "battery"]):
         return {"intent": "battery", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
 
+    if any(token in text for token in ["regarde mon ecran", "analyse mon ecran", "analyse l ecran", "lis mon ecran", "que vois tu sur mon ecran", "decris mon ecran"]):
+        return {"intent": "analyze_screen", "target": raw_text, "confidence": 100, "raw": raw_text, "slots": {"question": raw_text}}
+
     if any(token in text for token in ["capture", "screenshot", "capture ecran"]):
         return {"intent": "screenshot", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
 

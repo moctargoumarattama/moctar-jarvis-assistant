@@ -120,6 +120,7 @@ def _is_duplicate_command(command, state, now_value=None):
 
 COMMAND_ONLY_SAFE_INTENTS = {
     "add_todo",
+    "analyze_screen",
     "battery",
     "close_app",
     "create_note",
@@ -766,7 +767,21 @@ def shutdown_runtime(state):
 
 
 def main():
+    import sys
+    import os
     configure_logging()
+    if "--headless" in sys.argv or "--server" in sys.argv or os.getenv("HEADLESS", "0") == "1":
+        logger.info("Jarvis starting in Headless Engine mode")
+        from headless_bridge import JarvisHeadlessBridge
+        bridge = JarvisHeadlessBridge()
+        logger.info("Jarvis Headless Engine running. Status: %s", bridge.get_status())
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("Jarvis Headless Engine stopped")
+        return
+
     logger.info("Jarvis starting")
     app, ui, engine, assistant, state = setup_runtime()
     sched_core.start()

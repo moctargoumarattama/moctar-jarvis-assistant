@@ -442,3 +442,92 @@ def open_folder(target: str) -> Dict[str, Any]:
             data=None,
             error=str(exc),
         )
+
+
+def analyze_screen(
+    question: str = "Que vois-tu à l'écran ? Résume et analyse précisément ce qui est affiché.",
+    pyautogui_module: Any = pyautogui,
+) -> Dict[str, Any]:
+    """Capture l'affichage de l'écran hôte et l'analyse visuellement via le modèle d'IA vision local.
+
+    Critères d'utilisation:
+        - L'agent DOIT appeler cet outil dès que l'utilisateur lui demande de regarder son écran,
+          d'analyser une page web, d'inspecter un message d'erreur ou du code visible, ou de décrire son bureau
+          (ex: 'Regarde mon écran', 'Qu'est-ce qu'il y a d'affiché ?', 'Analyse mon écran', 'Lis ce qui bugge à l'écran').
+        - L'agent NE DOIT PAS appeler cet outil si l'utilisateur demande seulement d'enregistrer
+          une capture sans l'analyser (utiliser `capture_screenshot`).
+
+    Args:
+        question (str): Question d'analyse ou instruction spécifique adressée au modèle de vision (ex: 'Quel est le bug affiché ?').
+        pyautogui_module (Any): Module d'automatisation GUI (injection de dépendance).
+
+    Returns:
+        Dict[str, Any]: Résultat standardisé contenant l'analyse visuelle :
+            - success (bool): True si la capture a été prise et analysée.
+            - action (str): 'analyze_screen'.
+            - message (str): Résumé textuel de l'analyse visuelle pour l'utilisateur.
+            - data (dict): Métadonnées {'file_path': '...', 'analysis': '...'}.
+            - error (str | None): Détail en cas d'échec.
+    """
+    action_name = "analyze_screen"
+    try:
+        config.ensure_runtime_directories()
+        filename = (
+            config.SCREENSHOTS_DIR
+            / f"screen_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        )
+        try:
+            screenshot = pyautogui_module.screenshot()
+            screenshot.save(filename)
+        except Exception:
+            from PIL import ImageGrab
+            screenshot = ImageGrab.grab()
+            screenshot.save(filename)
+
+        import ai_brain
+        vision_model = (
+            os.getenv("OLLAMA_VISION_MODEL")
+            or "gemma3"
+        ).strip()
+
+        try:
+            analysis = ai_brain.ask_ollama(
+                question,
+                images=[str(filename)],
+                model=vision_model,
+                max_predict=300,
+                temperature=0.2,
+                system_prompt=(
+                    "Tu es M.O.C.T.A.R, un assistant doué d'analyse visuelle d'écran. "
+                    "Décris précisément et de façon concise ce qui est affiché à l'écran, "
+                    "les fenêtres actives, les éventuels messages d'erreur ou le contenu demandé."
+                ),
+            )
+            return format_action_result(
+                action=action_name,
+                success=True,
+                message=str(analysis).strip(),
+                data={"file_path": str(filename), "analysis": str(analysis).strip()},
+                error=None,
+            )
+        except Exception as ollama_err:
+            msg = (
+                f"Capture enregistrée ({filename.name}), mais le modèle de vision local n'a pas répondu ({ollama_err}). "
+                f"Assure-toi qu'Ollama est lancé avec un modèle de vision comme '{vision_model}' ou 'llava'."
+            )
+            return format_action_result(
+                action=action_name,
+                success=True,
+                message=msg,
+                data={"file_path": str(filename), "analysis": None},
+                error=str(ollama_err),
+            )
+    except Exception as exc:
+        return format_action_result(
+            action=action_name,
+            success=False,
+            message=f"Impossible d'analyser l'écran : {exc}",
+            data=None,
+            error=str(exc),
+        )
+

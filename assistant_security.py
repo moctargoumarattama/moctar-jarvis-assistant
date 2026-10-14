@@ -36,6 +36,8 @@ TIER_1_READ_ONLY: Set[str] = {
     "get_network_info",
     "read_notes",
     "read_personal_file",
+    "capture_screenshot",
+    "analyze_screen",
     # IoT & Domotique
     "get_iot_status",
     "iot_status",

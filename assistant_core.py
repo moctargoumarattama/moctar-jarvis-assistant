@@ -507,6 +507,14 @@ class AssistantCore:
     def _handle_screenshot(self, _intent_data):
         return system_actions.capture_screenshot()
 
+    def _handle_analyze_screen(self, intent_data):
+        question = (
+            (intent_data.get("slots") or {}).get("question")
+            or intent_data.get("target")
+            or "Que vois-tu à l'écran ? Résume et analyse précisément ce qui est affiché."
+        )
+        return system_actions.analyze_screen(question=str(question))
+
     def _handle_volume_up(self, _intent_data):
         return system_actions.change_volume("volume_up")
 
