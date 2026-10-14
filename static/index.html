@@ -15,8 +15,8 @@
     .section-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:13px;gap:15px}.section-heading h2{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#b6c5d9;display:flex;align-items:center;gap:9px}.section-heading h2 .icon{width:15px;height:15px;color:var(--muted)}.section-heading .meta{font-size:10px;color:#728198;font-family:var(--mono)}section{scroll-margin-top:25px}.hardware-grid{display:grid;grid-template-columns:1.85fr 1.17fr .9fr 1.28fr;gap:15px;margin-bottom:29px}.card{border:1px solid var(--line);border-radius:11px;background:linear-gradient(140deg,#131b29 0%,#101722 90%);min-width:0}.metric-card{padding:18px 19px;min-height:205px}.card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:19px}.card-label{font-size:11px;color:#a0b1c9;font-weight:600;display:flex;align-items:center;gap:8px}.card-label .icon{width:15px;height:15px;color:#71829b}.card-top .meta{font-size:9px;color:#75859c}.cpu-body{display:flex;gap:17px;align-items:center}.gauge{width:102px;height:102px;flex-shrink:0;border-radius:50%;display:grid;place-items:center;background:conic-gradient(from 225deg,var(--gauge-color,var(--cyan)) calc(var(--progress,0)*.75%),#273245 0 75%,transparent 0);position:relative}.gauge:before{content:"";position:absolute;inset:8px;border-radius:50%;background:#131c29}.gauge-content{position:relative;display:flex;flex-direction:column;align-items:center;margin-top:5px}.gauge-number{font-family:var(--mono);font-size:28px;line-height:1.2;letter-spacing:-1.5px}.gauge-number small{font-size:13px;letter-spacing:0;color:var(--muted);margin-left:3px}.gauge-caption{font-size:8px;letter-spacing:.1em;color:var(--muted);margin-top:5px;text-transform:uppercase}.cpu-trend{flex:1;min-width:0}.chart-caption{display:flex;justify-content:space-between;font-size:8px;color:var(--muted);gap:5px;margin-bottom:5px}.trend-svg{width:100%;height:66px;overflow:visible}.chart-grid{stroke:#263349;stroke-width:.6;stroke-dasharray:2 3}.chart-line{stroke:var(--cyan);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}.chart-area{fill:url(#cpu-fill)}.chart-end{fill:var(--cyan)}.core-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px 10px;margin-top:14px;max-height:75px;overflow-y:auto;scrollbar-width:thin}.core-item{min-width:0}.core-label{font:8px var(--mono);display:flex;justify-content:space-between;gap:3px;color:#7f91aa;margin-bottom:4px}.core-track{height:3px;background:#253044;border-radius:3px;overflow:hidden}.core-fill{height:100%;background:var(--cyan);border-radius:3px;transition:width .4s}.no-data{font-size:10px;color:var(--muted);line-height:1.7}.memory-body{display:flex;align-items:center;gap:17px}.memory-body .gauge{width:86px;height:86px;--gauge-color:var(--green)}.memory-body .gauge-number{font-size:25px}.memory-values{min-width:0}.primary-value{font-family:var(--mono);font-size:19px;letter-spacing:-.8px;white-space:nowrap}.secondary-value{font-size:10px;color:var(--muted);margin-top:7px}.swap-row{border-top:1px solid #253044;margin-top:17px;padding-top:11px}.detail-line{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:9px;color:var(--muted)}.detail-line .value{color:#acbdd3;font-family:var(--mono);font-size:9px}.progress-track{height:4px;background:#263145;border-radius:4px;overflow:hidden;margin-top:8px}.progress-fill{height:100%;background:var(--cyan);transition:width .4s;border-radius:4px;width:0}.swap-row .progress-fill{background:var(--green)}.temperature-value{font:38px var(--mono);letter-spacing:-2px;margin-top:22px}.temperature-value small{font:15px var(--mono);color:var(--muted);letter-spacing:0;margin-left:5px}.thermal-label{font-size:10px;color:var(--muted);margin-top:7px}.temperature-meter{display:flex;gap:3px;margin-top:20px;height:6px}.temperature-meter span{flex:1;border-radius:2px;background:#263246}.temperature-meter span.lit{background:var(--cyan)}.temperature-meter[data-tone="warning"] span.lit{background:var(--amber)}.temperature-meter[data-tone="error"] span.lit{background:var(--red)}.disk-row+.disk-row{margin-top:20px}.disk-label{display:flex;align-items:center;gap:7px;font:10px var(--mono);color:#becce0}.disk-label .icon{width:13px;height:13px;color:#8293ab}.disk-data{font:10px var(--mono);color:#cad6e8;margin-top:8px;display:flex;justify-content:space-between;gap:8px}.disk-data .muted{font-size:9px}.disk-sub{font-size:8px;color:#6f829c;margin-top:6px;overflow-wrap:anywhere}.disk-row.backup .progress-fill{background:#9d96eb}
     .services-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px;margin-bottom:29px}.service-card{padding:18px 19px 14px;border-top:2px solid #2b3a4d;position:relative;overflow:hidden}.service-card[data-tone="success"]{border-top-color:#408d78}.service-card[data-tone="error"]{border-top-color:#a24c62}.service-card[data-tone="success"]:after{content:"";position:absolute;inset:0 0 auto auto;width:100px;height:85px;background:radial-gradient(at 100% 0%,#47e4ac09,transparent 75%);pointer-events:none}.service-header{display:flex;justify-content:space-between;align-items:center;gap:10px}.service-logo{width:34px;height:34px;display:grid;place-items:center;background:#1b283b;border:1px solid #30405a;border-radius:8px;color:#9aafce;font-size:10px;font-weight:700;font-family:var(--mono)}.service-name{font-size:13px;font-weight:600;margin-top:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.service-port{font:9px var(--mono);color:#8394ad;margin-top:6px}.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid #334155;border-radius:4px;color:#9baac0;font:8px var(--mono);text-transform:uppercase;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}.badge .led{width:4px;height:4px;box-shadow:none}.badge[data-tone="success"]{color:var(--green);background:#17342a55;border-color:#2e5446}.badge[data-tone="error"]{color:var(--red);background:#391e2955;border-color:#573342}.badge[data-tone="warning"]{color:var(--amber);background:#33291755;border-color:#54452b}.service-measure{display:flex;justify-content:space-between;gap:10px;align-items:flex-end;margin:18px 0 16px}.service-measure-label{font-size:9px;color:var(--muted);margin-bottom:5px}.latency{font:23px var(--mono);letter-spacing:-.6px}.latency small{font-size:10px;color:#7a8ca7;letter-spacing:0;margin-left:4px}.http-status{font:9px var(--mono);color:#9bacbf;margin-bottom:3px}.service-footer{display:flex;justify-content:space-between;align-items:center;gap:5px;border-top:1px solid #263044;padding-top:12px}.service-systemd{font:8px var(--mono);color:#7f92ad;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:65%}.restart-button{display:flex;align-items:center;gap:5px;border:0;padding:3px 0;background:none;font-size:9px;color:#9dafc7}.restart-button .icon{width:12px;height:12px}.restart-button:not(:disabled):hover{color:var(--cyan)}.service-error{color:var(--red);font-size:9px;line-height:1.5;margin-top:10px;overflow-wrap:anywhere}
     .bottom-grid{display:grid;grid-template-columns:1.12fr 1fr;gap:21px}.network-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-bottom:20px}.network-card{padding:17px 18px}.network-top{display:flex;align-items:center;justify-content:space-between;gap:9px;margin-bottom:14px}.network-icon{width:31px;height:31px;border-radius:8px;background:#152a38;border:1px solid #294656;color:var(--cyan);display:grid;place-items:center}.network-icon.whatsapp{background:#142c25;border-color:#2a473a;color:var(--green)}.network-icon .icon{width:17px;height:17px}.network-name{font-size:12px;font-weight:550}.network-meta{font:9px var(--mono);color:var(--muted);margin-top:7px;overflow-wrap:anywhere}.network-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:13px;color:#73859e;font-size:9px}.network-footer strong{font:9px var(--mono);color:#aebed4;font-weight:400}.network-error{font-size:9px;color:var(--red);line-height:1.5;margin-top:9px;overflow-wrap:anywhere}.vps-panel{overflow:hidden;min-height:151px}.vps-empty{display:flex;gap:13px;align-items:center;padding:24px;color:var(--muted)}.vps-empty-icon{height:40px;width:40px;border:1px dashed #354359;border-radius:10px;display:grid;place-items:center;flex-shrink:0}.vps-empty strong{font-size:11px;color:#9bb0cd;font-weight:500}.vps-empty p{font-size:10px;margin-top:6px;line-height:1.7}.vps-item{padding:15px 18px}.vps-item+.vps-item{border-top:1px solid var(--line)}.vps-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:13px}.vps-host{font:11px var(--mono);overflow-wrap:anywhere}.vps-meta{font:8px var(--mono);color:var(--muted)}.vps-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.vps-stat .detail-line{font-size:8px}.vps-stat .detail-line .value{font-size:9px}.vps-services{margin-top:10px;display:flex;flex-wrap:wrap;gap:5px}.vps-services .badge{font-size:8px;max-width:none}.vps-age{font:8px var(--mono);color:#7486a0;margin-top:10px}.terminal-card{height:341px;display:flex;flex-direction:column;background:#0e1521;overflow:hidden}.terminal-header{display:flex;justify-content:space-between;align-items:center;padding:13px 17px;border-bottom:1px solid #243046;background:#121c2b}.terminal-dots{display:flex;gap:5px}.terminal-dots span{width:6px;height:6px;border-radius:50%;background:#3b4b64}.terminal-dots span:first-child{background:#95706b}.terminal-dots span:nth-child(2){background:#95855e}.terminal-dots span:nth-child(3){background:#628b7b}.terminal-name{font:9px var(--mono);color:#93a5bf}.console-controls{display:flex;align-items:center;gap:10px}.console-button{font-size:9px;color:#8194af;background:none;border:0;padding:2px}.console-button:hover{color:var(--cyan)}.events-list{overflow:auto;flex:1;padding:11px 17px 14px;scrollbar-width:thin;scrollbar-color:#2b3c54 transparent;display:flex;flex-direction:column;gap:10px}.console-empty{margin:auto 0;color:#627590;font:10px var(--mono);line-height:1.9}.event-line{font:9px/1.7 var(--mono);display:grid;grid-template-columns:52px 48px 1fr;gap:8px;color:#adbcd0;overflow-wrap:anywhere}.event-time{color:#5d7391}.event-level{color:var(--cyan);font-size:8px}.event-line[data-level="warning"] .event-level{color:var(--amber)}.event-line[data-level="error"] .event-level{color:var(--red)}.terminal-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 17px;border-top:1px solid #223048;color:#5f7796;font:8px var(--mono)}.terminal-cursor{width:5px;height:9px;background:#68bdd3;display:inline-block;margin-left:5px;vertical-align:middle;animation:cursor 1.2s steps(2) infinite}@keyframes cursor{50%{opacity:0}}footer{margin-top:26px;padding-top:15px;border-top:1px solid #1e2a3a;display:flex;justify-content:space-between;gap:12px;color:#5f718a;font:8px var(--mono);letter-spacing:.02em}.footer-left{display:flex;gap:15px;align-items:center}.footer-status{display:flex;align-items:center;gap:6px}.footer-status .led{width:4px;height:4px;box-shadow:none;color:#64788e}.footer-status[data-tone="success"] .led{color:var(--green)}
-    dialog{border:1px solid rgba(56,189,248,0.22);border-radius:20px;background:radial-gradient(ellipse at 50% 0%,#152338 0%,#0c1421 100%);color:var(--text);padding:28px;width:min(450px,calc(100% - 32px));box-shadow:0 30px 80px rgba(0,0,0,0.75),0 0 35px rgba(56,189,248,0.12);transition:all .25s cubic-bezier(0.16,1,0.3,1)}dialog[open]{animation:modalSoftPop .26s cubic-bezier(0.16,1,0.3,1) forwards}dialog::backdrop{background:rgba(3,7,18,0.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}@keyframes modalSoftPop{from{opacity:0;transform:scale(0.97) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}.dialog-icon{width:43px;height:43px;background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.25);display:grid;place-items:center;color:var(--cyan);border-radius:12px;margin-bottom:19px}dialog h2{font-size:21px;font-weight:600;letter-spacing:-.4px}dialog p{font-size:12px;color:#8c9eb9;line-height:1.8;margin-top:10px}.dialog-label{display:block;font-size:10px;font-weight:600;color:#bdcde1;margin:23px 0 9px}dialog input{width:100%;background:#0b1320;border:1px solid #35445c;border-radius:10px;padding:12px 14px;color:var(--text);font-family:var(--mono);font-size:12px}dialog input:focus{border-color:var(--cyan);box-shadow:0 0 12px rgba(56,189,248,0.2)}.dialog-error{font-size:11px;color:var(--red);margin-top:12px;line-height:1.6;min-height:0}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:23px}.button{border:1px solid rgba(56,189,248,0.2);padding:10px 16px;font-size:11px;border-radius:10px;background:#162438;transition:all .18s cubic-bezier(0.16,1,0.3,1)}.button:hover{background:#20344d;border-color:rgba(56,189,248,0.4);transform:translateY(-1px)}.button.primary{color:#06171d;background:linear-gradient(135deg,#0ea5e9 0%,#06b6d4 100%);border-color:var(--cyan);font-weight:650;box-shadow:0 0 14px rgba(6,182,212,0.3)}.button.primary:hover{background:#7ee5f4;box-shadow:0 0 20px rgba(6,182,212,0.5)}.button.danger{color:#1a0911;background:#ff8397;border-color:#ff8397}.toast{position:fixed;right:25px;bottom:24px;background:#142232;border:1px solid rgba(56,189,248,0.25);box-shadow:0 12px 45px rgba(0,0,0,0.55);padding:14px 18px;border-radius:12px;max-width:min(440px,calc(100% - 32px));font-size:12px;line-height:1.5;z-index:30;backdrop-filter:blur(8px)}.toast[data-tone="error"]{border-color:#783b4d;color:var(--red)}.toast[data-tone="success"]{border-color:#386451;color:var(--green)}
-    @media(min-width:1700px){.metric-card{min-height:222px}.cpu-body{gap:25px}.gauge{width:112px;height:112px}.trend-svg{height:76px}.terminal-card{height:365px}.service-card{padding:22px}}
+    dialog{border:1px solid rgba(56,189,248,0.22);border-radius:20px;background:radial-gradient(ellipse at 50% 0%,#152338 0%,#0c1421 100%);color:var(--text);padding:26px 28px;width:min(450px,calc(100% - 32px));box-shadow:0 30px 80px rgba(0,0,0,0.75),0 0 35px rgba(56,189,248,0.12);transition:all .25s cubic-bezier(0.16,1,0.3,1)}dialog[open]{animation:modalSoftPop .26s cubic-bezier(0.16,1,0.3,1) forwards}dialog::backdrop{background:rgba(3,7,18,0.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}@keyframes modalSoftPop{from{opacity:0;transform:scale(0.975) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}.dialog-icon{width:43px;height:43px;background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.25);display:grid;place-items:center;color:var(--cyan);border-radius:12px;margin-bottom:19px}dialog h2{font-size:21px;font-weight:600;letter-spacing:-.4px}dialog p{font-size:12px;color:#8c9eb9;line-height:1.8;margin-top:10px}.dialog-label{display:block;font-size:10px;font-weight:600;color:#bdcde1;margin:23px 0 9px}dialog input{width:100%;background:#0b1320;border:1px solid #35445c;border-radius:10px;padding:12px 14px;color:var(--text);font-family:var(--mono);font-size:12px}dialog input:focus{border-color:var(--cyan);box-shadow:0 0 12px rgba(56,189,248,0.2)}.dialog-error{font-size:11px;color:var(--red);margin-top:12px;line-height:1.6;min-height:0}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:23px}.button{border:1px solid rgba(56,189,248,0.2);padding:10px 16px;font-size:11px;border-radius:10px;background:#162438;transition:all .18s cubic-bezier(0.16,1,0.3,1);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}.button:hover{background:#20344d;border-color:rgba(56,189,248,0.4);transform:translateY(-1px);box-shadow:0 4px 14px rgba(6,182,212,0.15)}.button.primary{color:#06171d;background:linear-gradient(135deg,#0ea5e9 0%,#06b6d4 100%);border-color:var(--cyan);font-weight:650;box-shadow:0 0 14px rgba(6,182,212,0.3)}.button.primary:hover{background:#7ee5f4;box-shadow:0 0 20px rgba(6,182,212,0.5)}.button.danger{color:#1a0911;background:#ff8397;border-color:#ff8397}.toast{position:fixed;right:25px;bottom:24px;background:#142232;border:1px solid rgba(56,189,248,0.25);box-shadow:0 12px 45px rgba(0,0,0,0.55);padding:14px 18px;border-radius:14px;max-width:min(440px,calc(100% - 32px));font-size:12px;line-height:1.5;z-index:30;backdrop-filter:blur(12px);animation:toastSlideIn .25s cubic-bezier(0.16,1,0.3,1)}@keyframes toastSlideIn{from{opacity:0;transform:translateY(12px) scale(0.96)}to{opacity:1;transform:translateY(0) scale(1)}}.toast[data-tone="error"]{border-color:#783b4d;color:var(--red)}.toast[data-tone="success"]{border-color:#386451;color:var(--green)}
+    @media(min-width:961px) and (min-height:560px){html,body{height:100vh;height:100dvh;overflow:hidden;margin:0}.shell{height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;margin-left:64px}.topbar{height:52px;padding:0 24px;flex-shrink:0}main{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-start;padding:8px 24px 6px;overflow:hidden}.page-heading{margin-bottom:6px;min-height:20px;flex-shrink:0}.page-heading h1{font-size:15px;font-weight:600}.section-heading{margin-bottom:5px;min-height:14px;flex-shrink:0}.section-heading h2{font-size:10px}.hardware-grid{grid-template-columns:1.65fr 1.14fr .84fr 1.18fr;gap:12px;margin-bottom:8px;flex-shrink:0}.metric-card{padding:10px 14px;min-height:142px}.card-top{margin-bottom:7px}.gauge{width:76px;height:76px}.gauge:before{inset:6px}.gauge-number{font-size:22px}.memory-body .gauge{width:70px;height:70px}.trend-svg{height:44px}.core-grid{margin-top:6px;max-height:44px}.temperature-value{font-size:26px;margin-top:4px}.temperature-meter{margin-top:10px}.disk-row+.disk-row{margin-top:7px}.services-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:8px;flex-shrink:0}.service-card{padding:9px 13px 8px}.service-header{min-height:30px}.service-logo{width:26px;height:26px}.service-name{font-size:12px}.service-measure{margin:8px 0 6px}.latency{font-size:20px}.service-footer{padding-top:6px}.bottom-grid{flex:1;min-height:0;display:grid;grid-template-columns:1.2fr .88fr 1.35fr;gap:12px;margin-bottom:0;align-items:stretch}.bottom-grid>section{display:flex;flex-direction:column;min-height:0}.bottom-grid>section>.card{flex:1;min-height:0;height:100%}.network-grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.network-card{min-height:0;padding:9px 12px;display:flex;flex-direction:column;justify-content:space-between}.remote-panel{height:100%;min-height:0;display:flex;flex-direction:column}.remote-panel .remote-content{flex:1;min-height:0;max-height:none;overflow-y:auto}.terminal-card{height:100%;min-height:0;display:flex;flex-direction:column}.terminal-header{padding:8px 14px;flex-shrink:0}.voice-strip{min-height:26px;padding:4px 10px;flex-shrink:0}.events-list{flex:1;min-height:0;overflow-y:auto;padding:8px 14px}.terminal-footer{padding:6px 14px;flex-shrink:0}footer{flex-shrink:0;margin-top:5px;padding-top:5px}}
     @media(max-width:1250px){.topbar{padding:0 25px}main{padding:26px 25px 20px}.hardware-grid{grid-template-columns:1.5fr 1.1fr;gap:13px}.metric-card{min-height:192px}.temperature-card .temperature-value{margin-top:0}.temperature-card .temperature-meter{max-width:250px}.disk-card{display:grid;grid-template-columns:1fr 1fr;gap:20px}.disk-card .card-top{grid-column:1/-1;margin-bottom:0}.disk-row+.disk-row{margin-top:0}.services-grid{gap:12px}.service-card{padding:16px 14px}.network-card{padding:14px}.bottom-grid{grid-template-columns:1.05fr 1fr;gap:16px}.topbar-right{gap:18px}.host-platform{display:none}.status-chip{font-size:9px}}
     @media(max-width:960px){.bottom-grid{grid-template-columns:1fr}.terminal-card{height:285px}.services-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.network-grid{grid-template-columns:1fr 1fr}.topbar{height:77px}.clock{font-size:13px}.host-name{max-width:190px;font-size:13px}.status-chip{max-width:175px;font-size:8px;line-height:1.5}.page-heading{margin-bottom:24px}h1{font-size:27px}.subtitle{font-size:11px}.telemetry-info{font-size:9px}.hardware-grid{margin-bottom:24px}}
     @media(max-width:640px){.rail{width:55px}.brand{width:33px;height:33px;margin:22px 0 30px;border-radius:9px}.brand .icon{width:20px;height:20px}.nav-link,.rail-bottom{width:35px;height:38px}.nav-link.active:before{left:-10px}.tooltip{left:41px}.rail nav{gap:13px}.shell{margin-left:55px}.topbar{padding:0 15px;height:76px;gap:9px}.host-icon{display:none}.host-name{max-width:130px;font-size:11px}.host-block .eyebrow{font-size:8px}.topbar-right{gap:10px}.clock{font-size:11px}.clock-date{font-size:8px}.status-chip{display:none}main{padding:23px 15px 17px}.page-heading{align-items:start;margin-bottom:24px;gap:10px}h1{font-size:24px}.heading-kicker{font-size:8px}.subtitle{font-size:10px;line-height:1.7;max-width:200px}.telemetry-info{font-size:8px;max-width:100px;padding-top:2px}.stream-label{font-size:8px}.hardware-grid{grid-template-columns:1fr}.metric-card{min-height:0;padding:17px}.cpu-card{min-height:196px}.memory-body .gauge{width:82px;height:82px}.memory-card .memory-body{gap:26px}.memory-card .primary-value{font-size:25px}.memory-card .card-top{margin-bottom:13px}.temperature-card{display:grid;grid-template-columns:1fr auto;align-items:center;column-gap:12px}.temperature-card .card-top{grid-column:1/-1;margin-bottom:13px}.temperature-card .temperature-value{grid-column:2;grid-row:2;font-size:32px}.temperature-card .thermal-label{grid-column:1;grid-row:2;margin-top:0}.temperature-card .temperature-meter{grid-column:1/-1;margin-top:15px}.disk-card{gap:15px}.disk-card .card-top{margin-bottom:4px}.services-grid{gap:10px}.service-card{padding:14px 12px 12px}.service-name{font-size:11px;margin-top:12px}.service-logo{width:29px;height:29px;font-size:8px}.badge{font-size:7px;gap:4px;padding:4px;max-width:80px}.latency{font-size:20px}.service-port{font-size:8px}.service-systemd{font-size:7px;max-width:58%}.restart-button{font-size:8px;gap:3px}.http-status{font-size:8px}.service-measure{gap:5px}.service-measure-label{font-size:8px}.section-heading h2{font-size:9px;letter-spacing:.08em;gap:6px}.section-heading .meta{font-size:8px}.section-heading h2 .icon{width:13px;height:13px}.network-grid{grid-template-columns:1fr}.network-card{padding:16px}.network-top{margin-bottom:12px}.network-card .badge{font-size:8px;max-width:130px}.vps-empty{padding:20px 16px;gap:10px}.vps-empty p{font-size:9px}.vps-host{font-size:10px}.vps-row .badge{max-width:100px}.vps-item{padding:14px}.vps-stats{gap:9px}.events-list{padding:12px}.event-line{grid-template-columns:45px 39px 1fr;gap:6px;font-size:8px}.event-level{font-size:7px}.terminal-header{padding:12px}.terminal-name{font-size:8px}.terminal-footer{padding:9px 12px;font-size:7px}.terminal-card{height:300px}.footer-left{gap:9px}footer{font-size:7px;flex-wrap:wrap;line-height:1.8}.connection-banner{font-size:10px;line-height:1.7}.console-button{font-size:8px}}
@@ -337,6 +337,202 @@
     @keyframes jarvis-core-pulse{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:1;transform:scale(1.1)}}
     @keyframes jarvis-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.2);opacity:.6}}
     @media(max-width:900px){.jarvis-body{grid-template-columns:1fr}.jarvis-hud-col{display:none}#jarvis-modal{width:calc(100% - 16px);height:calc(100dvh - 20px)}}
+
+    /* Cockpit Desktop No-Scroll : Ajustement haute précision sur écran d'accueil sans aucun défilement vertical */
+    @media (min-width: 961px) and (min-height: 560px) {
+      html, body {
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
+        margin: 0;
+      }
+      .shell {
+        height: 100vh;
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        margin-left: 64px;
+      }
+      .topbar {
+        height: 52px;
+        padding: 0 24px;
+        flex-shrink: 0;
+      }
+      main {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        padding: 8px 24px 6px;
+        overflow: hidden;
+      }
+      .page-heading {
+        margin-bottom: 6px;
+        min-height: 20px;
+        flex-shrink: 0;
+      }
+      .page-heading h1 {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .section-heading {
+        margin-bottom: 5px;
+        min-height: 14px;
+        flex-shrink: 0;
+      }
+      .section-heading h2 {
+        font-size: 10px;
+      }
+      .hardware-grid {
+        grid-template-columns: 1.65fr 1.14fr .84fr 1.18fr;
+        gap: 12px;
+        margin-bottom: 8px;
+        flex-shrink: 0;
+      }
+      .metric-card {
+        padding: 10px 14px;
+        min-height: 140px;
+      }
+      .card-top {
+        margin-bottom: 7px;
+      }
+      .gauge {
+        width: 76px;
+        height: 76px;
+      }
+      .gauge:before {
+        inset: 6px;
+      }
+      .gauge-number {
+        font-size: 22px;
+      }
+      .memory-body .gauge {
+        width: 70px;
+        height: 70px;
+      }
+      .trend-svg {
+        height: 44px;
+      }
+      .core-grid {
+        margin-top: 6px;
+        max-height: 44px;
+      }
+      .temperature-value {
+        font-size: 26px;
+        margin-top: 4px;
+      }
+      .temperature-meter {
+        margin-top: 10px;
+      }
+      .disk-row + .disk-row {
+        margin-top: 7px;
+      }
+      .services-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 8px;
+        flex-shrink: 0;
+      }
+      .service-card {
+        padding: 9px 13px 8px;
+      }
+      .service-header {
+        min-height: 30px;
+      }
+      .service-logo {
+        width: 26px;
+        height: 26px;
+      }
+      .service-name {
+        font-size: 12px;
+      }
+      .service-measure {
+        margin: 8px 0 6px;
+      }
+      .latency {
+        font-size: 20px;
+      }
+      .service-footer {
+        padding-top: 6px;
+      }
+      .bottom-grid {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 1.2fr .88fr 1.35fr;
+        gap: 12px;
+        margin-bottom: 0;
+        align-items: stretch;
+      }
+      .bottom-grid > section {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .bottom-grid > section > .card {
+        flex: 1;
+        min-height: 0;
+        height: 100%;
+      }
+      .network-grid {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .network-card {
+        min-height: 0;
+        padding: 9px 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .remote-panel {
+        height: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .remote-panel .remote-content {
+        flex: 1;
+        min-height: 0;
+        max-height: none;
+        overflow-y: auto;
+      }
+      .terminal-card {
+        height: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .terminal-header {
+        padding: 8px 14px;
+        flex-shrink: 0;
+      }
+      .voice-strip {
+        min-height: 26px;
+        padding: 4px 10px;
+        flex-shrink: 0;
+      }
+      .events-list {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 8px 14px;
+      }
+      .terminal-footer {
+        padding: 6px 14px;
+        flex-shrink: 0;
+      }
+      footer {
+        flex-shrink: 0;
+        margin-top: 5px;
+        padding-top: 5px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -380,7 +576,7 @@
             <div class="remote-content" id="sentinel-list" role="tabpanel" aria-labelledby="sentinel-tab" tabindex="0"><div class="sentinel-empty"><strong>En attente de Sentinel</strong>Le statut de l’agent apparaîtra au prochain relevé.</div></div>
           </div>
         </section>
-        <section id="events" aria-labelledby="events-title"><div class="section-heading"><h2 id="events-title"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 6 5 5-5 5M12 17h8"/></svg>Journal d’événements</h2><span class="meta" id="event-count">0 ÉVÉNEMENT</span></div><div class="card terminal-card"><div class="terminal-header"><div class="terminal-dots" aria-hidden="true"><span></span><span></span><span></span></div><span class="terminal-name">noc / live-events</span><div class="console-controls"><button class="console-button" id="autoscroll-button" type="button" aria-pressed="true">Défilement auto</button><button class="console-button" id="events-open" type="button" aria-label="Ouvrir le journal d’événements complet" aria-haspopup="dialog" aria-controls="events-dialog"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>Agrandir</button></div></div><div class="voice-strip"><button id="jarvis-open-btn" class="jarvis-strip-trigger" type="button" aria-label="Ouvrir la console M.O.C.T.A.R" title="Raccourci: Ctrl+Espace ou touche M" aria-haspopup="dialog" aria-controls="jarvis-modal"><span class="jarvis-strip-pulse"></span><span class="jarvis-strip-label">M.O.C.T.A.R</span><span class="jarvis-badge-status" id="jarvis-strip-badge">STANDBY</span><span class="jarvis-strip-shortcut">Ctrl+Espace</span></button><div class="voice-strip-divider"></div><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg><button id="voice-trigger" class="voice-trigger" type="button" aria-label="Voir la dernière commande WhatsApp" disabled><span class="voice-kicker">WHATSAPP</span><span class="voice-summary" id="voice-summary">En attente du collecteur</span></button><span class="voice-status" id="voice-status">—</span></div><div class="events-list" id="events-list" role="log" aria-label="Événements de supervision" aria-live="polite" aria-relevant="additions"><p class="console-empty" id="events-empty">Connexion au collecteur…<br>Les changements d’état s’afficheront ici.<span class="terminal-cursor" aria-hidden="true"></span></p></div><div class="terminal-footer"><span id="console-state">EN ATTENTE DU FLUX</span><span>200 événements max.</span></div></div></section>
+        <section id="events" aria-labelledby="events-title"><div class="section-heading"><h2 id="events-title"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 6 5 5-5 5M12 17h8"/></svg>Journal d’événements</h2><span class="meta" id="event-count">0 ÉVÉNEMENT</span></div><div class="card terminal-card"><div class="terminal-header"><div class="terminal-dots" aria-hidden="true"><span></span><span></span><span></span></div><span class="terminal-name">noc / live-events</span><div class="console-controls"><button class="console-button" id="autoscroll-button" type="button" aria-pressed="true">Défilement auto</button><button class="console-button" id="events-open" type="button" aria-label="Ouvrir le journal d’événements complet" aria-haspopup="dialog" aria-controls="events-dialog"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>Agrandir</button></div></div><div class="voice-strip"><button id="jarvis-open-btn" class="jarvis-strip-trigger" type="button" aria-label="Ouvrir l'assistant IA MOCTAR" title="Raccourci: Ctrl+Espace ou touche M" aria-haspopup="dialog" aria-controls="jarvis-modal"><span class="jarvis-strip-pulse"></span><span class="jarvis-strip-label">MOCTAR</span><span class="jarvis-badge-status" id="jarvis-strip-badge">MOCTAR</span><span class="jarvis-strip-shortcut">Ctrl+Espace</span></button><div class="voice-strip-divider"></div><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg><button id="voice-trigger" class="voice-trigger" type="button" aria-label="Voir la dernière commande WhatsApp" disabled><span class="voice-kicker">WHATSAPP</span><span class="voice-summary" id="voice-summary">En attente du collecteur</span></button><span class="voice-status" id="voice-status">—</span></div><div class="events-list" id="events-list" role="log" aria-label="Événements de supervision" aria-live="polite" aria-relevant="additions"><p class="console-empty" id="events-empty">Connexion au collecteur…<br>Les changements d’état s’afficheront ici.<span class="terminal-cursor" aria-hidden="true"></span></p></div><div class="terminal-footer"><span id="console-state">EN ATTENTE DU FLUX</span><span>200 événements max.</span></div></div></section>
       </div>
       <footer><div class="footer-left"><span>NOC <span style="color:#8194af">/</span> MISSION CONTROL</span><span class="footer-status" id="footer-status"><span class="led"></span><span id="collector-label">Collecteur en attente</span></span></div><span>Processus : <span id="process-memory">—</span> · Flux SSE</span></footer>
     </main>
@@ -396,7 +592,7 @@
         </svg>
         <div>
           <div class="eyebrow" style="color:var(--cyan);letter-spacing:.14em">NOC MISSION CONTROL · ASSISTANT INTELLIGENT</div>
-          <h2 id="jarvis-modal-title" class="jarvis-title">M.O.C.T.A.R <span class="jarvis-title-sub">v4.0 ReAct Autonome</span></h2>
+          <h2 id="jarvis-modal-title" class="jarvis-title">MOCTAR <span class="jarvis-title-sub">v4.0 ReAct Autonome</span></h2>
         </div>
       </div>
       <div class="jarvis-header-badges">
@@ -414,7 +610,7 @@
           <div class="jarvis-msg jarvis-msg-bot">
             <div class="jarvis-msg-avatar">M</div>
             <div class="jarvis-msg-content">
-              <div class="jarvis-msg-author">M.O.C.T.A.R CORE <time class="mono">Initialisé</time></div>
+              <div class="jarvis-msg-author">MOCTAR CORE <time class="mono">Initialisé</time></div>
               <div class="jarvis-msg-text">Bonjour monsieur. Moteur ReAct autonome opérationnel, connecté à la mémoire SQLite locale et aux outils de contrôle. Comment puis-je vous assister aujourd'hui ?</div>
             </div>
           </div>
@@ -1230,11 +1426,11 @@
                 badge.style.color = 'var(--green)';
                 badge.style.borderColor = 'rgba(81, 220, 170, 0.4)';
               } else if (data.status === 'degraded') {
-                badge.textContent = 'STANDBY (LOCAL)';
+                badge.textContent = 'MOCTAR STANDBY';
                 badge.style.color = 'var(--amber)';
                 badge.style.borderColor = 'rgba(243, 189, 101, 0.4)';
               } else {
-                badge.textContent = 'HORS LIGNE';
+                badge.textContent = 'MOCTAR HORS LIGNE';
                 badge.style.color = 'var(--red)';
                 badge.style.borderColor = 'rgba(255, 115, 138, 0.4)';
               }
@@ -1251,6 +1447,10 @@
           }
         } catch (e) {
           console.warn('Erreur verification Jarvis:', e);
+          const badge = $('jarvis-strip-badge');
+          if (badge) {
+            badge.textContent = 'MOCTAR STANDBY';
+          }
         }
       }
 
@@ -1312,7 +1512,7 @@
         const author = document.createElement('div');
         author.className = 'jarvis-msg-author';
         const authorName = document.createElement('span');
-        authorName.textContent = isUser ? 'UTILISATEUR' : 'M.O.C.T.A.R CORE';
+        authorName.textContent = isUser ? 'UTILISATEUR' : 'MOCTAR CORE';
         const timeNode = document.createElement('time');
         timeNode.className = 'mono';
         timeNode.textContent = timestamp ? time(timestamp) : clockFormat.format(new Date());
@@ -1529,6 +1729,23 @@
       $('jarvis-open-btn')?.addEventListener('click', openJarvisModal);
       $('jarvis-close-btn')?.addEventListener('click', closeJarvisModal);
       $('jarvis-mic-btn')?.addEventListener('click', toggleJarvisListening);
+
+      // Fermeture douce et intuitive des modales au clic en dehors (backdrop)
+      ['jarvis-modal', 'events-dialog', 'voice-dialog'].forEach(id => {
+        const dlg = $(id);
+        if (!dlg) return;
+        dlg.addEventListener('click', (event) => {
+          if (event.target !== dlg) return;
+          const rect = dlg.getBoundingClientRect();
+          if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) {
+            if (id === 'jarvis-modal') {
+              closeJarvisModal();
+            } else {
+              dlg.close();
+            }
+          }
+        });
+      });
 
       $('jarvis-clear-btn')?.addEventListener('click', async () => {
         if (!confirm('Vider l’historique de conversation de Moctar ?')) return;
