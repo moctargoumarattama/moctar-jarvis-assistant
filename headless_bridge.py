@@ -138,17 +138,41 @@ class JarvisHeadlessBridge:
         agent_core.execute_tool = hooked_execute_tool
         actions.execute_tool = hooked_execute_tool
 
+        def local_fallback() -> str:
+            from intent_engine import detect_intent
+            detected = detect_intent(user_input)
+            intent = detected.get("intent")
+            if intent == "time":
+                from actions.system_actions import get_time_response
+                res = get_time_response()
+                return res.get("message") if isinstance(res, dict) else str(res)
+            elif intent == "date":
+                from actions.system_actions import get_date_response
+                res = get_date_response()
+                return res.get("message") if isinstance(res, dict) else str(res)
+            elif intent in {"greetings", "hello"}:
+                return "Bonjour monsieur. Je suis prêt. En quoi puis-je vous aider ?"
+            elif intent and intent in actions.TOOL_DISPATCHER:
+                tool_res = actions.execute_tool(intent, detected.get("slots") or {})
+                return tool_res.get("message") if isinstance(tool_res, dict) else str(tool_res)
+            return "Bonjour monsieur. Je suis prêt et à votre écoute."
+
         status = "success"
         try:
-            reply = self.agent.run(
-                user_query=user_input,
+            agent_result = self.agent.run(
+                prompt=user_input,
                 session_id=current_session,
+                fallback=local_fallback,
             )
-            if isinstance(reply, dict):
-                reply = reply.get("response") or str(reply)
-            reply = str(reply or "").strip()
+            if hasattr(agent_result, "response"):
+                reply = agent_result.response
+            elif isinstance(agent_result, dict):
+                reply = agent_result.get("response") or agent_result.get("message") or str(agent_result)
+            else:
+                reply = str(agent_result or "").strip()
+
             if not reply:
-                reply = "J'ai traité votre demande."
+                reply = local_fallback()
         except Exception as exc:
             logger.exception("Erreur exécution agent headless : %s", exc)
             reply = f"Erreur lors de l'exécution de la requête : {exc}"

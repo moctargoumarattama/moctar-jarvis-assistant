@@ -306,7 +306,7 @@ def get_ai_status():
     model, base_url = _ollama_settings()
     tags_url = f"{base_url.rstrip('/')}/api/tags"
     try:
-        with urlopen(tags_url, timeout=5) as response:
+        with urlopen(tags_url, timeout=1.0) as response:
             payload = json.loads(response.read().decode("utf-8"))
         models = payload.get("models") if isinstance(payload, dict) else []
         available_models = {

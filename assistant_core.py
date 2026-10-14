@@ -111,10 +111,16 @@ class AssistantCore:
 
     @staticmethod
     def _format_user_facing_response(response):
-        if response in {"__STOP__", "__OPEN_SCHEDULER__", "__OPEN_HISTORY__"}:
+        if isinstance(response, str) and response in {
+            "__STOP__", "__OPEN_SCHEDULER__", "__OPEN_HISTORY__",
+            "STOP", "OPEN_SCHEDULER", "OPEN_HISTORY"
+        }:
             return response
 
-        text = (response or "").strip()
+        if isinstance(response, dict):
+            response = response.get("message") or response.get("response") or str(response)
+
+        text = str(response or "").strip()
         if not text:
             return "Je n'ai pas de reponse pour le moment."
         return text

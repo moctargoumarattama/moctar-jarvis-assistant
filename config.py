@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+
 try:
     from dotenv import load_dotenv
 except Exception:

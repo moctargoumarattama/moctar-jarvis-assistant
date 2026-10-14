@@ -429,16 +429,19 @@ class AgentCore:
 
     def run(
         self,
-        prompt: str,
+        prompt: str = "",
         *,
+        user_query: Optional[str] = None,
         context: Optional[Any] = None,
         fallback: Optional[Callable[[], str]] = None,
         tool_names: Optional[Tuple[str, ...]] = None,
         **kwargs: Any,
     ) -> AgentResult:
         """Point d'entrée d'exécution compatible avec assistant_core et la suite de tests."""
+        effective_prompt = (prompt or user_query or "").strip()
         request_id = uuid4().hex
-        logger.info("AgentCore.run(request_id=%s): prompt='%s'", request_id, prompt)
+        logger.info("AgentCore.run(request_id=%s): prompt='%s'", request_id, effective_prompt)
+        prompt = effective_prompt
 
         # Filtrage des outils selon tool_names si précisé
         if tool_names is not None:

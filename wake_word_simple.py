@@ -444,7 +444,11 @@ def _listen_loop():
                 _log_throttled("warning", "soft_wake_micro", f"Soft wake word micro indisponible : {exc}", cooldown=15.0)
                 time.sleep(0.5)
         finally:
-            _microphone_lock.release()
+            try:
+                if _microphone_lock.locked():
+                    _microphone_lock.release()
+            except RuntimeError:
+                pass
 
         if audio is None:
             continue
@@ -597,8 +601,11 @@ def acquire_command_microphone(app=None, timeout=2.5):
 
 
 def release_command_microphone(*, resume_listener=True):
-    if _microphone_lock.locked():
-        _microphone_lock.release()
+    try:
+        if _microphone_lock.locked():
+            _microphone_lock.release()
+    except RuntimeError:
+        pass
     if resume_listener:
         resume_soft_wake_listener()
 

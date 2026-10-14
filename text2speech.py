@@ -25,6 +25,7 @@ except ImportError:
 
 _PYGAME_AVAILABLE = False
 try:
+    os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
     import pygame
     _PYGAME_AVAILABLE = True
 except ImportError:
