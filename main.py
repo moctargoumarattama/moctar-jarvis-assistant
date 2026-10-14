@@ -26,6 +26,7 @@ import collector
 from config import RESTART_ALLOWLIST, Settings
 from cyberdefense import CyberDefenseManager, TRAP_PATHS
 from sentinel import SentinelManager
+from vps_registry import VPSRegistry
 from whatsapp import AUDIO_MIME_TYPES, WhatsAppController, parse_message
 
 LOGGER = logging.getLogger("noc-dashboard")
@@ -151,6 +152,7 @@ class Runtime:
         self.collect_task: asyncio.Task | None = None
         self.changed = asyncio.Condition()
         self.vps: dict[str, dict[str, Any]] = {}
+        self.vps_registry = VPSRegistry(settings, VPSReport)
         self.active_streams = 0
         self.restart_locks = {name: asyncio.Lock() for name in RESTART_ALLOWLIST}
         self.restart_times: dict[str, float] = {}
@@ -174,11 +176,12 @@ class Runtime:
                 del self.vps[hostname]
                 self.collector._states.pop("vps:" + hostname, None)
                 continue
-            stale = age > self.settings.vps_stale_seconds
+            restored = item.get("restored", False)
+            stale = restored or age > self.settings.vps_stale_seconds
             healthy = not stale and item["report"]["cpu_percent"] < 95 and item["report"]["memory"]["percent"] < 90 and item["report"]["disk"]["percent"] < 90 and all(service["status"] == "active" for service in item["report"]["services"])
             self.collector.transition("vps:" + hostname, (stale, healthy), f"VPS {hostname} · {'rapport expiré' if stale else ('opérationnel' if healthy else 'incident détecté')}", healthy)
             item["stale"] = stale
-            result.append({**item["report"], "last_seen": item["last_seen"], "age_seconds": round(age, 1), "stale": stale, "healthy": healthy})
+            result.append({**item["report"], "last_seen": item["last_seen"], "age_seconds": round(age, 1), "stale": stale, "healthy": healthy, "restored": restored})
         return sorted(result, key=lambda entry: entry["hostname"])
 
     async def publish(self, snapshot: dict[str, Any], *, collected: bool = True) -> None:
@@ -271,6 +274,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(application: FastAPI):
         runtime = Runtime(settings)
         application.state.runtime = runtime
+        runtime.vps = await runtime.vps_registry.load()
         await runtime.collector.start()
         await runtime.sentinel.start()
         await runtime.cyber.start()
@@ -311,6 +315,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/")
     async def dashboard():
         return FileResponse(BASE_DIR / "static" / "index.html", media_type="text/html")
+
+    @application.get("/static/live_metrics.js")
+    async def live_metrics_script():
+        return FileResponse(BASE_DIR / "static" / "live_metrics.js", media_type="application/javascript")
+
+    @application.get("/static/live_metrics.css")
+    async def live_metrics_styles():
+        return FileResponse(BASE_DIR / "static" / "live_metrics.css", media_type="text/css")
 
     @application.get("/favicon.ico", include_in_schema=False)
     async def favicon():
@@ -373,7 +385,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         runtime.vps_snapshot()
         if report.hostname not in runtime.vps and len(runtime.vps) >= settings.max_vps:
             raise HTTPException(429, "Limite de serveurs VPS atteinte")
-        runtime.vps[report.hostname] = {"report": report.model_dump(), "seen": time.monotonic(), "last_seen": collector.utc_now(), "stale": False}
+        runtime.vps[report.hostname] = {"report": report.model_dump(), "seen": time.monotonic(), "last_seen": collector.utc_now(), "stale": False, "restored": False}
+        await runtime.vps_registry.persist(runtime.vps)
+        await runtime.publish_module_update()
         return {"ok": True, "hostname": report.hostname}
 
     @application.post("/api/service/{name}/restart")
@@ -651,6 +665,90 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse(res)
         except Exception as exc:
             return JSONResponse({"status": "error", "message": str(exc), "ok": False}, status_code=500)
+
+    # --------------------------------------------------------------------------
+    # API PLANIFICATEUR D'AUTOMATISATIONS & TÂCHES
+    # --------------------------------------------------------------------------
+    @application.get("/api/scheduler/tasks")
+    async def scheduler_list_tasks(status: str | None = None) -> JSONResponse:
+        try:
+            from scheduler import scheduler_store
+            tasks = scheduler_store.list_tasks(status=status)
+            return JSONResponse({"tasks": tasks, "total": len(tasks), "ok": True})
+        except Exception as exc:
+            return JSONResponse({"error": str(exc), "tasks": [], "total": 0, "ok": False}, status_code=500)
+
+    @application.post("/api/scheduler/tasks")
+    async def scheduler_create_task(request: Request) -> JSONResponse:
+        try:
+            from scheduler import scheduler_store
+            data = await limited_json(request, 65536)
+            title = str(data.get("title") or "").strip()
+            message = str(data.get("message") or "").strip()
+            if not title or not message:
+                raise HTTPException(400, "Le titre et le message sont obligatoires.")
+            platform = str(data.get("platform") or "system").strip().lower()
+            target = str(data.get("target") or "").strip()
+            send_time = str(data.get("send_time") or "09:00").strip()
+            frequency = str(data.get("frequency") or "daily").strip().lower()
+            weekday = data.get("weekday")
+            ai_enhanced = bool(data.get("ai_enhanced", False))
+            media_paths = data.get("media_paths") or []
+
+            task = scheduler_store.create_task(
+                title=title,
+                platform=platform,
+                target=target,
+                message=message,
+                media_paths=media_paths,
+                frequency=frequency,
+                weekday=int(weekday) if weekday is not None else None,
+                send_time=send_time,
+                ai_enhanced=ai_enhanced,
+            )
+            return JSONResponse({"task": task, "ok": True}, status_code=201)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            return JSONResponse({"error": str(exc), "ok": False}, status_code=500)
+
+    @application.post("/api/scheduler/tasks/{task_id}/toggle")
+    async def scheduler_toggle_task(task_id: int) -> JSONResponse:
+        try:
+            from scheduler import scheduler_store
+            task = scheduler_store.get_task(task_id)
+            if not task:
+                raise HTTPException(404, "Tâche introuvable")
+            new_status = "paused" if task.get("status") == "active" else "active"
+            updated = scheduler_store.update_task(task_id, status=new_status)
+            return JSONResponse({"task": updated, "status": new_status, "ok": True})
+        except HTTPException:
+            raise
+        except Exception as exc:
+            return JSONResponse({"error": str(exc), "ok": False}, status_code=500)
+
+    @application.post("/api/scheduler/tasks/{task_id}/confirm")
+    async def scheduler_confirm_task(task_id: int) -> JSONResponse:
+        try:
+            from scheduler import scheduler_core, scheduler_store
+            task = scheduler_store.get_task(task_id)
+            if not task:
+                raise HTTPException(404, "Tâche introuvable")
+            success, detail = scheduler_core.confirm_and_send(task_id)
+            return JSONResponse({"ok": success, "detail": detail, "task": scheduler_store.get_task(task_id)})
+        except HTTPException:
+            raise
+        except Exception as exc:
+            return JSONResponse({"error": str(exc), "ok": False}, status_code=500)
+
+    @application.delete("/api/scheduler/tasks/{task_id}")
+    async def scheduler_delete_task(task_id: int) -> JSONResponse:
+        try:
+            from scheduler import scheduler_store
+            deleted = scheduler_store.delete_task(task_id)
+            return JSONResponse({"deleted": deleted, "ok": True})
+        except Exception as exc:
+            return JSONResponse({"error": str(exc), "ok": False}, status_code=500)
 
     return application
 
