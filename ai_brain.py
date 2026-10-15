@@ -10,6 +10,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 import socket
+import time
 from threading import Event, Thread
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from urllib.error import HTTPError, URLError
@@ -56,7 +57,8 @@ MOCTAR_SYSTEM_PROMPT = (
     "Utilise les observations réelles et le contexte pertinent ; n'invente aucun fait ni résultat d'action."
 )
 OLLAMA_STOP = ("Observation:", "<|im_end|>", "\n\nUser:")
-HYBRID_OLLAMA_TIMEOUT_SECONDS = 15.0
+HYBRID_OLLAMA_TIMEOUT_SECONDS = 8.0
+PROVIDER_FAILURE_TTL_SECONDS = 30.0
 logger = logging.getLogger("jarvis.ai")
 
 
@@ -73,8 +75,8 @@ def _ai_provider():
     return provider if provider in {"ollama", "gemini", "hybrid"} else "hybrid"
 
 
-def _with_ollama_deadline(callback, timeout):
-    """Bound the whole local request, including connect and response decoding."""
+def _with_inference_deadline(callback, timeout):
+    """Bound the whole request, including connect and response decoding."""
     completed = Event()
     outcome = {}
 
@@ -86,13 +88,20 @@ def _with_ollama_deadline(callback, timeout):
         finally:
             completed.set()
 
-    # A stalled local server must not hold up cloud fallback or process shutdown.
-    Thread(target=run, daemon=True, name="jarvis-ollama").start()
+    # An unresponsive provider must not hold up fallback or process shutdown.
+    Thread(target=run, daemon=True, name="jarvis-inference").start()
     if not completed.wait(timeout):
-        raise OllamaTimeoutError("Ollama request timed out")
+        raise TimeoutError("AI request timed out")
     if "error" in outcome:
         raise outcome["error"]
     return outcome["result"]
+
+
+def _with_ollama_deadline(callback, timeout):
+    try:
+        return _with_inference_deadline(callback, timeout)
+    except TimeoutError as exc:
+        raise OllamaTimeoutError("Ollama request timed out") from exc
 
 
 _ALLOWED_MATH_BINOPS = {
@@ -372,7 +381,9 @@ def _should_use_ollama_assistant(prompt):
 
 def get_ai_status():
     provider = _ai_provider()
-    cloud_ready = bool(genai is not None and os.getenv("GEMINI_API_KEY", config.GEMINI_API_KEY).strip())
+    cloud_ready = provider in {"hybrid", "gemini"} and bool(
+        genai is not None and os.getenv("GEMINI_API_KEY", config.GEMINI_API_KEY).strip()
+    )
     cloud_model = os.getenv("GEMINI_MODEL", config.gemini_model).strip() or config.gemini_model
     model, base_url = _ollama_settings()
     status = {
@@ -380,11 +391,14 @@ def get_ai_status():
         "base_url": base_url, "online": False, "ollama_online": False,
         "server_online": False, "model_available": False,
         "label": f"IA: Local | {model}",
+        "gemini_configured": cloud_ready, "gemini_online": cloud_ready,
     }
     if provider == "gemini":
         status.update(model=cloud_model, base_url="", online=cloud_ready,
                       mode="gemini" if cloud_ready else "local",
                       label=f"IA: Gemini | {cloud_model}")
+        status.update(active_provider=status["mode"], model_offline=not status["online"],
+                      all_providers_offline=not status["online"])
         return status
 
     tags_url = f"{base_url.rstrip('/')}/api/tags"
@@ -418,6 +432,8 @@ def get_ai_status():
     if provider == "hybrid" and not status["online"] and cloud_ready:
         status.update(mode="gemini", model=cloud_model, base_url="", online=True,
                       label=f"IA: Gemini | {cloud_model}")
+    status.update(active_provider=status["mode"], model_offline=not status["online"],
+                  all_providers_offline=not status["online"])
     return status
 
 
@@ -1312,7 +1328,10 @@ def ask_ollama(
             reply = brain.chat(messages, tools=tools, temperature=temperature)
         finally:
             if brain.gemini_client is not None:
-                brain.gemini_client.close()
+                try:
+                    brain.gemini_client.close()
+                except Exception:
+                    logger.debug("Fermeture du client Gemini indisponible")
         if reply.get("finish_reason") == "error":
             raise OllamaRequestError("AI providers are unavailable")
         message = {"role": "assistant", "content": reply.get("content") or ""}
@@ -1390,6 +1409,10 @@ class AIBrain:
         self.base_url = (base_url or default_base_url or DEFAULT_BASE_URL).rstrip("/")
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.timeout = float(timeout or os.getenv("LLM_TIMEOUT_SECONDS") or OLLAMA_TIMEOUT_SECONDS)
+        self.gemini_timeout = min(self.timeout, 30.0)
+        self.last_provider = None
+        self._provider_online = {"ollama": None, "gemini": None, "openai": None}
+        self._provider_checked_at = {}
 
         # Détection automatique du type de backend
         if requested_type == "auto" and (os.getenv("AI_PROVIDER") or self.ai_provider == "gemini"):
@@ -1417,7 +1440,8 @@ class AIBrain:
             try:
                 self.gemini_client = genai.Client(
                     api_key=gemini_key,
-                    http_options={"timeout": max(1, int(self.timeout * 1000))},
+                    http_options={"timeout": max(1, int(self.gemini_timeout * 1000)),
+                                  "retry_options": {"attempts": 1}},
                 )
             except Exception:
                 logger.warning("Initialisation Gemini indisponible")
@@ -1429,6 +1453,50 @@ class AIBrain:
             self.base_url,
             self.timeout,
         )
+
+    def _record_provider_result(self, provider, result):
+        online = bool(isinstance(result, dict) and result.get("finish_reason") != "error"
+                      and (result.get("content") or result.get("tool_calls")))
+        self._provider_online[provider] = online
+        self._provider_checked_at[provider] = time.monotonic()
+        if online:
+            self.last_provider = provider
+        return online
+
+    def get_health_status(self, probe=True):
+        """Combine provider readiness with observed inference results, without cloud probes."""
+        status = dict(get_ai_status()) if probe else {}
+        cloud_configured = self.gemini_client is not None and self.ai_provider in {"gemini", "hybrid"}
+
+        def observed(provider, default):
+            value = self._provider_online[provider]
+            if (probe and provider == "gemini" and value is False
+                    and time.monotonic() - self._provider_checked_at.get(provider, 0) >= PROVIDER_FAILURE_TTL_SECONDS):
+                return default
+            return default if value is None else value
+
+        # A deterministic action that never called an LLM cannot establish a failure.
+        local_default = bool(status.get("ollama_online", status.get("online", False))) if probe else self.ai_provider in {"ollama", "hybrid"}
+        local_online = observed("ollama", local_default)
+        cloud_online = cloud_configured and observed("gemini", True)
+        if self.ai_provider == "gemini":
+            local_online = False
+        online = cloud_online or (local_online and self.ai_provider != "gemini")
+        active = (self.last_provider if self.last_provider == "gemini" and cloud_online else
+                  "ollama" if local_online else "gemini" if cloud_online else "local")
+        if self.ai_provider == "openai":
+            online = observed("openai", True)
+            active = "openai" if online else "local"
+        status.update(
+            provider=self.ai_provider, mode=active, active_provider=active,
+            online=bool(online), ollama_online=bool(local_online),
+            gemini_online=bool(cloud_online), gemini_configured=cloud_configured,
+            model_offline=not online, all_providers_offline=not online,
+            model=self.gemini_model if active == "gemini" else self.model,
+            base_url="https://generativelanguage.googleapis.com" if active == "gemini" else self.base_url,
+        )
+        status["label"] = f"IA: {active} | {status['model']}"
+        return status
 
     @staticmethod
     def _parse_arguments(raw_args: Any) -> Dict[str, Any]:
@@ -1557,10 +1625,29 @@ class AIBrain:
                 "finish_reason": str
             }
         """
-        if self.ai_provider == "gemini":
-            return self._chat_gemini(messages, tools=tools, temperature=0.2 if temperature is None else temperature)
+        def cloud_request():
+            try:
+                result = _with_inference_deadline(
+                    lambda: self._chat_gemini(messages, tools=tools, temperature=0.2 if temperature is None else temperature),
+                    self.gemini_timeout,
+                )
+            except Exception:
+                logger.warning("Appel Gemini indisponible")
+                result = {"content": "Le moteur IA est indisponible pour le moment.",
+                          "tool_calls": [], "finish_reason": "error"}
+            self._record_provider_result("gemini", result)
+            return result
+
+        # Gemini tool turns must retain their signed model parts and provider.
+        cloud_tool_turn = any(message.get("_gemini_parts") for message in messages) or (
+            self.last_provider == "gemini" and messages and messages[-1].get("role") == "tool"
+        )
+        if self.ai_provider == "gemini" or (self.ai_provider == "hybrid" and cloud_tool_turn):
+            return cloud_request()
         if self.api_type == "openai":
-            return self._chat_openai(messages=messages, tools=tools, temperature=0.2 if temperature is None else temperature)
+            result = self._chat_openai(messages=messages, tools=tools, temperature=0.2 if temperature is None else temperature)
+            self._record_provider_result("openai", result)
+            return result
         if self.ai_provider == "hybrid":
             try:
                 result = _with_ollama_deadline(
@@ -1570,16 +1657,18 @@ class AIBrain:
                     ),
                     min(self.timeout, HYBRID_OLLAMA_TIMEOUT_SECONDS),
                 )
-                if result.get("finish_reason") != "error" and (result.get("content") or result.get("tool_calls")):
+                if self._record_provider_result("ollama", result):
                     return result
             except Exception:
-                pass
+                self._record_provider_result("ollama", {})
             logger.info("Repli automatique vers Gemini")
-            return self._chat_gemini(messages, tools=tools, temperature=0.2 if temperature is None else temperature)
-        return self._chat_ollama(
+            return cloud_request()
+        result = self._chat_ollama(
             messages=messages, tools=tools,
             temperature=OLLAMA_TEMPERATURE if temperature is None else temperature,
         )
+        self._record_provider_result("ollama", result)
+        return result
 
     def _chat_gemini(self, messages, tools=None, temperature=0.2):
         """Translate model/tool turns without letting the SDK execute local actions."""
@@ -1611,6 +1700,8 @@ class AIBrain:
                     if message.get("tool_call_id"):
                         function_response["id"] = message["tool_call_id"]
                     parts.append({"function_response": function_response})
+                elif role == "assistant" and message.get("_gemini_parts"):
+                    parts = message["_gemini_parts"]
                 else:
                     if content:
                         parts.append({"text": str(content)})
@@ -1624,7 +1715,11 @@ class AIBrain:
                                          "args": self._parse_arguments(function.get("arguments"))}
                         if call.get("id"):
                             function_call["id"] = call["id"]
-                        parts.append({"function_call": function_call})
+                        part = {"function_call": function_call}
+                        if self.gemini_model.startswith("gemini-3"):
+                            # Google's documented marker for history imported from another model.
+                            part["thought_signature"] = b"skip_thought_signature_validator"
+                        parts.append(part)
                 if not parts:
                     continue
                 gemini_role = "model" if role == "assistant" else "user"
@@ -1638,8 +1733,11 @@ class AIBrain:
                 "max_output_tokens": GENERATION_CONFIG["max_tokens"],
                 "top_p": GENERATION_CONFIG["top_p"],
                 "automatic_function_calling": {"disable": True},
-                "http_options": {"timeout": max(1, int(self.timeout * 1000))},
+                "http_options": {"timeout": max(1, int(self.gemini_timeout * 1000)),
+                                 "retry_options": {"attempts": 1}},
             }
+            if self.gemini_model.startswith("gemini-3"):
+                generation_config["thinking_config"] = {"thinking_level": "minimal"}
             if instructions:
                 generation_config["system_instruction"] = "\n\n".join(instructions)
             if tools:
@@ -1673,8 +1771,16 @@ class AIBrain:
                 return error
             if not tool_calls and content:
                 tool_calls = self._extract_text_tool_calls(content)
-            return {"content": content, "tool_calls": tool_calls,
-                    "finish_reason": "tool_calls" if tool_calls else "stop"}
+            result = {"content": content, "tool_calls": tool_calls,
+                      "finish_reason": "tool_calls" if tool_calls else "stop"}
+            if tool_calls:
+                # Preserve opaque Gemini 3 signatures exactly across tool observations.
+                parts = candidates[0].content.parts or []
+                serialized = [part.model_dump(mode="json", exclude_none=True) for part in parts
+                              if callable(getattr(part, "model_dump", None))]
+                if serialized and any(getattr(part, "function_call", None) for part in parts):
+                    result["_gemini_parts"] = serialized
+            return result
         except Exception:
             # Do not expose credentials or transport details in user-facing replies.
             logger.warning("Appel Gemini indisponible")

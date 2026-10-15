@@ -370,13 +370,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def favicon():
         return Response(status_code=204)
 
+    async def ai_status_payload() -> dict[str, Any]:
+        runtime: Runtime = application.state.runtime
+        if not runtime.jarvis:
+            return {
+                "status": "offline",
+                "available": False,
+                "online": False,
+                "model_offline": True,
+                "all_providers_offline": True,
+                "message": "Module Jarvis headless non disponible sur ce serveur.",
+            }
+        try:
+            # Provider probes use synchronous HTTP; never block the ASGI loop.
+            status = await asyncio.to_thread(runtime.jarvis.get_status)
+            return {**status, "available": True}
+        except Exception as exc:
+            LOGGER.warning("Lecture du statut IA indisponible : %s", exc)
+            # A failed status probe does not prove that both providers are down.
+            return {"status": "error", "available": True, "error": "Statut IA temporairement indisponible."}
+
     @application.get("/api/health")
     async def health():
         runtime: Runtime = application.state.runtime
         latest = runtime.latest
         last_success = latest["collector"].get("last_success") if latest else None
         collecting = bool(last_success and not latest["collector"].get("error") and time.monotonic() - runtime.last_published <= max(10, 3 * settings.interval) and runtime.collect_task and not runtime.collect_task.done())
-        return JSONResponse({"status": "ok" if collecting else "starting" if latest is None else "degraded", "collector_ready": collecting, "interval_seconds": settings.interval, "process_id": os.getpid()}, status_code=200 if collecting else 503)
+        ai_status = await ai_status_payload()
+        return JSONResponse({"status": "ok" if collecting else "starting" if latest is None else "degraded", "collector_ready": collecting, "interval_seconds": settings.interval, "process_id": os.getpid(), "ai": ai_status, "ai_online": ai_status.get("online")}, status_code=200 if collecting else 503)
 
     @application.get("/api/overview")
     @application.get("/api/snapshot")
@@ -660,30 +681,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=500,
             )
 
+    @application.get("/api/status")
+    @application.get("/api/system/ai-status")
     @application.get("/api/jarvis/status")
     async def jarvis_status() -> JSONResponse:
-        runtime: Runtime = application.state.runtime
-        if not runtime.jarvis:
-            return JSONResponse(
-                {
-                    "status": "offline",
-                    "available": False,
-                    "message": "Module Jarvis headless non disponible sur ce serveur.",
-                }
-            )
-        try:
-            status = runtime.jarvis.get_status()
-            status["available"] = True
-            return JSONResponse(status)
-        except Exception as exc:
-            return JSONResponse(
-                {
-                    "status": "error",
-                    "available": False,
-                    "error": str(exc),
-                },
-                status_code=500,
-            )
+        status = await ai_status_payload()
+        return JSONResponse(status, status_code=500 if status["status"] == "error" else 200)
 
     @application.get("/api/jarvis/history")
     async def jarvis_history(limit: int = 20) -> JSONResponse:

@@ -840,7 +840,7 @@
           Moteur IA Hors-Ligne <span style="font-size:0.8rem;background:rgba(255,115,138,0.2);color:#ff738a;border:1px solid rgba(255,115,138,0.5);padding:2px 8px;border-radius:999px;">MODE AUTONOME ACTIF</span>
         </h2>
         <p id="model-offline-desc" style="margin:4px 0 0;font-size:0.85rem;color:#8fa9c5">
-          Le modèle local Ollama (<code style="color:#5ed9ec">qwen2.5:1.5b</code>) ne répond pas ou est arrêté. <strong>Aucune panne :</strong> M.O.C.T.A.R prend le relais à 100% avec sa bibliothèque déterministe.
+          Les moteurs Ollama local et Gemini Cloud sont tous les deux inaccessibles. M.O.C.T.A.R reste disponible avec ses <strong>46 tâches autonomes locales</strong> pendant leur reconnexion.
         </p>
       </div>
       <button type="button" class="jarvis-btn-icon" id="model-offline-close-icon" aria-label="Fermer la modale" style="background:rgba(255,115,138,0.15);color:#ff738a;border:1px solid rgba(255,115,138,0.3);width:32px;height:32px;border-radius:8px;cursor:pointer;">✕</button>
@@ -849,11 +849,11 @@
     <div class="cyber-scroll" style="padding:20px 24px;max-height:65vh;overflow-y:auto;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px">
         <div style="background:rgba(255,80,100,0.1);border:1px solid rgba(255,115,138,0.35);padding:12px;border-radius:10px;">
-          <div style="font-size:10px;font-weight:700;color:#ff738a;letter-spacing:.1em;margin-bottom:4px">MOTEUR NEURONAL (OLLAMA)</div>
+          <div style="font-size:10px;font-weight:700;color:#ff738a;letter-spacing:.1em;margin-bottom:4px">MOTEURS IA (OLLAMA + GEMINI)</div>
           <div style="font-size:13px;font-weight:700;color:#ff9aa8;display:flex;align-items:center;gap:6px">
             <span class="led-blink" style="background:#ff4757;box-shadow:0 0 8px #ff4757"></span> HORS SERVICE / SANS RÉPONSE
           </div>
-          <small id="model-offline-details-text" style="color:#8fa9c5;display:block;margin-top:4px;font-size:10px">Erreur connexion socket ou délai dépassé (port 11434).</small>
+          <small id="model-offline-details-text" style="color:#8fa9c5;display:block;margin-top:4px;font-size:10px">Aucun moteur IA disponible après vérification du relais Cloud.</small>
         </div>
 
         <div style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.35);padding:12px;border-radius:10px;">
@@ -911,7 +911,7 @@
     <footer class="cyber-footer" style="padding:14px 24px;border-top:1px solid rgba(255, 115, 138, 0.25);display:flex;justify-content:space-between;align-items:center;">
       <span style="font-size:11px;color:#8fa9c5">M.O.C.T.A.R reste réactif même sans réseau neuronal.</span>
       <div style="display:flex;gap:10px">
-        <button type="button" class="button" id="model-offline-retry-btn" style="background:rgba(94,217,236,0.15);border:1px solid #5ed9ec;color:#5ed9ec;padding:7px 14px;border-radius:8px;font-size:11px;cursor:pointer;">🔄 Tester reconnexion Ollama</button>
+        <button type="button" class="button" id="model-offline-retry-btn" style="background:rgba(94,217,236,0.15);border:1px solid #5ed9ec;color:#5ed9ec;padding:7px 14px;border-radius:8px;font-size:11px;cursor:pointer;">🔄 Retester les moteurs IA</button>
         <button type="button" class="button primary" id="model-offline-close-btn" style="padding:7px 16px;border-radius:8px;font-size:11px;cursor:pointer;">Continuer en mode autonome</button>
       </div>
     </footer>
@@ -1643,39 +1643,46 @@
         isListening: false
       };
 
-      async function fetchJarvisStatus() {
+      function jarvisAiHealth(data = {}) {
+        if (data.online === true || data.gemini_online === true || data.ollama_online === true) return 'online';
+        if (data.all_providers_offline === true || (data.ollama_online === false && data.gemini_online === false)) return 'offline';
+        if (data.online !== false && data.model_offline !== true &&
+            (data.model_offline === false || ['ready', 'ok', 'online', 'hybrid_active'].includes(data.status))) return 'online';
+        return 'unknown';
+      }
+
+      function renderJarvisAiStatus(data, notifyOffline = false) {
+        const health = jarvisAiHealth(data);
+        const badge = $('jarvis-strip-badge');
+        if (badge) {
+          badge.textContent = health === 'online' ? 'MOCTAR EN LIGNE' : health === 'offline' ? 'MOCTAR HORS LIGNE' : 'MOCTAR STANDBY';
+          badge.style.color = health === 'online' ? 'var(--green)' : health === 'offline' ? 'var(--red)' : 'var(--amber)';
+          badge.style.borderColor = health === 'online' ? 'rgba(81, 220, 170, 0.4)' : health === 'offline' ? 'rgba(255, 115, 138, 0.4)' : 'rgba(243, 189, 101, 0.4)';
+        }
+        if (health === 'online') $('model-offline-modal')?.close();
+        else if (health === 'offline' && notifyOffline) showModelOfflinePopup(data.model_offline_details, data);
+        const activeProvider = data.active_provider || data.mode || data.provider;
+        if ($('jarvis-model-badge') && ['gemini', 'ollama'].includes(activeProvider)) {
+          const model = activeProvider === 'gemini' ? data.gemini_model || data.model || 'gemini-3.5-flash-lite' : data.model || 'qwen2.5:1.5b';
+          set('jarvis-model-badge', model + (activeProvider === 'gemini' ? ' @ Gemini' : ' @ Ollama'));
+        }
+      }
+
+      async function fetchJarvisStatus(notifyOffline = false) {
         try {
           const res = await apiFetch('/api/jarvis/status', {}, 5000);
           if (res.ok) {
             const data = await res.json();
             jarvisState.status = data;
             jarvisState.available = data.available !== false;
-            const badge = $('jarvis-strip-badge');
-            if (badge) {
-              const isOnline = data.status === 'ready' || data.status === 'ok' || data.available === true;
-              if (isOnline) {
-                badge.textContent = 'MOCTAR EN LIGNE';
-                badge.style.color = 'var(--green)';
-                badge.style.borderColor = 'rgba(81, 220, 170, 0.4)';
-              } else if (data.status === 'degraded') {
-                badge.textContent = 'MOCTAR STANDBY';
-                badge.style.color = 'var(--amber)';
-                badge.style.borderColor = 'rgba(243, 189, 101, 0.4)';
-              } else {
-                badge.textContent = 'MOCTAR HORS LIGNE';
-                badge.style.color = 'var(--red)';
-                badge.style.borderColor = 'rgba(255, 115, 138, 0.4)';
-              }
-            }
-            if ($('jarvis-model-badge')) {
-              set('jarvis-model-badge', (data.model || 'qwen2.5:1.5b') + ' @ Ollama');
-            }
+            renderJarvisAiStatus(data, notifyOffline);
             if ($('jarvis-tools-badge')) {
               set('jarvis-tools-badge', (data.tools_count || 46) + ' outils ReAct');
             }
             if ($('jarvis-session-id') && data.active_session) {
               set('jarvis-session-id', 'Session: ' + data.active_session.slice(-12));
             }
+            return data;
           }
         } catch (e) {
           console.warn('Erreur verification Jarvis:', e);
@@ -1841,7 +1848,7 @@
           const label = $('jarvis-typing-label');
           if (!label) return;
           if (elapsedSeconds >= 8) {
-            label.textContent = '🧠 Inférence locale CPU (Dell M4800)...';
+            label.textContent = '🧠 M.O.C.T.A.R prépare la réponse...';
           } else if (elapsedSeconds >= 3) {
             label.textContent = '⚙️ Consultation des jauges et outils système...';
           }
@@ -1859,6 +1866,7 @@
           }, 60000);
 
           const data = await readResponse(res);
+          renderJarvisAiStatus(data, true);
           if (res.ok && data.status === 'success') {
             // Exécution automatique de l'action open_browser sur le navigateur du client
             let targetUrl = data.url;
@@ -1891,22 +1899,16 @@
             }
             speakJarvisText(data.reply || '');
 
-            // Si le modèle IA était hors-ligne et que le mode autonome a pris le relais, afficher la pop-up
-            if (data.model_offline) {
-              showModelOfflinePopup(data.model_offline_details);
-            }
           } else {
             const errReply = (typeof data.reply === 'string' && data.reply) ? data.reply : (typeof data.detail === 'string' ? data.detail : 'Erreur lors de l’exécution.');
             appendChatMessage('assistant', '⚠️ ' + errReply, data.thought_chain, data.tools_used);
             speakJarvisText(errReply);
-            if (data.model_offline) {
-              showModelOfflinePopup(data.model_offline_details);
-            }
           }
         } catch (err) {
           const errMsg = err.name === 'AbortError' ? 'Délai d’attente dépassé pour la réponse du modèle IA.' : (err.message || 'Erreur réseau vers le moteur Moctar.');
           appendChatMessage('assistant', '⚠️ ' + errMsg);
-          showModelOfflinePopup('Délai d’attente réseau dépassé ou serveur Ollama muet.');
+          // Un timeout HTTP ne prouve pas que les deux moteurs IA sont indisponibles.
+          await fetchJarvisStatus(true);
         } finally {
           clearInterval(typingInterval);
           $('jarvis-typing-bubble')?.remove();
@@ -1919,7 +1921,8 @@
         }
       }
 
-      function showModelOfflinePopup(details) {
+      function showModelOfflinePopup(details, health) {
+        if (jarvisAiHealth(health) !== 'offline') return;
         const modal = $('model-offline-modal');
         if (!modal) return;
         if (details && $('model-offline-details-text')) {
@@ -1943,22 +1946,11 @@
           btn.textContent = 'Connexion en cours...';
         }
         try {
-          const res = await apiFetch('/api/jarvis/status', {}, 5000);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.ollama_online) {
-              $('model-offline-modal')?.close();
-              const badge = $('jarvis-strip-badge');
-              if (badge) {
-                badge.textContent = 'MOCTAR EN LIGNE';
-                badge.style.color = 'var(--green)';
-              }
-              await fetchJarvisStatus();
-            } else {
-              if ($('model-offline-details-text')) {
-                set('model-offline-details-text', 'Ollama toujours inaccessible sur le port 11434.');
-              }
-            }
+          const data = await fetchJarvisStatus();
+          if (data && jarvisAiHealth(data) === 'offline') {
+            set('model-offline-details-text', 'Ollama et Gemini sont toujours inaccessibles. Les 46 tâches locales restent disponibles.');
+          } else if (!data || jarvisAiHealth(data) === 'unknown') {
+            set('model-offline-details-text', 'Vérification des moteurs IA indisponible. Réessayez la connexion au serveur.');
           }
         } catch (e) {
           if ($('model-offline-details-text')) {
@@ -1967,7 +1959,7 @@
         } finally {
           if (btn) {
             btn.disabled = false;
-            btn.textContent = '🔄 Tester reconnexion Ollama';
+            btn.textContent = '🔄 Retester les moteurs IA';
           }
         }
       });

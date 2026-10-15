@@ -336,13 +336,11 @@ class JarvisHeadlessBridge:
             agent_core.execute_tool = hooked_execute_tool
             actions.execute_tool = hooked_execute_tool
 
-            model_offline = False
-            model_offline_details = None
+            fallback_required = False
 
             def local_fallback() -> str:
-                nonlocal status, model_offline, model_offline_details
-                model_offline = True
-                model_offline_details = "Modèle Ollama local inaccessible ou expiré (port 11434)"
+                nonlocal status, fallback_required
+                fallback_required = True
                 if telemetry_result is not None:
                     return _format_telemetry_report(telemetry_result)
 
@@ -397,8 +395,7 @@ class JarvisHeadlessBridge:
                     fallback=local_fallback,
                 )
                 if getattr(agent_result, "used_fallback", False) or getattr(agent_result, "status", None) == "fallback":
-                    model_offline = True
-                    model_offline_details = "Modèle neuronal local déconnecté (mode autonome activé)"
+                    fallback_required = True
 
                 if hasattr(agent_result, "response"):
                     reply = agent_result.response
@@ -410,7 +407,7 @@ class JarvisHeadlessBridge:
                 if not reply:
                     reply = local_fallback()
                 if telemetry_deadline is not None:
-                    measured_report = local_fallback()
+                    measured_report = _format_telemetry_report(telemetry_result)
                     recommendations_heading = "[Recommandations M.O.C.T.A.R]"
                     if telemetry_result.get("success") and all(
                         section in reply for section in ("[État Opérationnel]", recommendations_heading)
@@ -425,8 +422,7 @@ class JarvisHeadlessBridge:
                         reply = measured_report
             except Exception as exc:
                 logger.exception("Erreur exécution agent headless : %s", exc)
-                model_offline = True
-                model_offline_details = str(exc)
+                fallback_required = True
                 try:
                     import autonomous_library
                     auto_fallback = autonomous_library.execute_autonomous_task(user_input, session_id=current_session)
@@ -447,7 +443,13 @@ class JarvisHeadlessBridge:
                 actions.execute_tool = orig_execute_tool
                 agent_core.execute_tool = orig_agent_execute_tool
 
+            # Une réponse déterministe ou une erreur d'outil ne prouve pas une
+            # panne IA. Seuls les échecs observés de tous les fournisseurs
+            # autorisent l'alerte autonome ; cette lecture ne fait aucun appel réseau.
+            ai_status = self.brain.get_health_status(probe=False)
+            model_offline = fallback_required and ai_status.get("all_providers_offline") is True
             resp_dict: Dict[str, Any] = {
+                **ai_status,
                 "status": status,
                 "reply": reply,
                 "thought_chain": thought_chain,
@@ -456,7 +458,10 @@ class JarvisHeadlessBridge:
                 "session_id": current_session,
                 "source": source,
                 "model_offline": model_offline,
-                "model_offline_details": model_offline_details,
+                "model_offline_details": (
+                    "Aucun moteur IA configuré n'est accessible (mode autonome activé)"
+                    if model_offline else None
+                ),
                 "autonomous_available": True,
             }
 
@@ -481,7 +486,7 @@ class JarvisHeadlessBridge:
 
     def get_status(self) -> Dict[str, Any]:
         """Renvoie l'état du moteur IA, du fournisseur actif, des outils et de la mémoire."""
-        ai_stat = ai_brain.get_ai_status()
+        ai_stat = self.brain.get_health_status()
         online = bool(ai_stat.get("online"))
         mode = ai_stat.get("mode") or ("ollama" if online else "local")
         provider = ai_stat.get("provider") or mode
@@ -505,12 +510,17 @@ class JarvisHeadlessBridge:
 
         return {
             "status": "ready" if online else "degraded",
+            "online": online,
             "provider": provider,
             "mode": mode,
+            "active_provider": ai_stat.get("active_provider", mode),
             "model": active_model,
             "base_url": active_base_url,
             "ollama_online": bool(ai_stat.get("ollama_online", online)),
-            "model_offline": not online,
+            "gemini_online": bool(ai_stat.get("gemini_online", mode == "gemini" and online)),
+            "gemini_configured": bool(ai_stat.get("gemini_configured", mode == "gemini")),
+            "all_providers_offline": bool(ai_stat.get("all_providers_offline", not online)),
+            "model_offline": bool(ai_stat.get("all_providers_offline", not online)),
             "autonomous_ready": True,
             "autonomous_tasks_count": len(actions.TOOL_DISPATCHER),
             "tools_count": len(actions.TOOL_DISPATCHER),

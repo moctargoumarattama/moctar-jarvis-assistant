@@ -26,6 +26,22 @@ def telemetry_result(cpu=12.5, memory=45.0, disk=60.0):
     }
 
 
+def hybrid_health(*, online=True):
+    return {
+        "provider": "hybrid",
+        "mode": "gemini" if online else "local",
+        "active_provider": "gemini" if online else "local",
+        "online": online,
+        "ollama_online": False,
+        "gemini_online": online,
+        "gemini_configured": True,
+        "all_providers_offline": not online,
+        "model_offline": not online,
+        "model": "gemini-3.5-flash-lite",
+        "base_url": "https://generativelanguage.googleapis.com",
+    }
+
+
 class JarvisHeadlessBridgeTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -56,7 +72,7 @@ class JarvisHeadlessBridgeTests(unittest.TestCase):
 
     def test_gemini_status_reports_ready_when_ollama_is_offline(self):
         for provider in ("gemini", "hybrid"):
-            with self.subTest(provider=provider), patch("ai_brain.get_ai_status", return_value={
+            with self.subTest(provider=provider), patch.object(self.bridge.brain, "get_health_status", return_value={
                 "provider": provider,
                 "mode": "gemini",
                 "online": True,
@@ -73,6 +89,21 @@ class JarvisHeadlessBridgeTests(unittest.TestCase):
             self.assertEqual("https://generativelanguage.googleapis.com", status["base_url"])
             self.assertFalse(status["ollama_online"])
             self.assertFalse(status["model_offline"])
+
+    def test_hybrid_status_exposes_cloud_health_when_ollama_is_offline(self):
+        with patch.object(self.bridge.brain, "get_health_status", return_value=hybrid_health()) as health:
+            status = self.bridge.get_status()
+
+        health.assert_called_once_with()
+        self.assertEqual("ready", status["status"])
+        self.assertEqual("hybrid", status["provider"])
+        self.assertEqual("gemini", status["active_provider"])
+        self.assertTrue(status["online"])
+        self.assertTrue(status["gemini_online"])
+        self.assertTrue(status["gemini_configured"])
+        self.assertFalse(status["ollama_online"])
+        self.assertFalse(status["all_providers_offline"])
+        self.assertFalse(status["model_offline"])
 
     def test_execute_prompt_empty(self):
         res = self.bridge.execute_prompt("")
@@ -138,6 +169,78 @@ class JarvisHeadlessBridgeTests(unittest.TestCase):
         self.assertEqual(1, len(result["tools_used"]))
         self.assertEqual(original_timeout, self.bridge.brain.timeout)
         self.assertEqual([reply], result["thought_chain"])
+
+    def test_gemini_telemetry_synthesis_does_not_report_offline(self):
+        reply = (
+            "[État Opérationnel]\nMesures disponibles.\n"
+            "[Recommandations M.O.C.T.A.R]\nSurveiller la charge."
+        )
+        with patch.dict(actions.TOOL_DISPATCHER, {"get_system_telemetry": Mock(return_value=telemetry_result())}), \
+                patch.object(self.bridge.agent, "_call_llm", return_value={"content": reply}), \
+                patch.object(self.bridge.brain, "get_health_status", return_value=hybrid_health()) as health, \
+                patch("autonomous_library.execute_autonomous_task") as autonomous:
+            result = self.bridge.execute_prompt("État du système")
+
+        self.assertEqual("success", result["status"])
+        self.assertIn("CPU 12.5 %", result["reply"])
+        self.assertIn("Surveiller la charge.", result["reply"])
+        self.assertEqual("gemini", result["active_provider"])
+        self.assertTrue(result["online"])
+        self.assertFalse(result["model_offline"])
+        self.assertIsNone(result["model_offline_details"])
+        health.assert_called_once_with(probe=False)
+        autonomous.assert_not_called()
+
+    def test_deterministic_telemetry_formatting_preserves_cloud_health(self):
+        with patch.dict(actions.TOOL_DISPATCHER, {"get_system_telemetry": Mock(return_value=telemetry_result())}), \
+                patch.object(self.bridge.agent, "_call_llm", return_value={"content": "Mesures disponibles."}), \
+                patch.object(self.bridge.brain, "get_health_status", return_value=hybrid_health()):
+            result = self.bridge.execute_prompt("État du système")
+
+        self.assertIn("CPU 12.5 %", result["reply"])
+        self.assertFalse(result["model_offline"])
+        self.assertFalse(result["all_providers_offline"])
+
+    def test_both_providers_unavailable_marks_autonomous_fallback_offline(self):
+        with patch.object(self.bridge.agent, "_call_llm", side_effect=TimeoutError("Tous les fournisseurs sont indisponibles")), \
+                patch.object(self.bridge.brain, "get_health_status", return_value=hybrid_health(online=False)):
+            result = self.bridge.execute_prompt("Explique pourquoi les étoiles brillent")
+
+        self.assertTrue(result["model_offline"])
+        self.assertTrue(result["all_providers_offline"])
+        self.assertFalse(result["gemini_online"])
+        self.assertIsNotNone(result["model_offline_details"])
+
+    def test_autonomous_response_keeps_operational_cloud_online(self):
+        with patch.object(self.bridge.agent, "_call_llm", side_effect=TimeoutError("Budget de synthèse dépassé")), \
+                patch.object(self.bridge.brain, "get_health_status", return_value=hybrid_health()):
+            result = self.bridge.execute_prompt("dimensionne solaire 10 kwh")
+
+        self.assertEqual("success", result["status"])
+        self.assertIn("Dimensionnement Solaire", result["reply"])
+        self.assertTrue(result["gemini_online"])
+        self.assertFalse(result["model_offline"])
+        self.assertIsNone(result["model_offline_details"])
+
+    def test_deterministic_success_does_not_claim_a_new_provider_failure(self):
+        with patch.object(self.bridge.agent, "run", return_value=AgentResult("Il est 15:30.")), \
+                patch.object(self.bridge.brain, "get_health_status", return_value=hybrid_health(online=False)):
+            result = self.bridge.execute_prompt("Quelle heure est-il ?")
+
+        self.assertEqual("success", result["status"])
+        self.assertFalse(result["model_offline"])
+        self.assertIsNone(result["model_offline_details"])
+
+    def test_tool_error_does_not_mark_operational_cloud_offline(self):
+        with patch.object(self.bridge.agent, "run", side_effect=RuntimeError("Outil indisponible")), \
+                patch.object(self.bridge.brain, "get_health_status", return_value=hybrid_health()), \
+                patch("autonomous_library.execute_autonomous_task", return_value={"handled": False}):
+            result = self.bridge.execute_prompt("Analyse cette demande")
+
+        self.assertEqual("error", result["status"])
+        self.assertTrue(result["gemini_online"])
+        self.assertFalse(result["model_offline"])
+        self.assertIsNone(result["model_offline_details"])
 
     def test_ollama_timeout_returns_measured_report_and_prioritized_advice(self):
         measured = telemetry_result(cpu=96.0, memory=92.0, disk=91.0)

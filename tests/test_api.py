@@ -483,6 +483,29 @@ class APITests(unittest.TestCase):
         self.assertEqual(stopped.status_code, 503)
         self.assertFalse(stopped.json()["collector_ready"])
 
+    def test_ai_cloud_availability_does_not_override_collector_health(self) -> None:
+        for online in (False, True):
+            with self.subTest(ai_online=online), patch.object(self.runtime.jarvis, "get_status", return_value={
+                "status": "ready" if online else "degraded",
+                "online": online, "provider": "hybrid", "gemini_online": online,
+                "ollama_online": False, "model_offline": not online,
+                "all_providers_offline": not online,
+            }):
+                self.runtime.last_published = time.monotonic()
+                healthy = self.client.get("/api/health")
+                self.assertEqual(200, healthy.status_code)
+                self.assertEqual("ok", healthy.json()["status"])
+                self.assertEqual(online, healthy.json()["ai_online"])
+                self.assertEqual(not online, healthy.json()["ai"]["model_offline"])
+
+                self.runtime.last_published = time.monotonic() - max(10, 3 * self.settings.interval) - 1
+                stale = self.client.get("/api/health")
+                self.assertEqual(503, stale.status_code)
+                self.assertEqual("degraded", stale.json()["status"])
+                self.assertFalse(stale.json()["collector_ready"])
+                self.assertEqual(online, stale.json()["ai_online"])
+                self.runtime.last_published = time.monotonic()
+
 
 if __name__ == "__main__":
     unittest.main()

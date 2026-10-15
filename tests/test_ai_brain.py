@@ -442,7 +442,7 @@ class GeminiBrainTests(unittest.TestCase):
 
         self.assertEqual("Reponse locale.", result["content"])
         self.assertEqual("stop", result["finish_reason"])
-        self.assertLessEqual(request.call_args.kwargs["timeout"], 15.0)
+        self.assertEqual(8.0, request.call_args.kwargs["timeout"])
         self.client.models.generate_content.assert_not_called()
 
     def test_hybrid_uses_gemini_for_local_connection_timeout_http_and_json_failures(self):
@@ -680,6 +680,71 @@ class GeminiBrainTests(unittest.TestCase):
 
         self.assertFalse(status["online"])
         self.client.models.generate_content.assert_not_called()
+
+    def test_short_local_budget_does_not_expire_the_cloud_request(self):
+        brain = ai_brain.AIBrain(api_type="hybrid", timeout=60)
+        brain.timeout = 0.05
+        with patch("ai_brain.urlopen", side_effect=TimeoutError("CPU timeout")):
+            result = brain.chat([{"role": "user", "content": "Analyse ces mesures."}])
+
+        self.assertEqual("Reponse Gemini.", result["content"])
+        self.assertEqual(30000, self.client.models.generate_content.call_args.kwargs["config"]["http_options"]["timeout"])
+        self.assertEqual(0.05, brain.timeout)
+        self.assertTrue(brain.get_health_status(probe=False)["gemini_online"])
+
+    def test_gemini_exception_is_normalized_and_both_failed_providers_are_offline(self):
+        brain = ai_brain.AIBrain(api_type="hybrid")
+        with patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")), \
+                patch.object(brain, "_chat_gemini", side_effect=RuntimeError("Cloud offline")):
+            result = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+        with patch("ai_brain.get_ai_status", return_value={"online": True, "ollama_online": True}):
+            status = brain.get_health_status()
+
+        self.assertEqual("error", result["finish_reason"])
+        self.assertFalse(status["online"])
+        self.assertFalse(status["gemini_online"])
+        self.assertTrue(status["all_providers_offline"])
+        self.assertTrue(status["model_offline"])
+        self.assertNotIn("Cloud offline", result["content"])
+
+    def test_cloud_recovery_restores_online_status_after_double_failure(self):
+        brain = ai_brain.AIBrain(api_type="hybrid")
+        self.client.models.generate_content.side_effect = RuntimeError("Cloud offline")
+        with patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")):
+            failed = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+            self.client.models.generate_content.side_effect = None
+            recovered = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+
+        self.assertEqual("error", failed["finish_reason"])
+        self.assertEqual("Reponse Gemini.", recovered["content"])
+        status = brain.get_health_status(probe=False)
+        self.assertTrue(status["online"])
+        self.assertTrue(status["gemini_online"])
+        self.assertEqual("gemini", status["active_provider"])
+        self.assertFalse(status["model_offline"])
+        self.assertFalse(status["all_providers_offline"])
+
+    def test_inference_timeouts_are_bounded_even_if_cloud_client_stalls(self):
+        brain = ai_brain.AIBrain(api_type="hybrid")
+        brain.gemini_timeout = 0.03
+        release = threading.Event()
+
+        def stalled_cloud(*_args, **_kwargs):
+            release.wait(2)
+            return self.gemini_response("Trop tard.")
+
+        self.client.models.generate_content.side_effect = stalled_cloud
+        try:
+            with patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")):
+                started = time.monotonic()
+                result = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+                elapsed = time.monotonic() - started
+        finally:
+            release.set()
+
+        self.assertEqual("error", result["finish_reason"])
+        self.assertLess(elapsed, 0.75)
+        self.assertTrue(brain.get_health_status(probe=False)["all_providers_offline"])
 
 
 class LocalBrainTests(unittest.TestCase):

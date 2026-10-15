@@ -225,6 +225,36 @@ class AgentCoreTests(unittest.TestCase):
         self.assertIn("Il est 14:30.", tool_messages[0]["content"])
         self.assertTrue(all(call["kwargs"]["temperature"] == 0.2 for call in chat.calls))
 
+    def test_native_gemini_signed_parts_survive_the_tool_observation(self):
+        handler = Mock(return_value="Il est 14:30.")
+        self.register("time", handler)
+        signed_parts = [
+            {"thought": True, "text": "Internal tool selection"},
+            {"thought_signature": "b3BhcXVlLXNpZ25hdHVyZQ==",
+             "function_call": {"id": "signed-time", "name": "time", "args": {}}},
+        ]
+        brain = Mock()
+        brain.chat.side_effect = [
+            {"content": None, "tool_calls": [{"id": "signed-time", "name": "time", "arguments": {}}],
+             "finish_reason": "tool_calls", "_gemini_parts": deepcopy(signed_parts)},
+            {"content": "Il est 14:30.", "tool_calls": [], "finish_reason": "stop"},
+        ]
+        agent = AgentCore(self.registry, self.security, ai_brain_instance=brain)
+
+        result = agent.run("Consulte l'heure.")
+
+        self.assertEqual("final", result.status)
+        self.assertEqual("Il est 14:30.", result.response)
+        handler.assert_called_once_with({"intent": "time", "target": "", "slots": {}})
+        self.assertEqual(2, brain.chat.call_count)
+        second_messages = brain.chat.call_args_list[1].args[0]
+        assistant = next(message for message in second_messages if message["role"] == "assistant")
+        self.assertEqual(signed_parts, assistant["_gemini_parts"])
+        self.assertEqual("signed-time", assistant["tool_calls"][0]["id"])
+        observation = next(message for message in second_messages if message["role"] == "tool")
+        self.assertEqual("signed-time", observation["tool_call_id"])
+        self.assertIn("14:30", observation["content"])
+
     def test_two_successive_tool_calls(self):
         time_handler = Mock(return_value="Il est 15:00.")
         battery_handler = Mock(return_value="La batterie est a 80 pour cent.")

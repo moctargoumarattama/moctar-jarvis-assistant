@@ -333,6 +333,8 @@ class AgentCore:
                         for tc in tool_calls
                     ],
                 }
+                if llm_response.get("_gemini_parts"):
+                    assistant_entry["_gemini_parts"] = llm_response["_gemini_parts"]
                 messages.append(assistant_entry)
                 if self.memory:
                     try:
@@ -639,6 +641,8 @@ class AgentCore:
                     for tc in tool_calls
                 ],
             }
+            if llm_response.get("_gemini_parts"):
+                assistant_msg["_gemini_parts"] = llm_response["_gemini_parts"]
             state.messages.append(assistant_msg)
 
             for index, tc in enumerate(tool_calls):
