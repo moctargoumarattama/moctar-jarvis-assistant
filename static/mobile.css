@@ -131,6 +131,7 @@
   .jarvis-title-sub { font-size: 9px; }
   .jarvis-header-badges { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .jarvis-model-badge, .jarvis-tools-badge { min-width: 0; max-width: 100%; font-size: 10px; white-space: normal; }
+  .jarvis-model-badge { flex: 1 1 100%; }
   #jarvis-close-btn { position: absolute; top: 10px; right: 10px; }
   .jarvis-body, .jarvis-chat-col { min-height: 0; min-width: 0; }
   .jarvis-chat-stream { min-height: 0; padding: 14px 12px; gap: 14px; }
@@ -171,13 +172,14 @@
   :root[data-mobile-compact] :is(.cyber-header, .live-metrics-header, .events-dialog-header) p,
   :root[data-mobile-compact] #model-offline-modal .cyber-footer > span,
   :root[data-mobile-compact] .jarvis-header-left .eyebrow,
-  :root[data-mobile-compact] :is(.jarvis-title-sub, .jarvis-model-badge, .jarvis-tools-badge, .jarvis-footer-meta) {
+  :root[data-mobile-compact] :is(.jarvis-title-sub, .jarvis-tools-badge, .jarvis-footer-meta) {
     display: none;
   }
   :root[data-mobile-compact] #model-offline-title { font-size: 16px !important; }
   :root[data-mobile-compact] #model-offline-modal .cyber-footer { padding: 8px 12px !important; }
   :root[data-mobile-compact] .jarvis-header-left { padding-right: 96px; }
-  :root[data-mobile-compact] .jarvis-header-badges { margin-top: 0; }
+  :root[data-mobile-compact] .jarvis-header-badges { margin-top: 4px; }
+  :root[data-mobile-compact] .jarvis-model-badge { padding: 3px 6px; line-height: 1.4; }
   :root[data-mobile-compact] #jarvis-clear-btn { position: absolute; top: 10px; right: 60px; }
 
   @keyframes mobile-dialog-in { from { opacity: 0; } to { opacity: 1; } }

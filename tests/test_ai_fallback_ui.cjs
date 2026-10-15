@@ -55,7 +55,8 @@ test('Gemini query response suppresses stale Ollama offline flags and reports th
   assert.equal(ui.$('model-offline-modal').open, false);
   assert.equal(ui.$('model-offline-modal').opens, 0);
   assert.equal(ui.$('jarvis-strip-badge').textContent, 'MOCTAR EN LIGNE');
-  assert.equal(ui.$('jarvis-model-badge').textContent, 'gemini-3.5-flash-lite @ Gemini');
+  assert.equal(ui.$('jarvis-model-badge').textContent, 'Gemini Cloud · gemini-3.5-flash-lite');
+  assert.equal(ui.$('home-ai-badge').textContent, 'Gemini Cloud · gemini-3.5-flash-lite');
   assert.equal(ui.messages.at(-1)[1], 'Réponse Cloud');
   assert.equal(ui.requests[0].timeout, 60000);
 });
@@ -115,4 +116,53 @@ test('all dashboard inline scripts remain valid JavaScript', () => {
   for (const match of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) {
     new vm.Script(match[1]);
   }
+});
+
+test('home and chat display the effective provider and model through fallback and recovery', () => {
+  const ui = frontend();
+  for (const [provider, model, expected] of [
+    ['ollama', 'qwen2.5:1.5b', 'Hybride · Ollama local · qwen2.5:1.5b'],
+    ['gemini', 'gemini-3.5-flash-lite', 'Hybride · Gemini Cloud · gemini-3.5-flash-lite'],
+    ['ollama', 'custom-local:latest', 'Hybride · Ollama local · custom-local:latest'],
+  ]) {
+    ui.context.renderJarvisAiStatus({online: true, provider: 'hybrid', active_provider: provider, model});
+    for (const id of ['home-ai-badge', 'jarvis-model-badge']) {
+      assert.equal(ui.$(id).textContent, expected);
+      assert.equal(ui.$(id).title, expected);
+      assert.equal(ui.$(id).dataset.tone, 'success');
+    }
+  }
+});
+
+test('autonomous mode clears the previous model when both AI providers are offline', () => {
+  const ui = frontend();
+  ui.context.renderJarvisAiStatus({online: true, active_provider: 'gemini', model: 'cloud-model'});
+  ui.context.renderJarvisAiStatus({online: false, all_providers_offline: true,
+    active_provider: 'local', model: 'configured-but-unavailable'});
+  assert.equal(ui.$('home-ai-badge').textContent, 'Mode autonome · sans modèle IA');
+  assert.equal(ui.$('jarvis-model-badge').textContent, 'Mode autonome · sans modèle IA');
+  assert.equal(ui.$('home-ai-badge').dataset.tone, 'warning');
+});
+
+test('missing model metadata does not invent the default model', () => {
+  const ui = frontend();
+  ui.context.renderJarvisAiStatus({online: true, active_provider: 'gemini'});
+  assert.equal(ui.$('home-ai-badge').textContent, 'Gemini Cloud · modèle non communiqué');
+});
+
+test('status network failures clear stale model information without reporting offline', async () => {
+  const ui = frontend({statusError: new Error('network')});
+  ui.context.renderJarvisAiStatus({online: true, active_provider: 'gemini', model: 'cloud-model'});
+  await ui.context.fetchJarvisStatus();
+  assert.equal(ui.$('home-ai-badge').textContent, 'IA · Statut indisponible');
+  assert.equal(ui.$('jarvis-strip-badge').textContent, 'MOCTAR STANDBY');
+  assert.equal(ui.$('model-offline-modal').opens, 0);
+});
+
+test('a stale status request cannot overwrite the provider of a newer answer', async () => {
+  const ui = frontend({status: {online: true, active_provider: 'ollama', model: 'old-local-model'}});
+  const pending = ui.context.fetchJarvisStatus();
+  ui.context.renderJarvisAiStatus({online: true, active_provider: 'gemini', model: 'current-cloud-model'});
+  await pending;
+  assert.equal(ui.$('home-ai-badge').textContent, 'Gemini Cloud · current-cloud-model');
 });

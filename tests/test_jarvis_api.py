@@ -103,6 +103,41 @@ class TestJarvisAPI(unittest.TestCase):
                 self.assertFalse(health.json()["ai"]["model_offline"])
             genai.Client.return_value.models.generate_content.assert_not_called()
 
+    def test_status_routes_expose_active_model_after_fallback_and_local_recovery(self) -> None:
+        sdk_response = SimpleNamespace(candidates=[SimpleNamespace(
+            content=SimpleNamespace(parts=[SimpleNamespace(text="Reponse cloud.", thought=False, function_call=None)]),
+            finish_reason="STOP",
+        )])
+        local_response = {"content": "Reponse locale.", "tool_calls": [], "finish_reason": "stop"}
+        with patch("ai_brain.load_dotenv"), patch.dict(os.environ, {
+            "AI_PROVIDER": "hybrid", "GEMINI_API_KEY": "test-gemini-key",
+            "GEMINI_MODEL": "gemini-test-model",
+        }), patch("ai_brain.genai") as genai, patch("ai_brain.get_ai_status", return_value={
+            "online": True, "ollama_online": True,
+        }):
+            genai.Client.return_value.models.generate_content.return_value = sdk_response
+            with self.client as client:
+                brain = self.app.state.runtime.jarvis.brain
+                with patch.object(brain, "_chat_ollama", side_effect=[
+                    local_response, TimeoutError("Local inference stalled"), local_response,
+                ]):
+                    for active_provider, active_model in (
+                        ("ollama", brain.model), ("gemini", brain.gemini_model), ("ollama", brain.model),
+                    ):
+                        brain.chat("Explique le principe photovoltaïque.")
+                        for path in ("/api/jarvis/status", "/api/status", "/api/system/ai-status", "/api/health"):
+                            with self.subTest(active_provider=active_provider, path=path):
+                                response = client.get(path)
+                                self.assertEqual(200, response.status_code)
+                                data = response.json()["ai"] if path == "/api/health" else response.json()
+                                self.assertEqual("hybrid", data["provider"])
+                                self.assertEqual(active_provider, data["active_provider"])
+                                self.assertEqual(active_provider, data["mode"])
+                                self.assertEqual(active_model, data["model"])
+                                self.assertTrue(data["online"])
+
+            genai.Client.return_value.models.generate_content.assert_called_once()
+
     def test_status_probe_runs_outside_the_async_event_loop(self) -> None:
         import asyncio
 

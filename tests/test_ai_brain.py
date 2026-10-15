@@ -445,6 +445,30 @@ class GeminiBrainTests(unittest.TestCase):
         self.assertEqual(8.0, request.call_args.kwargs["timeout"])
         self.client.models.generate_content.assert_not_called()
 
+    def test_active_model_follows_inference_fallback_and_local_recovery(self):
+        brain = ai_brain.AIBrain(api_type="hybrid")
+        local_response = {"content": "Reponse locale.", "tool_calls": [], "finish_reason": "stop"}
+        with patch.object(brain, "_chat_ollama", side_effect=[
+            local_response, TimeoutError("Local inference stalled"), local_response,
+        ]), patch("ai_brain.get_ai_status", return_value={"online": True, "ollama_online": True}):
+            for expected_provider, expected_model in (
+                ("ollama", "qwen2.5:1.5b"),
+                ("gemini", "gemini-test-model"),
+                ("ollama", "qwen2.5:1.5b"),
+            ):
+                with self.subTest(active_provider=expected_provider):
+                    result = brain.chat("Explique le principe photovoltaïque.")
+                    self.assertEqual("stop", result["finish_reason"])
+                    for probe in (False, True):
+                        status = brain.get_health_status(probe=probe)
+                        self.assertEqual("hybrid", status["provider"])
+                        self.assertEqual(expected_provider, status["active_provider"])
+                        self.assertEqual(expected_provider, status["mode"])
+                        self.assertEqual(expected_model, status["model"])
+                        self.assertTrue(status["online"])
+
+        self.client.models.generate_content.assert_called_once()
+
     def test_hybrid_uses_gemini_for_local_connection_timeout_http_and_json_failures(self):
         invalid_json = self.ollama_response({})
         invalid_json.read.return_value = b"not-json"

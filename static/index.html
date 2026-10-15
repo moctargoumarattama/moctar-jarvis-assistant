@@ -535,7 +535,7 @@
     }
   </style>
   <link rel="stylesheet" href="/static/live_metrics.css?v=1">
-  <link rel="stylesheet" href="/static/cosmos.css?v=1">
+  <link rel="stylesheet" href="/static/cosmos.css?v=2">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/moctar-logo-v2-192.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/moctar-logo-v2-180.png">
@@ -543,7 +543,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="M.O.C.T.A.R">
   <link rel="stylesheet" href="/static/pwa.css">
-  <link rel="stylesheet" href="/static/mobile.css?v=2">
+  <link rel="stylesheet" href="/static/mobile.css?v=3">
   <script src="/static/mobile.js?v=2" defer></script>
   <script src="/static/pwa.js" defer></script>
 </head>
@@ -564,7 +564,7 @@
     </nav>
     <div class="cosmos-core">
       <button id="jarvis-open-btn" class="core-btn" type="button" aria-label="Ouvrir l'assistant IA MOCTAR" title="Parler à MOCTAR · Ctrl+Espace ou touche M" aria-haspopup="dialog" aria-controls="jarvis-modal"><span class="core-ring r1"></span><span class="core-ring r2"></span><span class="core-ring r3"></span></button>
-      <div class="core-label"><span class="core-name">MOCTAR</span><span class="jarvis-badge-status" id="jarvis-strip-badge">MOCTAR</span><span class="core-hint">Touchez le soleil pour parler</span></div>
+      <div class="core-label"><span class="core-name">MOCTAR</span><span class="jarvis-badge-status" id="jarvis-strip-badge">MOCTAR</span><span class="ai-runtime-badge" id="home-ai-badge" role="status" aria-live="polite" aria-atomic="true" data-tone="warning">IA · Vérification…</span><span class="core-hint">Touchez le soleil pour parler</span></div>
     </div>
     <nav class="cosmos-col cosmos-right" aria-label="Outils et automatisations">
       <button class="orb-tile" type="button" id="live-metrics-open" data-live-metrics-open="central" data-planet="4" data-key="5" aria-haspopup="dialog" aria-controls="live-metrics-dialog"><span class="orb-tile-head"><span class="orb-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18M6 14l4-5 4 4 6-8"/></svg></span><span class="orb-title">Courbes en direct</span><kbd>5</kbd></span><span class="orb-main"><strong id="home-spark-value">—</strong><small>% CPU · session</small></span><canvas class="orb-spark" id="home-spark" aria-hidden="true"></canvas></button>
@@ -629,7 +629,7 @@
         </div>
       </div>
       <div class="jarvis-header-badges">
-        <span class="jarvis-model-badge" id="jarvis-model-badge"><span class="led"></span> qwen2.5:1.5b @ Ollama</span>
+        <span class="jarvis-model-badge ai-runtime-badge" id="jarvis-model-badge" role="status" aria-live="polite" aria-atomic="true" data-tone="warning">IA · Vérification…</span>
         <span class="jarvis-tools-badge" id="jarvis-tools-badge">46 outils ReAct</span>
         <button type="button" class="jarvis-btn-icon" id="jarvis-clear-btn" title="Vider l'historique">
           <svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
@@ -1637,6 +1637,8 @@
       const jarvisState = {
         available: false,
         status: null,
+        statusPending: false,
+        aiStatusRevision: 0,
         historyLoaded: false,
         busy: false,
         recognition: null,
@@ -1652,6 +1654,7 @@
       }
 
       function renderJarvisAiStatus(data, notifyOffline = false) {
+        jarvisState.aiStatusRevision = (jarvisState.aiStatusRevision || 0) + 1;
         const health = jarvisAiHealth(data);
         const badge = $('jarvis-strip-badge');
         if (badge) {
@@ -1662,17 +1665,34 @@
         if (health === 'online') $('model-offline-modal')?.close();
         else if (health === 'offline' && notifyOffline) showModelOfflinePopup(data.model_offline_details, data);
         const activeProvider = data.active_provider || data.mode || data.provider;
-        if ($('jarvis-model-badge') && ['gemini', 'ollama'].includes(activeProvider)) {
-          const model = activeProvider === 'gemini' ? data.gemini_model || data.model || 'gemini-3.5-flash-lite' : data.model || 'qwen2.5:1.5b';
-          set('jarvis-model-badge', model + (activeProvider === 'gemini' ? ' @ Gemini' : ' @ Ollama'));
+        let label = 'IA · Statut indisponible';
+        if (health === 'offline' || (health !== 'online' && ['local', 'autonomous'].includes(activeProvider))) {
+          label = 'Mode autonome · sans modèle IA';
+        } else if (health === 'online') {
+          const providerLabel = {gemini: 'Gemini Cloud', ollama: 'Ollama local', openai: 'OpenAI'}[activeProvider];
+          const model = data.model || (activeProvider === 'gemini' ? data.gemini_model : data.ollama_model) || 'modèle non communiqué';
+          label = providerLabel ? (data.provider === 'hybrid' ? 'Hybride · ' : '') + providerLabel + ' · ' + model : 'IA en ligne · modèle non communiqué';
         }
+        ['home-ai-badge', 'jarvis-model-badge'].forEach(id => {
+          const node = $(id);
+          if (!node) return;
+          if (node.textContent !== label) node.textContent = label;
+          node.title = label;
+          node.dataset.tone = health === 'online' ? 'success' : 'warning';
+        });
       }
 
       async function fetchJarvisStatus(notifyOffline = false) {
+        if (jarvisState.statusPending) return jarvisState.status;
+        jarvisState.statusPending = true;
+        const revision = jarvisState.aiStatusRevision || 0;
         try {
           const res = await apiFetch('/api/jarvis/status', {}, 5000);
+          if (!res.ok) throw new Error('Statut IA indisponible (HTTP ' + res.status + ').');
           if (res.ok) {
             const data = await res.json();
+            // A slow status probe must not overwrite the provider from a newer answer.
+            if (revision !== (jarvisState.aiStatusRevision || 0)) return jarvisState.status;
             jarvisState.status = data;
             jarvisState.available = data.available !== false;
             renderJarvisAiStatus(data, notifyOffline);
@@ -1686,10 +1706,9 @@
           }
         } catch (e) {
           console.warn('Erreur verification Jarvis:', e);
-          const badge = $('jarvis-strip-badge');
-          if (badge) {
-            badge.textContent = 'MOCTAR STANDBY';
-          }
+          if (revision === (jarvisState.aiStatusRevision || 0)) renderJarvisAiStatus({});
+        } finally {
+          jarvisState.statusPending = false;
         }
       }
 
@@ -2320,6 +2339,10 @@
       });
 
       setTimeout(fetchJarvisStatus, 1500);
+      setInterval(() => { if (!document.hidden && !jarvisState.busy) fetchJarvisStatus(); }, 10000);
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && !jarvisState.busy) fetchJarvisStatus();
+      });
 
       // -----------------------------------------------------------------------
       // Planificateur d'automatisations & Tâches
