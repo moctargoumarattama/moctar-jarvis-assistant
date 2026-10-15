@@ -64,11 +64,11 @@ main.cosmos-home > .connection-banner { pointer-events: auto; }
 .cosmos-logo {
   width: 38px; height: 38px; flex: none; border-radius: 12px;
   display: grid; place-items: center; color: #ffd27a;
-  background: radial-gradient(circle at 35% 30%, rgba(255, 214, 120, .28), rgba(255, 140, 40, .08) 70%);
+  background: #0b0f19; overflow: hidden;
   border: 1px solid rgba(255, 200, 110, .3);
   box-shadow: 0 0 22px rgba(255, 170, 60, .18);
 }
-.cosmos-logo .icon { width: 20px; height: 20px; }
+.cosmos-logo img { display: block; width: 100%; height: 100%; object-fit: contain; border-radius: inherit; }
 .cosmos-name {
   font-size: 15px; font-weight: 700; letter-spacing: .32em; color: #f3f7ff;
   text-shadow: 0 0 18px rgba(94, 217, 236, .35);

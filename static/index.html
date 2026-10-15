@@ -256,7 +256,7 @@
     body:has(#jarvis-modal[open]){overflow:hidden}
     .jarvis-header{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:20px 26px;border-bottom:1px solid rgba(56,189,248,0.15);background:linear-gradient(180deg,#101c2d 0%,#0c1624 100%);flex-shrink:0}
     .jarvis-header-left{display:flex;align-items:center;gap:14px}
-    .jarvis-mini-reactor{width:36px;height:36px;animation:jarvis-spin-slow 20s linear infinite;filter:drop-shadow(0 0 8px rgba(56,189,248,0.35))}
+    .jarvis-brand-logo{display:block;width:36px;height:36px;flex:none;object-fit:contain;border-radius:10px;filter:drop-shadow(0 0 8px rgba(56,189,248,0.35))}
     .jarvis-title{font-size:20px;font-weight:700;letter-spacing:.04em;color:#f0f9ff;display:flex;align-items:center;gap:10px}
     .jarvis-title-sub{font-size:11px;font-weight:500;color:var(--cyan);font-family:var(--mono);opacity:.9;background:rgba(56,189,248,0.12);padding:2px 8px;border-radius:6px;border:1px solid rgba(56,189,248,0.2)}
     .jarvis-header-badges{display:flex;align-items:center;gap:10px}
@@ -537,6 +537,7 @@
   <link rel="stylesheet" href="/static/live_metrics.css?v=1">
   <link rel="stylesheet" href="/static/cosmos.css?v=1">
   <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/moctar-logo-v2-192.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/moctar-logo-v2-180.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -548,7 +549,7 @@
   <canvas id="cosmos-canvas" class="cosmos-canvas" aria-hidden="true"></canvas>
   <main id="overview" class="cosmos-home" aria-label="Tour de contrôle M.O.C.T.A.R">
     <header class="cosmos-top">
-      <div class="cosmos-brand"><span class="cosmos-logo" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg></span><div><div class="cosmos-name">M.O.C.T.A.R</div><div class="cosmos-host"><span id="hostname">Connexion en cours…</span><span class="host-platform" id="platform"></span></div></div></div>
+      <div class="cosmos-brand"><span class="cosmos-logo" aria-hidden="true"><img src="/static/icons/moctar-logo-v2-192.png" width="38" height="38" alt="" decoding="async"></span><div><div class="cosmos-name">M.O.C.T.A.R</div><div class="cosmos-host"><span id="hostname">Connexion en cours…</span><span class="host-platform" id="platform"></span></div></div></div>
       <div class="cosmos-telemetry"><div class="stream-label" id="stream-state" data-tone="warning"><span class="led"></span><span id="stream-state-text">Connexion…</span></div><span class="cosmos-sep" aria-hidden="true"></span><span>Relevé <span class="mono" id="last-update">—</span></span><span class="cosmos-sep" aria-hidden="true"></span><span class="mono" id="uptime">UPTIME —</span></div>
       <div class="cosmos-top-right"><div class="clock mono"><time id="clock-time">--:--:--</time><div class="clock-date" id="clock-date">—</div></div><div class="status-chip" id="global-status" data-tone="warning" role="status"><span class="led"></span><span id="global-status-text">Initialisation</span></div><button class="cosmos-icon-btn" id="refresh-button" type="button" aria-label="Actualiser les mesures" title="Actualiser les mesures"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg></button></div>
     </header>
@@ -619,11 +620,7 @@
     <canvas id="jarvis-bg-canvas" class="jarvis-bg-canvas" aria-hidden="true"></canvas>
     <header class="jarvis-header">
       <div class="jarvis-header-left">
-        <svg viewBox="0 0 36 36" class="jarvis-mini-reactor" aria-hidden="true">
-          <circle cx="18" cy="18" r="16" stroke="rgba(94,217,236,0.3)" stroke-width="2" fill="none"/>
-          <circle cx="18" cy="18" r="11" stroke="#5ed9ec" stroke-dasharray="3 3" stroke-width="2" fill="none"/>
-          <circle cx="18" cy="18" r="5" fill="#5ed9ec"/>
-        </svg>
+        <img src="/static/icons/moctar-logo-v2-192.png" class="jarvis-brand-logo" width="36" height="36" alt="" aria-hidden="true" decoding="async">
         <div>
           <div class="eyebrow" style="color:var(--cyan);letter-spacing:.14em">NOC MISSION CONTROL · ASSISTANT INTELLIGENT</div>
           <h2 id="jarvis-modal-title" class="jarvis-title">MOCTAR <span class="jarvis-title-sub">v4.0 ReAct Autonome</span></h2>
