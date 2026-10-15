@@ -14,16 +14,19 @@ from __future__ import annotations
 import argparse
 import ast
 import contextlib
+import ipaddress
 import json
 import os
 import re
 import shutil
+import ssl
 import stat
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
@@ -92,7 +95,7 @@ def gateway_replacement(package: str) -> str:
       adminNumbers: process.env.WHATSAPP_ADMIN_NUMBERS,
       sessionId: process.env.NOC_WHATSAPP_SESSION_ID || "1",
       webhookToken: process.env.NOC_WHATSAPP_WEBHOOK_TOKEN,
-      baseUrl: "http://127.0.0.1:5050",
+      baseUrl: process.env.NOC_API_BASE_URL || "http://127.0.0.1:5050",
       logger: console
     }});
     console.info("NOC relay ready");
@@ -104,7 +107,10 @@ def patch_gateway(source: str, package: str) -> str:
     if MARKER in source:
         if source.count(MARKER) != 1 or legacy_pattern().search(source):
             raise ValueError("Plusieurs relais NOC : remplacement ambigu refusé")
-        return source
+        # Upgrade only the known V2 setting; preserve every unrelated gateway line.
+        return re.sub(r'(?m)^([ \t]*webhookToken: process\.env\.NOC_WHATSAPP_WEBHOOK_TOKEN,[ \t]*\r?\n)'
+                      r'([ \t]*)baseUrl: (["\'])http://127\.0\.0\.1:5050\3,[ \t]*$',
+                      r'\1\2baseUrl: process.env.NOC_API_BASE_URL || "http://127.0.0.1:5050",', source)
     matches = list(legacy_pattern().finditer(source))
     if len(matches) != 1:
         raise ValueError("Le bloc server.js diffère du diagnostic ou existe plusieurs fois. Aucun fichier modifié ; fournir le bloc réel")
@@ -208,24 +214,61 @@ def relay_ready() -> bool:
     return "NOC relay ready" in journal.stdout and "NOC relay unavailable" not in journal.stdout
 
 
-def http(path: str, payload=None, token: str = ""):
+def local_tls_host(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or any(address in ipaddress.ip_network(network)
+        for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"))
+
+
+def api_base_url(values=None) -> str:
+    values = os.environ if values is None else values
+    configured = values.get("NOC_API_BASE_URL", "").strip()
+    if not configured:
+        enabled = all(Path(values.get(name, default)).is_file() for name, default in (
+            ("NOC_SSL_KEYFILE", "/opt/jarvis/certs/server.key"),
+            ("NOC_SSL_CERTFILE", "/opt/jarvis/certs/server.crt")))
+        configured = ("https" if enabled else "http") + "://127.0.0.1:5050"
+    parsed = urllib.parse.urlsplit(configured)
+    if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or parsed.path not in {"", "/"}):
+        raise ValueError("NOC_API_BASE_URL invalide")
+    parsed.port  # Validate the optional port before any request or configuration write.
+    if parsed.scheme == "http" and not local_tls_host(parsed.hostname):
+        raise ValueError("NOC_API_BASE_URL HTTP doit rester local")
+    return configured.rstrip("/")
+
+
+def http(path: str, payload=None, token: str = "", base_url: str | None = None):
     headers = {"Content-Type": "application/json"}
     if token:
         headers["X-Gateway-Secret"] = token
-    request = urllib.request.Request("http://127.0.0.1:5050" + path,
+    base_url = api_base_url({"NOC_API_BASE_URL": base_url}) if base_url else api_base_url()
+    request = urllib.request.Request(base_url + path,
         data=json.dumps(payload).encode() if payload is not None else None, headers=headers)
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    handlers = [urllib.request.ProxyHandler({})]
+    parsed = urllib.parse.urlsplit(base_url)
+    if parsed.scheme == "https" and local_tls_host(parsed.hostname):
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        handlers.append(urllib.request.HTTPSHandler(context=context))
+    opener = urllib.request.build_opener(*handlers)
     with opener.open(request, timeout=5) as response:
         return json.loads(response.read(65536))
 
 
-def probe(token: str, phone: str, session: str) -> None:
+def probe(token: str, phone: str, session: str, base_url: str | None = None) -> None:
     identifier = "diagnostic-" + uuid.uuid4().hex
     accepted = http("/api/whatsapp/webhook", {"id": identifier, "sender": phone,
-                     "message": "statut", "sessionId": session}, token)
+                     "message": "statut", "sessionId": session}, token, base_url=base_url)
     print("Réception :", "acceptée" if accepted.get("accepted") else "refusée")
     for _ in range(50):
-        state = http("/api/voice/status")
+        state = http("/api/voice/status", base_url=base_url)
         command = state.get("last_command") or {}
         if command.get("id") == identifier and command.get("status") in {"completed", "failed"} and not state.get("busy"):
             print("Traitement :", command["status"], "· action :", command.get("action"))
@@ -251,6 +294,7 @@ def main() -> int:
     if attributes.st_uid != 0 or attributes.st_mode & 0o022:
         raise ValueError("La configuration NOC doit appartenir à root et ne pas être modifiable par le groupe/autres")
     config = read_env(config_path)
+    base_url = api_base_url(config)
     token = config.get("NOC_WHATSAPP_WEBHOOK_TOKEN", "")
     phone = re.sub(r"[+ ()-]", "", config.get("ADMIN_PHONE_NUMBER", ""))
     session = config.get("NOC_WHATSAPP_SESSION_ID", "1")
@@ -284,7 +328,7 @@ def main() -> int:
                     Change(BRIDGE, checked_file(args.source_dir / "integrations" / "baileys-noc.cjs")),
                     Change(GATEWAY_ENV, update_env(checked_file(GATEWAY_ENV) if GATEWAY_ENV.exists() else "",
                            {"ADMIN_PHONE_NUMBER": phone, "NOC_WHATSAPP_WEBHOOK_TOKEN": token,
-                            "NOC_WHATSAPP_SESSION_ID": session}), private=True),
+                            "NOC_WHATSAPP_SESSION_ID": session, "NOC_API_BASE_URL": base_url}), private=True),
                     Change(DROP_IN, "# NOC_GATEWAY_RELAY_V2\n[Service]\nEnvironmentFile=/etc/klasora-whatsapp-noc.env\n")))
     for change in changes:
         if change.path.exists():
@@ -341,7 +385,7 @@ def main() -> int:
             healthy = False
             for _ in range(40):
                 try:
-                    healthy = http("/api/health").get("status") == "ok" and all(
+                    healthy = http("/api/health", base_url=base_url).get("status") == "ok" and all(
                         systemctl("is-active", "--quiet", unit, check=False).returncode == 0 for unit in active) and relay_ready()
                 except (OSError, ValueError, urllib.error.URLError, subprocess.SubprocessError):
                     healthy = False
@@ -366,10 +410,10 @@ def main() -> int:
             raise ValueError("Mise à jour annulée : fichiers restaurés. Sauvegarde : " + str(backup)) from None
         print("Mise à jour appliquée. Sauvegarde :", backup)
         print("Relais entrant Baileys attaché (nouvelle invocation systemd confirmée)")
-    state = http("/api/voice/status")
+    state = http("/api/voice/status", base_url=base_url)
     print("Whisper :", state.get("status"), "·", state.get("reason"))
     if args.probe:
-        probe(token, phone, session)
+        probe(token, phone, session, base_url=base_url)
     return 0
 
 

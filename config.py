@@ -454,6 +454,8 @@ class Settings:
     sentinel_state_path: str = str(DATA_DIR / "sentinel-counters.json")
     cyber_state_path: str = str(DATA_DIR / "blocked_ips.json")
     cyber_protected_ips: tuple[str, ...] = ("187.77.171.225",)
+    ssl_keyfile: str = "/opt/jarvis/certs/server.key"
+    ssl_certfile: str = "/opt/jarvis/certs/server.crt"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -500,4 +502,6 @@ class Settings:
             cyber_protected_ips=tuple(value.strip() for value in
                                       os.environ.get("NOC_CYBER_PROTECTED_IPS", "187.77.171.225").split(",")
                                       if value.strip()),
+            ssl_keyfile=os.environ.get("NOC_SSL_KEYFILE", "/opt/jarvis/certs/server.key"),
+            ssl_certfile=os.environ.get("NOC_SSL_CERTFILE", "/opt/jarvis/certs/server.crt"),
         )

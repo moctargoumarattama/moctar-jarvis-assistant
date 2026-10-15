@@ -156,8 +156,8 @@ def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
     if _is_system_status_prompt(prompt) or has_keyword(("temperature", "température")):
         tools.add("get_system_telemetry")
 
-    # Mots-clés Système / Heure / Date / Volume / Apps
-    if has_keyword(("heure", "date", "jour", "volume", "son", "ouvre", "ferme", "capture", "ecran", "écran")):
+    # Mots-clés Système / Heure / Date / Volume / Apps / Ouverture
+    if has_keyword(("heure", "date", "jour", "volume", "son", "ouvre", "ouve", "lance", "ferme", "capture", "ecran", "écran")):
         tools.update([
             "get_time_response",
             "get_date_response",
@@ -165,10 +165,11 @@ def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
             "open_app",
             "close_app",
             "change_volume",
+            "open_site",
         ])
 
     # Mots-clés Web / Musique / Recherche
-    if has_keyword(("musique", "chanson", "youtube", "google", "cherche", "site", "web")):
+    if has_keyword(("musique", "chanson", "youtube", "google", "cherche", "site", "web", "navigue", "internet")):
         tools.update([
             "play_music",
             "control_music",
@@ -401,7 +402,7 @@ class JarvisHeadlessBridge:
                 actions.execute_tool = orig_execute_tool
                 agent_core.execute_tool = orig_agent_execute_tool
 
-            return {
+            resp_dict: Dict[str, Any] = {
                 "status": status,
                 "reply": reply,
                 "thought_chain": thought_chain,
@@ -410,6 +411,16 @@ class JarvisHeadlessBridge:
                 "session_id": current_session,
                 "source": source,
             }
+
+            for tu in tools_used:
+                t_data = tu.get("data")
+                if isinstance(t_data, dict) and t_data.get("action") == "open_browser":
+                    resp_dict["action"] = "open_browser"
+                    resp_dict["url"] = t_data.get("url")
+                    resp_dict["title"] = t_data.get("title")
+                    break
+
+            return resp_dict
 
     async def execute_prompt_async(
         self,

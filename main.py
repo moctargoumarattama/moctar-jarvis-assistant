@@ -309,7 +309,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         return response
 
     @application.get("/")
@@ -331,6 +331,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/static/cosmos.css")
     async def cosmos_styles():
         return FileResponse(BASE_DIR / "static" / "cosmos.css", media_type="text/css")
+
+    @application.get("/manifest.webmanifest", include_in_schema=False)
+    async def pwa_manifest():
+        return FileResponse(BASE_DIR / "static" / "manifest.webmanifest", media_type="application/manifest+json")
+
+    @application.get("/service-worker.js", include_in_schema=False)
+    async def pwa_worker():
+        return FileResponse(BASE_DIR / "static" / "service-worker.js", media_type="application/javascript",
+                            headers={"Service-Worker-Allowed": "/"})
+
+    @application.get("/static/pwa.js", include_in_schema=False)
+    async def pwa_script():
+        return FileResponse(BASE_DIR / "static" / "pwa.js", media_type="application/javascript")
+
+    @application.get("/static/pwa.css", include_in_schema=False)
+    async def pwa_styles():
+        return FileResponse(BASE_DIR / "static" / "pwa.css", media_type="text/css")
+
+    @application.get("/static/icons/{name}", include_in_schema=False)
+    async def pwa_icon(name: str):
+        if name not in {"moctar-192.png", "moctar-512.png"}:
+            raise HTTPException(status_code=404)
+        return FileResponse(BASE_DIR / "static" / "icons" / name, media_type="image/png")
 
     @application.get("/favicon.ico", include_in_schema=False)
     async def favicon():
@@ -763,10 +786,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 app = create_app()
 
-if __name__ == "__main__":
+def run_server(settings: Settings | None = None) -> None:
+    """Launch HTTPS when both certificate files are present, otherwise HTTP."""
     import uvicorn
-    settings = Settings.from_env()
+
+    settings = settings or Settings.from_env()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
-    uvicorn.run(app, host=settings.host, port=settings.port, workers=1, loop="asyncio", http="h11", ws="none", access_log=False, proxy_headers=False)
+    ssl_options: dict[str, str] = {}
+    try:
+        if Path(settings.ssl_keyfile).is_file() and Path(settings.ssl_certfile).is_file():
+            ssl_options = {"ssl_keyfile": settings.ssl_keyfile, "ssl_certfile": settings.ssl_certfile}
+    except OSError:
+        LOGGER.warning("Certificats SSL inaccessibles ; demarrage HTTP.")
+    LOGGER.info("Demarrage %s sur %s:%s", "HTTPS" if ssl_options else "HTTP", settings.host, settings.port)
+    uvicorn.run(app, host=settings.host, port=settings.port, workers=1, loop="asyncio", http="h11", ws="none", access_log=False, proxy_headers=False, **ssl_options)
+
+
+if __name__ == "__main__":
+    run_server()

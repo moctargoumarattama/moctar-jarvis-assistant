@@ -135,6 +135,8 @@ def gateway_environment(original: str, config: dict[str, str], secret: str) -> s
     phone = re.sub(r'\D', '', config.get('ADMIN_PHONE_NUMBER', '212770010264'))
     values = {'NOC_GATEWAY_SECRET': secret,
               'NOC_WHATSAPP_SESSION_ID': config.get('NOC_WHATSAPP_SESSION_ID', '1')}
+    if config.get('NOC_API_BASE_URL'):
+        values['NOC_API_BASE_URL'] = config['NOC_API_BASE_URL']
     admins = parse_whatsapp_admin_numbers(config.get('WHATSAPP_ADMIN_NUMBERS', config.get('ADMIN_PHONE_NUMBER', '212770010264')))
     if admins:
         values['WHATSAPP_ADMIN_NUMBERS'] = ','.join(admins)

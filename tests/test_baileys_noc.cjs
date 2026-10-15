@@ -2,8 +2,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const https = require('node:https');
 const { EventEmitter } = require('node:events');
-const { Readable } = require('node:stream');
+const { Readable, Writable } = require('node:stream');
 const { attachNocWebhook } = require('../integrations/baileys-noc.cjs');
 
 const incoming = (id, message, extra = {}) => ({ key: { id, fromMe: false, remoteJid: '212770010264@s.whatsapp.net', ...extra }, message, messageTimestamp: Math.floor(Date.now() / 1000) });
@@ -144,6 +145,88 @@ test('public plaintext targets and invalid credentials fail before attaching', (
   assert.throws(() => attachNocWebhook(sock, { ...config, baseUrl: 'http://8.8.8.8:5050' }), /configuration_transport/);
   assert.throws(() => attachNocWebhook(sock, { ...config, webhookToken: 'bad\r\nheader' }), /configuration_identity/);
   assert.equal(sock.ev.listenerCount('messages.upsert'), 0);
+});
+
+function mockHttps(t) {
+  const received = [];
+  t.mock.method(https, 'request', (url, options, onResponse) => {
+    const chunks = [];
+    return new Writable({
+      write(chunk, encoding, callback) { chunks.push(Buffer.from(chunk)); callback(); },
+      final(callback) {
+        received.push({ url, options, body: Buffer.concat(chunks) });
+        callback();
+        const response = Readable.from([Buffer.from('{"accepted":true}')]);
+        response.statusCode = 202;
+        queueMicrotask(() => onResponse(response));
+      }
+    });
+  });
+  return received;
+}
+
+test('self-signed local HTTPS delivers text and audio without real certificates', async t => {
+  const received = mockHttps(t);
+  const f = await fixture(t, { baseUrl: 'https://127.0.0.1:5050' });
+  f.sock.ev.emit('messages.upsert', event([
+    incoming('HTTPS_TEXT', { conversation: 'statut' }),
+    incoming('HTTPS_AUDIO', { audioMessage: { mimetype: 'audio/ogg' } }),
+  ]));
+  await until(() => received.length === 2);
+  assert.deepEqual(received.map(row => row.url.pathname), ['/api/whatsapp/webhook', '/api/voice/process']);
+  assert.ok(received.every(row => row.options.rejectUnauthorized === false));
+  assert.equal(JSON.parse(received[0].body).data.text, 'statut');
+  assert.equal(received[1].body.toString(), 'OggS-test');
+  assert.equal(f.logs.length, 0);
+});
+
+test('TLS verification is relaxed only for literal local hosts, never public or lookalike names', async t => {
+  const received = mockHttps(t);
+  const cases = [
+    ['localhost', false], ['[::1]', false], ['192.168.11.103', false],
+    ['10.42.0.1', false], ['172.16.0.1', false], ['172.31.255.255', false],
+    ['100.64.0.1', false], ['100.127.255.254', false],
+    ['8.8.8.8', true], ['noc.example.com', true], ['localhost.example.com', true],
+    ['192.168.11.103.example.com', true], ['172.32.0.1', true], ['100.128.0.1', true],
+  ];
+  for (const [index, [host, expected]] of cases.entries()) {
+    const f = await fixture(t, { baseUrl: `https://${host}:5050` });
+    f.sock.ev.emit('messages.upsert', event([incoming(`TLS_${received.length}`, { conversation: 'statut' })]));
+    await until(() => received.length === index + 1);
+    assert.equal(received.at(-1).options.rejectUnauthorized, expected, host);
+    f.detach();
+  }
+});
+
+test('NOC_API_BASE_URL selects HTTPS when an explicit baseUrl is absent', async t => {
+  const received = mockHttps(t);
+  const previous = process.env.NOC_API_BASE_URL;
+  let f;
+  try {
+    process.env.NOC_API_BASE_URL = 'https://192.168.11.103:5050';
+    f = await fixture(t, { baseUrl: undefined });
+  } finally {
+    if (previous === undefined) delete process.env.NOC_API_BASE_URL;
+    else process.env.NOC_API_BASE_URL = previous;
+  }
+  f.sock.ev.emit('messages.upsert', event([incoming('HTTPS_ENV', { conversation: 'status' })]));
+  await until(() => received.length === 1);
+  assert.equal(received[0].url.origin, 'https://192.168.11.103:5050');
+  assert.equal(received[0].options.rejectUnauthorized, false);
+});
+
+test('an explicit baseUrl takes precedence over NOC_API_BASE_URL', async t => {
+  const previous = process.env.NOC_API_BASE_URL;
+  let f;
+  try {
+    process.env.NOC_API_BASE_URL = 'https://192.168.11.103:5050';
+    f = await fixture(t);
+  } finally {
+    if (previous === undefined) delete process.env.NOC_API_BASE_URL;
+    else process.env.NOC_API_BASE_URL = previous;
+  }
+  f.sock.ev.emit('messages.upsert', event([incoming('HTTP_OVERRIDE', { conversation: 'status' })]));
+  await until(() => f.received.length === 1);
 });
 
 test('formatted administrator option accepts exact PN text and decrypted audio over HTTP', async t => {

@@ -1,5 +1,6 @@
 """Le correctif terminal n'écrase aucun handler non reconnu ni autre configuration."""
 import ast
+import ssl
 import subprocess
 import tempfile
 import unittest
@@ -8,7 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from tools.repair_whatsapp_contract import (LEGACY, MARKER, gateway_replacement,
-                                           patch_gateway, relay_ready, replace_functions, update_env)
+                                           api_base_url, http, patch_gateway, relay_ready,
+                                           replace_functions, update_env)
 
 
 class RepairTests(unittest.TestCase):
@@ -49,6 +51,48 @@ class RepairTests(unittest.TestCase):
         self.assertEqual(patch_gateway(first, "baileys"), first)
         with self.assertRaises(ValueError):
             patch_gateway(first + self.legacy(), "baileys")
+
+    def test_existing_v2_relay_upgrades_only_the_known_http_destination(self):
+        current = gateway_replacement("baileys")
+        previous = current.replace('process.env.NOC_API_BASE_URL || "http://127.0.0.1:5050"',
+                                   '"http://127.0.0.1:5050"')
+        self.assertEqual(patch_gateway(previous, "baileys"), current)
+        unrelated = 'const anotherClient = {\n  baseUrl: "http://127.0.0.1:5050",\n};\n'
+        self.assertEqual(patch_gateway(unrelated + previous, "baileys"), unrelated + current)
+        custom = previous.replace('"http://127.0.0.1:5050"', '"https://noc.example.com"')
+        self.assertEqual(patch_gateway(custom, "baileys"), custom)
+
+    def test_probe_base_url_defaults_to_http_and_detects_a_complete_certificate_pair(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            key, cert = Path(temporary) / "server.key", Path(temporary) / "server.crt"
+            values = {"NOC_SSL_KEYFILE": str(key), "NOC_SSL_CERTFILE": str(cert)}
+            self.assertEqual(api_base_url(values), "http://127.0.0.1:5050")
+            key.write_text("mock key", encoding="utf-8")
+            self.assertEqual(api_base_url(values), "http://127.0.0.1:5050")
+            cert.write_text("mock certificate", encoding="utf-8")
+            self.assertEqual(api_base_url(values), "https://127.0.0.1:5050")
+            values["NOC_API_BASE_URL"] = "https://192.168.11.103:5050/"
+            self.assertEqual(api_base_url(values), "https://192.168.11.103:5050")
+
+    def test_probe_rejects_public_plaintext_and_malformed_base_urls(self):
+        for value in ("http://8.8.8.8:5050", "file:///tmp/api", "https://user:password@localhost",
+                      "https://localhost/api", "https://localhost?token=secret", "https://localhost:invalid"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                api_base_url({"NOC_API_BASE_URL": value})
+
+    def test_https_probe_relaxes_verification_only_for_local_targets(self):
+        for base, unverified in (("https://192.168.11.103:5050", True),
+                                 ("https://localhost:5050", True),
+                                 ("https://noc.example.com", False)):
+            with self.subTest(base=base), patch("tools.repair_whatsapp_contract.urllib.request.build_opener") as build:
+                build.return_value.open.return_value.__enter__.return_value.read.return_value = b'{"status":"ok"}'
+                self.assertEqual(http("/api/health", base_url=base), {"status": "ok"})
+                tls_handlers = [handler for handler in build.call_args.args if hasattr(handler, "_context")]
+                self.assertEqual(len(tls_handlers), int(unverified))
+                if unverified:
+                    self.assertFalse(tls_handlers[0]._context.check_hostname)
+                    self.assertEqual(tls_handlers[0]._context.verify_mode, ssl.CERT_NONE)
+                self.assertEqual(build.return_value.open.call_args.args[0].full_url, base + "/api/health")
 
     def test_ast_patch_preserves_unrelated_source_and_route_decorators(self):
         old = "import os\n@route('/old')\ndef handle():\n    return 'before'\n\ndef unrelated():\n    return 42\n"
@@ -102,7 +146,6 @@ class RepairTests(unittest.TestCase):
         bridge_url = (project / 'integrations' / 'baileys-noc.cjs').as_uri()
         with patch('tools.repair_whatsapp_contract.BRIDGE', bridge_url):
             wrapper = gateway_replacement('baileys')
-        wrapper = wrapper.replace('"http://127.0.0.1:5050"', 'baseUrl')
         core = r'''
 const assert = (value) => { if(!value)throw new Error('Generated relay contract failed'); };
 const received = [];
@@ -112,6 +155,7 @@ const server = http.createServer((request,response) => {
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const baseUrl=`http://127.0.0.1:${server.address().port}`;
+process.env.NOC_API_BASE_URL=baseUrl;
 const downloadMediaMessage=async()=>Readable.from([Buffer.from('OggS')]);
 const sock={ev:new EventEmitter()};
 process.env.ADMIN_PHONE_NUMBER='212770010264';

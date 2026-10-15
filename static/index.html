@@ -536,6 +536,13 @@
   </style>
   <link rel="stylesheet" href="/static/live_metrics.css?v=1">
   <link rel="stylesheet" href="/static/cosmos.css?v=1">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/icons/moctar-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="M.O.C.T.A.R">
+  <link rel="stylesheet" href="/static/pwa.css">
+  <script src="/static/pwa.js" defer></script>
 </head>
 <body>
   <canvas id="cosmos-canvas" class="cosmos-canvas" aria-hidden="true"></canvas>
@@ -654,6 +661,16 @@
               <svg class="jarvis-mic-icon" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/></svg>
             </button>
             <div class="jarvis-mic-hint" id="jarvis-mic-hint">Microphone (Web Speech API)</div>
+
+            <label class="jarvis-tts-switch jarvis-wakeword-switch" title="Écoute continue avec mot-clé de réveil 'Yo Moctar'">
+              <input type="checkbox" id="jarvis-wakeword-toggle">
+              <span class="jarvis-slider"></span>
+              <span>Écoute active : &quot;Yo Moctar&quot;</span>
+            </label>
+            <div id="jarvis-wakeword-badge" class="jarvis-wakeword-badge" hidden>
+              <span class="led-blink"></span> <span id="jarvis-wakeword-badge-text">EN VEILLE ÉCOUTE</span>
+            </div>
+
             <label class="jarvis-tts-switch" title="Activer la synthèse vocale pour les réponses de Moctar">
               <input type="checkbox" id="jarvis-tts-toggle" checked>
               <span class="jarvis-slider"></span>
@@ -1727,6 +1744,31 @@
 
           const data = await readResponse(res);
           if (res.ok && data.status === 'success') {
+            // Exécution automatique de l'action open_browser sur le navigateur du client
+            let targetUrl = data.url;
+            let targetTitle = data.title || '';
+            if (!targetUrl && Array.isArray(data.tools_used)) {
+              for (const tu of data.tools_used) {
+                if (tu.data && tu.data.action === 'open_browser' && tu.data.url) {
+                  targetUrl = tu.data.url;
+                  targetTitle = tu.data.title || targetTitle;
+                  break;
+                }
+              }
+            }
+
+            if (targetUrl) {
+              try {
+                window.open(targetUrl, '_blank', 'noopener,noreferrer');
+              } catch (e) {
+                console.warn('Erreur window.open:', e);
+              }
+              const openNotice = `🌐 Ouverture de ${targetTitle ? targetTitle + ' (' + targetUrl + ')' : targetUrl} dans un nouvel onglet.`;
+              if (!data.reply || !data.reply.includes('🌐')) {
+                data.reply = (data.reply ? data.reply + '\n\n' : '') + openNotice;
+              }
+            }
+
             appendChatMessage('assistant', data.reply || 'Action exécutée, monsieur.', data.thought_chain, data.tools_used, data.timestamp);
             if (data.session_id && $('jarvis-session-id')) {
               set('jarvis-session-id', 'Session: ' + data.session_id.slice(-12));
@@ -1789,6 +1831,182 @@
           console.warn('TTS error:', e);
         }
       }
+
+      // Moteur Wake Word continu "Yo Moctar" (100% Web Speech API local)
+      const WakeWordEngine = {
+        recognition: null,
+        isActive: false,
+        isAwake: false,
+        awaitingTimer: null,
+        wakeKeywords: ['yo moctar', 'hey moctar', 'moctar', 'ok moctar', 'salut moctar', 'dis moctar'],
+        audioCtx: null,
+
+        playChime() {
+          try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = this.audioCtx || new AudioCtx();
+            this.audioCtx = ctx;
+            if (ctx.state === 'suspended') ctx.resume();
+
+            const now = ctx.currentTime;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+
+            osc.type = 'sine';
+            // Chime harmonique 2 tons : Ré5 (587.33 Hz) puis La5 (880.00 Hz)
+            osc.frequency.setValueAtTime(587.33, now);
+            osc.frequency.exponentialRampToValueAtTime(880.00, now + 0.08);
+
+            gain.gain.setValueAtTime(0.001, now);
+            gain.gain.linearRampToValueAtTime(0.18, now + 0.03);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.35);
+          } catch (e) {
+            console.warn('Erreur son de réveil:', e);
+          }
+        },
+
+        pulseSunAndReactor() {
+          const reactor = $('jarvis-reactor');
+          if (reactor) reactor.dataset.reactorState = 'listening';
+          set('jarvis-reactor-status', 'ÉCOUTE MOCTAR...');
+
+          if (window.CosmosEngine?.SolarEngine) {
+            window.CosmosEngine.SolarEngine.sunPulse = 1.35;
+          }
+        },
+
+        init() {
+          const toggle = $('jarvis-wakeword-toggle');
+          if (!toggle) return;
+
+          const saved = localStorage.getItem('jarvis_wakeword_active');
+          if (saved === 'true') {
+            toggle.checked = true;
+          }
+
+          toggle.addEventListener('change', () => {
+            const active = toggle.checked;
+            localStorage.setItem('jarvis_wakeword_active', active ? 'true' : 'false');
+            if (active) {
+              this.start();
+            } else {
+              this.stop();
+            }
+          });
+
+          if (toggle.checked) {
+            this.start();
+          }
+        },
+
+        start() {
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          if (!SpeechRecognition) {
+            console.warn('SpeechRecognition non disponible sur ce navigateur.');
+            return;
+          }
+
+          this.isActive = true;
+          const badge = $('jarvis-wakeword-badge');
+          if (badge) badge.hidden = false;
+          set('jarvis-wakeword-badge-text', 'EN VEILLE ÉCOUTE');
+
+          if (!this.recognition) {
+            this.recognition = new SpeechRecognition();
+            this.recognition.lang = 'fr-FR';
+            this.recognition.continuous = true;
+            this.recognition.interimResults = true;
+
+            this.recognition.onresult = (e) => this.handleResult(e);
+            this.recognition.onerror = (e) => {
+              if (e.error !== 'no-speech') {
+                console.warn('Erreur WakeWord:', e.error);
+              }
+            };
+            this.recognition.onend = () => {
+              if (this.isActive) {
+                setTimeout(() => {
+                  if (this.isActive) {
+                    try { this.recognition.start(); } catch (err) {}
+                  }
+                }, 300);
+              }
+            };
+          }
+
+          try {
+            this.recognition.start();
+          } catch (err) {
+            // Déjà démarré
+          }
+        },
+
+        stop() {
+          this.isActive = false;
+          this.isAwake = false;
+          clearTimeout(this.awaitingTimer);
+          const badge = $('jarvis-wakeword-badge');
+          if (badge) badge.hidden = true;
+          try { this.recognition?.stop(); } catch (err) {}
+        },
+
+        handleResult(e) {
+          if (!this.isActive) return;
+
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            const transcript = e.results[i][0].transcript.trim().toLowerCase();
+            const isFinal = e.results[i].isFinal;
+
+            if (this.isAwake) {
+              if (transcript && isFinal) {
+                clearTimeout(this.awaitingTimer);
+                this.isAwake = false;
+                set('jarvis-wakeword-badge-text', 'EN VEILLE ÉCOUTE');
+                sendJarvisPrompt(transcript, 'web_voice');
+                return;
+              }
+              continue;
+            }
+
+            for (const kw of this.wakeKeywords) {
+              const kwIdx = transcript.indexOf(kw);
+              if (kwIdx !== -1) {
+                this.playChime();
+                this.pulseSunAndReactor();
+
+                const remainder = transcript.slice(kwIdx + kw.length).trim();
+                const cleanRemainder = remainder.replace(/^[,;:\-\s]+/, '');
+
+                if (cleanRemainder.length > 2 && isFinal) {
+                  this.isAwake = false;
+                  sendJarvisPrompt(cleanRemainder, 'web_voice');
+                  return;
+                } else {
+                  this.isAwake = true;
+                  set('jarvis-wakeword-badge-text', 'PARLEZ MAINTENANT...');
+                  clearTimeout(this.awaitingTimer);
+                  this.awaitingTimer = setTimeout(() => {
+                    this.isAwake = false;
+                    set('jarvis-wakeword-badge-text', 'EN VEILLE ÉCOUTE');
+                    const reactor = $('jarvis-reactor');
+                    if (reactor && reactor.dataset.reactorState === 'listening') {
+                      reactor.dataset.reactorState = 'idle';
+                      set('jarvis-reactor-status', 'PRÊT');
+                    }
+                  }, 6000);
+                  return;
+                }
+              }
+            }
+          }
+        }
+      };
 
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (SpeechRecognition) {
@@ -1861,6 +2079,7 @@
       $('jarvis-open-btn')?.addEventListener('click', openJarvisModal);
       $('jarvis-close-btn')?.addEventListener('click', closeJarvisModal);
       $('jarvis-mic-btn')?.addEventListener('click', toggleJarvisListening);
+      WakeWordEngine.init();
 
       // Fermeture douce et intuitive des modales au clic en dehors (backdrop)
       ['jarvis-modal', 'events-dialog', 'voice-dialog'].forEach(id => {

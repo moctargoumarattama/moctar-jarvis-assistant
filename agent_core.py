@@ -31,6 +31,9 @@ AGENT_SYSTEM_PROMPT = (
     "RÈGLE ABSOLUE : Ne fais JAMAIS de promesse d'action ni de phrase d'attente "
     "(interdit : 'Je vais vérifier', 'Je commence par', 'Patientez'). "
     "Si une information demande un outil, APPELLE DIRECTEMENT L'OUTIL au premier tour sans texte d'introduction.\n"
+    "EXEMPLE D'APPEL D'OUTIL ATTENDU :\n"
+    "Action: open_site\n"
+    "Action Input: {\"target\": \"https://www.youtube.com\"}\n\n"
     "Utilise les observations réelles déjà obtenues dans le contexte système sans redemander les mêmes mesures. "
     "N'invente ni mesure, heure, fichier, état IoT ou statut Git ; signale les données indisponibles. "
     "system_telemetry décrit uniquement l'hôte mesuré, pas les services ni les machines distantes sans observation dédiée.\n"
@@ -157,6 +160,22 @@ class AgentCore:
             flags=re.IGNORECASE,
         ))
 
+    @staticmethod
+    def _extract_open_fast_path(prompt: str) -> Optional[Dict[str, str]]:
+        """Détecte les ordres directs d'ouverture de sites ou applications."""
+        norm = (prompt or "").strip()
+        m = re.match(
+            r"^(?:ouvre|ouvrez|ouve|lance|lancez|va sur|navigue vers|go to)\s+(?:le site\s+|l'application\s+|l'app\s+|la page\s+)?(.+)$",
+            norm,
+            re.IGNORECASE,
+        )
+        if not m:
+            return None
+        target = m.group(1).strip().rstrip(".!?")
+        if not target:
+            return None
+        return {"target": target}
+
     def _call_llm(
         self,
         messages: List[Dict[str, Any]],
@@ -249,6 +268,25 @@ class AgentCore:
                 self.memory.add_message(session_id=session_id, role="user", content=user_query)
             except Exception as exc:
                 logger.warning("Erreur persistance message user en mémoire : %s", exc)
+
+        # Fast-path pour ouverture directe de sites/apps
+        if self.chat_client is None:
+            open_info = self._extract_open_fast_path(user_query)
+            if open_info:
+                domain_allowed = True
+                if self.security is not None and hasattr(self.security, "is_domain_allowed"):
+                    domain_allowed = self.security.is_domain_allowed("web")
+                if domain_allowed:
+                    from actions.web_actions import resolve_site_url
+                    site_url, title = resolve_site_url(open_info["target"])
+                    execute_tool("open_site", {"target": open_info["target"]})
+                    final_text = f"🌐 Ouverture de {title} ({site_url}) dans votre navigateur."
+                    if self.memory:
+                        try:
+                            self.memory.add_message(session_id=session_id, role="assistant", content=final_text)
+                        except Exception:
+                            pass
+                    return final_text
 
         active_tools = list(self.tools)
 
@@ -458,6 +496,30 @@ class AgentCore:
         request_id = uuid4().hex
         logger.info("AgentCore.run(request_id=%s): prompt='%s'", request_id, effective_prompt)
         prompt = effective_prompt
+
+        # Fast-path pour ouverture directe de sites/apps si chat_client n'est pas mocké
+        if self.chat_client is None:
+            open_fast = self._extract_open_fast_path(prompt)
+            if open_fast:
+                domain_allowed = True
+                if self.security is not None and hasattr(self.security, "is_domain_allowed"):
+                    domain_allowed = self.security.is_domain_allowed("web")
+                if domain_allowed:
+                    from actions.web_actions import resolve_site_url
+                    site_url, title = resolve_site_url(open_fast["target"])
+                    execute_tool("open_site", {"target": open_fast["target"]})
+                    reply_msg = f"🌐 J'ouvre {title} ({site_url}) dans votre navigateur."
+                    if self.memory:
+                        try:
+                            s_id = kwargs.get("session_id", "default")
+                            self.memory.add_message(session_id=s_id, role="user", content=prompt)
+                            self.memory.add_message(session_id=s_id, role="assistant", content=reply_msg)
+                        except Exception:
+                            pass
+                    return AgentResult(
+                        response=reply_msg,
+                        status="final",
+                    )
 
         # Filtrage des outils selon tool_names si précisé
         if tool_names is not None:

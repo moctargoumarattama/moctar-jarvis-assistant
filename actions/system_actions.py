@@ -384,46 +384,91 @@ def change_volume(action: str, pyautogui_module: Any = pyautogui) -> Dict[str, A
         )
 
 
-def open_app(target: str) -> Dict[str, Any]:
+def _resolve_app_alias(target: str) -> str:
+    norm = target.strip().lower()
+    for canonical, aliases in getattr(config, "APP_ALIASES", {}).items():
+        if norm == canonical or norm in aliases:
+            return canonical
+    return norm
+
+
+def open_app(target: str = "", app: str = "", name: str = "", **kwargs: Any) -> Dict[str, Any]:
     """Lance et ouvre une application installée sur le système d'exploitation Windows.
 
     Critères d'utilisation:
         - L'agent DOIT appeler cet outil dès que l'utilisateur demande d'ouvrir une application
           (ex: 'Ouvre le bloc-notes', 'Lance la calculatrice', 'Ouvre Chrome', 'Démarre VS Code').
-        - L'agent NE DOIT PAS appeler cet outil pour naviguer vers une URL web (utiliser `open_site`
-          ou `open_url_smart`) ni pour ouvrir un dossier du système de fichiers (utiliser `open_folder`).
+        - Si la cible s'avère être un site web ou un service en ligne, l'outil délègue automatiquement
+          à open_site pour une expérience utilisateur transparente.
 
     Args:
-        target (str): Nom canonique de l'application configurée dans Jarvis (ex: 'notepad', 'calc', 'chrome').
-
-    Returns:
-        Dict[str, Any]: Résultat standardisé du lancement de l'application.
+        target (str): Nom canonique ou alias de l'application (ex: 'notepad', 'calc', 'chrome').
     """
     action_name = "open_app"
-    normalized_target = target.strip().lower()
+    chosen_target = (target or app or name or kwargs.get("query") or "").strip()
+    if not chosen_target and kwargs.get("_raw_prompt"):
+        m = re.search(r"(?:ouvre|ouvrez|lance|lancez|demarre|d[ée]marre)\s+(?:l'application\s+|l'app\s+|le logiciel\s+)?([a-zA-Z0-9_\-\.]+)", kwargs["_raw_prompt"], re.IGNORECASE)
+        if m:
+            chosen_target = m.group(1).strip()
+
+    if not chosen_target:
+        return format_action_result(
+            action=action_name,
+            success=False,
+            message="Précisez le nom de l'application à ouvrir.",
+            data={"available_apps": list(config.APP_COMMANDS.keys())},
+            error="MissingTarget",
+        )
+
+    normalized_target = _resolve_app_alias(chosen_target)
+
+    # Si la cible est un site web ou service web (ex: youtube, github, babamarket.ma), déléguer à open_site
+    from actions.web_actions import resolve_site_url, open_site as web_open_site
+    lowered = normalized_target.lower()
+    is_web_target = (
+        lowered in ("youtube", "google", "github", "wikipedia", "gmail", "whatsapp", "pythonanywhere")
+        or lowered.startswith("http://") or lowered.startswith("https://")
+        or bool(re.search(r"\.[a-zA-Z]{2,}(/.*)?$", lowered))
+    )
+    if is_web_target:
+        site_url, site_title = resolve_site_url(normalized_target)
+        status_msg = web_open_site(target=normalized_target)
+        return format_action_result(
+            action="open_site",
+            success=True,
+            message=f"Ouverture de {site_title} ({site_url}) dans le navigateur.",
+            data={"action": "open_browser", "url": site_url, "title": site_title, "status": status_msg},
+            error=None,
+        )
+
     command = config.APP_COMMANDS.get(normalized_target)
 
     if not command:
         return format_action_result(
             action=action_name,
             success=False,
-            message="Je ne connais pas encore cette application.",
-            data={"target": target, "available_apps": list(config.APP_COMMANDS.keys())},
-            error=f"AppNotFound: '{target}'",
+            message=f"Je ne connais pas encore l'application '{chosen_target}'.",
+            data={"target": chosen_target, "available_apps": list(config.APP_COMMANDS.keys())},
+            error=f"AppNotFound: '{chosen_target}'",
         )
 
     try:
         subprocess.Popen(command, shell=True)
-        display_name = target.replace("_", " ")
+        display_name = chosen_target.replace("_", " ")
+        app_data: Dict[str, Any] = {"target": chosen_target, "canonical": normalized_target, "command": command}
+        if normalized_target in ("chrome", "brave", "edge"):
+            app_data["action"] = "open_browser"
+            app_data["url"] = "https://www.google.com"
+            app_data["title"] = normalized_target.capitalize()
         return format_action_result(
             action=action_name,
             success=True,
             message=f"J'ouvre {display_name}.",
-            data={"target": target, "command": command},
+            data=app_data,
             error=None,
         )
     except Exception as exc:
-        display_name = target.replace("_", " ")
+        display_name = chosen_target.replace("_", " ")
         return format_action_result(
             action=action_name,
             success=False,

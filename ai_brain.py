@@ -1385,6 +1385,40 @@ class AIBrain:
             except Exception:
                 pass
 
+        # Format 3 : JSON direct dans le texte {"name": "...", "arguments": {...}}
+        if not tool_calls and "{" in content and "}" in content:
+            json_matches = re.findall(r"(\{(?:[^{}]|(?:\{[^{}]*\}))*\})", content, re.DOTALL)
+            for jm in json_matches:
+                try:
+                    obj = json.loads(jm)
+                    if isinstance(obj, dict):
+                        name = obj.get("name") or obj.get("action") or obj.get("tool") or obj.get("function")
+                        if name and isinstance(name, str):
+                            args = obj.get("arguments") or obj.get("action_input") or obj.get("parameters") or obj.get("args") or {}
+                            if isinstance(args, str):
+                                args = cls._parse_arguments(args)
+                            tool_calls.append({
+                                "id": f"call_{name}_{uuid4().hex[:8]}",
+                                "name": name,
+                                "arguments": args if isinstance(args, dict) else {"target": str(args)},
+                            })
+                except Exception:
+                    pass
+
+        # Format 4 : ReAct textuel Action: <tool>\nAction Input: <input>
+        if not tool_calls and "Action:" in content:
+            react_matches = re.findall(r"Action:\s*([a-zA-Z0-9_-]+)\s*(?:\n|\r\n)Action Input:\s*(.+?)(?=(?:\nAction:|\Z))", content, re.DOTALL | re.IGNORECASE)
+            for act_name, act_input in react_matches:
+                act_name = act_name.strip()
+                parsed_args = cls._parse_arguments(act_input.strip())
+                if not isinstance(parsed_args, dict):
+                    parsed_args = {"target": act_input.strip().strip("\"'")}
+                tool_calls.append({
+                    "id": f"call_{act_name}_{uuid4().hex[:8]}",
+                    "name": act_name,
+                    "arguments": parsed_args,
+                })
+
         return tool_calls
 
     def chat(

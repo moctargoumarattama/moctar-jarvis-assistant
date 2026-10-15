@@ -1,0 +1,5 @@
+.pwa-install{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-width:34px;min-height:34px;border:1px solid #315663;border-radius:8px;padding:7px 10px;background:#132734;color:var(--cyan,#5ed9ec);font:11px var(--sans,system-ui);white-space:nowrap}
+.pwa-install:hover{background:#193b49}.pwa-install:focus-visible,.pwa-help button:focus-visible{outline:2px solid #5ed9ec;outline-offset:3px}.pwa-install svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.pwa-help{max-width:min(400px,calc(100vw - 32px));border:1px solid #315663;border-radius:14px;padding:24px;background:#111722;color:#e5edf8;box-shadow:0 16px 64px #0008;font:14px/1.6 var(--sans,system-ui)}
+.pwa-help::backdrop{background:#050b16b8}.pwa-help h2{font-size:18px;margin:0 0 12px}.pwa-help p{margin:0 0 14px;color:#b6c5d9}.pwa-help button{display:block;margin-left:auto;border:1px solid #315663;border-radius:7px;padding:7px 14px;background:#132734;color:#5ed9ec;font:inherit;cursor:pointer}
+@media(max-width:640px){.pwa-install{padding:7px;gap:0}.pwa-install span{display:none}}

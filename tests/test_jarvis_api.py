@@ -218,5 +218,65 @@ class TestJarvisAPI(unittest.TestCase):
                 llm.assert_called_once()
 
 
+    def test_open_site_smart_extraction_and_alias(self) -> None:
+        import actions
+        # 1. Target standard youtube
+        res_yt = actions.execute_tool("open_site", {"target": "youtube"})
+        self.assertTrue(res_yt["success"])
+        self.assertEqual(res_yt["data"]["action"], "open_browser")
+        self.assertEqual(res_yt["data"]["url"], "https://www.youtube.com")
+
+        # 2. Argument alias 'url'
+        res_url = actions.execute_tool("open_site", {"url": "https://babamarket.ma"})
+        self.assertTrue(res_url["success"])
+        self.assertEqual(res_url["data"]["url"], "https://babamarket.ma")
+
+        # 3. Argument alias 'query' pour recherche
+        res_query = actions.execute_tool("open_site", {"query": "python test"})
+        self.assertTrue(res_query["success"])
+        self.assertIn("google.com/search?q=python+test", res_query["data"]["url"])
+
+        # 4. open_app ciblant un site -> délégation automatique transparente
+        res_app_site = actions.execute_tool("open_app", {"target": "youtube"})
+        self.assertTrue(res_app_site["success"])
+        self.assertEqual(res_app_site["data"]["action"], "open_browser")
+        self.assertEqual(res_app_site["data"]["url"], "https://www.youtube.com")
+
+    def test_jarvis_query_fast_path_open_browser(self) -> None:
+        with self.client as client:
+            # Fast-path pour ouverture YouTube
+            response = client.post(
+                "/api/jarvis/query",
+                json={"prompt": "ouvre youtube"},
+            )
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["action"], "open_browser")
+            self.assertEqual(data["url"], "https://www.youtube.com")
+            self.assertIn("YouTube", data["reply"])
+            self.assertIn("https://www.youtube.com", data["reply"])
+
+            # Fast-path avec faute de frappe fréquente "ouve"
+            response_typo = client.post(
+                "/api/jarvis/query",
+                json={"prompt": "ouve google"},
+            )
+            self.assertEqual(response_typo.status_code, 200)
+            data_typo = response_typo.json()
+            self.assertEqual(data_typo["status"], "success")
+            self.assertEqual(data_typo["action"], "open_browser")
+            self.assertEqual(data_typo["url"], "https://www.google.com")
+
+    def test_wake_word_elements_in_html(self) -> None:
+        index_path = Path("static/index.html")
+        content = index_path.read_text(encoding="utf-8")
+        self.assertIn("jarvis-wakeword-toggle", content)
+        self.assertIn("jarvis-wakeword-badge", content)
+        self.assertIn("Yo Moctar", content)
+        self.assertIn("EN VEILLE ÉCOUTE", content)
+
+
 if __name__ == "__main__":
     unittest.main()
+

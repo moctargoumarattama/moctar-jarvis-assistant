@@ -421,6 +421,18 @@ def execute_tool(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> 
             error="TypeError: arguments must be a dictionary",
         )
 
+    # Normalisation et aliasing intelligent des arguments pour petits modèles
+    if "target" not in raw_args:
+        for alias in ("url", "site", "query", "name", "app", "target_url"):
+            if alias in raw_args and raw_args[alias]:
+                raw_args["target"] = raw_args[alias]
+                break
+    if "query" not in raw_args:
+        for alias in ("target", "name", "terme", "recherche"):
+            if alias in raw_args and raw_args[alias]:
+                raw_args["query"] = raw_args[alias]
+                break
+
     # Inspection de la signature pour validation
     sig = inspect.signature(target_func)
     filtered_kwargs: Dict[str, Any] = {}
@@ -478,6 +490,19 @@ def execute_tool(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> 
         if isinstance(raw_result, dict) and "success" in raw_result and "action" in raw_result:
             return raw_result
 
+        # Cas spécifique open_site retournant une chaîne historique
+        if tool_name == "open_site":
+            from actions.web_actions import resolve_site_url
+            target_str = filtered_kwargs.get("target") or filtered_kwargs.get("url") or filtered_kwargs.get("site") or filtered_kwargs.get("query") or ""
+            target_url, title = resolve_site_url(target_str)
+            return format_action_result(
+                action=tool_name,
+                success=True,
+                message=f"🌐 Ouverture de {title} ({target_url}) dans le navigateur.",
+                data={"action": "open_browser", "url": target_url, "title": title, "result": str(raw_result)},
+                error=None,
+            )
+
         # Encapsulation automatique pour les fonctions historiques
         return format_action_result(
             action=tool_name,
@@ -486,6 +511,7 @@ def execute_tool(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> 
             data=raw_result,
             error=None,
         )
+
     except Exception as exc:
         logger.exception("Erreur lors de l'exécution de l'outil %s", tool_name)
         return format_action_result(

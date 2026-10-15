@@ -78,6 +78,13 @@ class OutgoingDeployTests(unittest.TestCase):
         self.assertIn('ADMIN_PHONE_NUMBER=""', updated)
         self.assertIn('PORT=3001', updated)
 
+    def test_https_backend_address_is_synced_without_changing_gateway_port(self):
+        updated = gateway_environment('PORT=3001\nOTHER_SECRET=preserved\n', {
+            'NOC_API_BASE_URL': 'https://127.0.0.1:5050',
+        }, 'private-outgoing-test')
+        self.assertIn('NOC_API_BASE_URL="https://127.0.0.1:5050"', updated)
+        self.assertIn('PORT=3001\nOTHER_SECRET=preserved\n', updated)
+
     def test_multiple_admins_are_synced_and_explicit_empty_revokes_previous_list(self):
         updated = gateway_environment('PORT=3001\n', {
             'ADMIN_PHONE_NUMBER': '', 'WHATSAPP_ADMIN_NUMBERS': '+212600000001,+22790000000',

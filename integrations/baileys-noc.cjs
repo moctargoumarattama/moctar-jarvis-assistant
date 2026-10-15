@@ -33,6 +33,18 @@ function unwrap(content) {
   return null;
 }
 
+function localTlsHost(hostname) {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host === '::1') return true;
+  // Literal private addresses only: a public DNS name must retain TLS validation.
+  const octets = host.split('.').map(Number);
+  if (octets.length !== 4 || !/^\d+\.\d+\.\d+\.\d+$/.test(host) || !octets.every(value => Number.isInteger(value) && value >= 0 && value <= 255)) return false;
+  return octets[0] === 127 || octets[0] === 10 ||
+    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168) ||
+    (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127);
+}
+
 function destination(baseUrl) {
   const base = new URL(baseUrl);
   if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash || !['', '/'].includes(base.pathname)) throw new BridgeError('configuration_url');
@@ -50,7 +62,9 @@ function post(url, headers, body, signal, timeoutMs, maximum) {
     let settled = false;
     let incoming;
     const transport = url.protocol === 'https:' ? https : http;
-    const request = transport.request(url, { method: 'POST', headers, signal, agent: false }, response => {
+    const requestOptions = { method: 'POST', headers, signal, agent: false };
+    if (url.protocol === 'https:') requestOptions.rejectUnauthorized = !localTlsHost(url.hostname);
+    const request = transport.request(url, requestOptions, response => {
       incoming = response;
       let bytes = 0;
       response.on('data', chunk => {
@@ -105,7 +119,7 @@ function attachNocWebhook(sock, options = {}) {
   const sessionId = String(options.sessionId || process.env.NOC_WHATSAPP_SESSION_ID || '1');
   const token = options.webhookToken || process.env.NOC_WHATSAPP_WEBHOOK_TOKEN || '';
   if ([...adminPhones].some(value => !/^\d{8,15}$/.test(value)) || !/^[A-Za-z0-9_.:-]{1,64}$/.test(sessionId) || !/^[\x21-\x7e]{1,512}$/.test(token)) throw new BridgeError('configuration_identity');
-  const base = destination(options.baseUrl || 'http://127.0.0.1:5050');
+  const base = destination(options.baseUrl || process.env.NOC_API_BASE_URL || 'http://127.0.0.1:5050');
   const maximum = Math.min(MAX_AUDIO_BYTES, Math.max(1, Number(options.maxAudioBytes) || MAX_AUDIO_BYTES));
   const timeoutMs = Math.min(30000, Math.max(1000, Number(options.timeoutMs) || 15000));
   const maxQueued = Math.min(16, Math.max(1, Number(options.maxQueued) || 8));

@@ -1,3 +1,4 @@
+import re
 import subprocess
 import time
 import webbrowser
@@ -138,15 +139,68 @@ def open_url_smart(
         return f"Impossible d'ouvrir le site : {exc}"
 
 
-def open_site(target):
-    url = config.IMPORTANT_URLS.get(target)
-    if not url:
-        return "Je ne connais pas encore ce site."
+def resolve_site_url(target: str = "") -> tuple[str, str]:
+    """Résout une cible en URL absolue et titre de page avec table intelligente."""
+    raw = (target or "").strip()
+    if not raw:
+        return "https://www.google.com", "Google"
 
-    return open_url_smart(
-        url,
+    cleaned = raw.strip("\"'").strip()
+    # Nettoyage des tournures de commande "ouvre youtube", "cherche...", etc.
+    cleaned = re.sub(r"^(?:ouvre|ouvrez|lance|lancez|cherche|cherchez|va sur|navigue vers|go to)\s+(?:le site\s+|l'application\s+|l'app\s+|la page\s+)?", "", cleaned, flags=re.IGNORECASE).strip()
+    if not cleaned:
+        cleaned = raw.strip()
+    lowered = cleaned.lower()
+
+    if lowered.startswith("http://") or lowered.startswith("https://"):
+        return cleaned, cleaned
+
+    direct_map = {
+        "youtube": ("https://www.youtube.com", "YouTube"),
+        "google": ("https://www.google.com", "Google"),
+        "github": ("https://github.com", "GitHub"),
+        "wikipedia": ("https://fr.wikipedia.org", "Wikipédia"),
+        "gmail": ("https://mail.google.com", "Gmail"),
+        "whatsapp": ("https://web.whatsapp.com", "WhatsApp Web"),
+        "pythonanywhere": ("https://www.pythonanywhere.com", "PythonAnywhere"),
+    }
+    for k, v in direct_map.items():
+        if lowered == k or lowered.startswith(k + " ") or lowered.endswith(" " + k):
+            return v
+
+    if lowered in config.IMPORTANT_URLS:
+        return config.IMPORTANT_URLS[lowered], cleaned.capitalize()
+
+    # Détection de domaine avec extension (ex: babamarket.ma, facebook.com, site.fr)
+    if re.match(r"^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(/.*)?$", cleaned) or re.match(r"^localhost(:\d+)?(/.*)?$", cleaned):
+        return f"https://{cleaned}", cleaned
+
+    # Terme générique ou recherche Web
+    return f"https://www.google.com/search?q={quote_plus(cleaned)}", f"Recherche Google: {cleaned}"
+
+
+def open_site(target: str = "", url: str = "", site: str = "", query: str = "", name: str = "", as_dict: bool = False, **kwargs):
+    """Ouvre un site web de manière universelle et flexible."""
+    chosen_target = target or url or site or query or name or ""
+    if not chosen_target and kwargs.get("_raw_prompt"):
+        chosen_target = kwargs["_raw_prompt"]
+
+    target_url, title = resolve_site_url(chosen_target)
+
+    status = open_url_smart(
+        target_url,
         browser=config.WEB_SETTINGS["default_browser"],
     )
+
+    if as_dict:
+        return {
+            "action": "open_browser",
+            "url": target_url,
+            "title": title,
+            "status": status,
+        }
+
+    return status
 
 
 def search_google(query):
