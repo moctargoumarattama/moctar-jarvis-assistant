@@ -637,11 +637,14 @@ class WhatsAppController:
             LOGGER.error("Réponse WhatsApp impossible: client HTTP non initialisé")
             return False
         number = normalize_phone(recipient or self.settings.admin_phone_number)
-        recipient_value = number + "@s.whatsapp.net" if self.settings.whatsapp_send_to_field == "jid" else number
-        payload = {
-            self.settings.whatsapp_send_to_field: recipient_value,
-            self.settings.whatsapp_send_text_field: response[:4096],
-        }
+        jid = f"{number}@s.whatsapp.net"
+        text = response[:4096]
+        recipient_value = jid if self.settings.whatsapp_send_to_field == "jid" else number
+        payload = {"to": number, "jid": jid, "number": number,
+                   "text": text, "message": text}
+        # Preserve custom gateway aliases while always sending the standard contract.
+        payload[self.settings.whatsapp_send_to_field] = recipient_value
+        payload[self.settings.whatsapp_send_text_field] = text
         url = self.settings.whatsapp_send_url.replace(
             "{session_id}", quote(self.settings.whatsapp_session_id, safe=""))
         LOGGER.info("WhatsApp envoi passerelle: POST %s destinataire=%s", url, recipient_value)

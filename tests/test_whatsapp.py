@@ -262,8 +262,13 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json={"ok": True})
         self.controller.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         self.assertTrue(await self.controller._send_reply("✅ état opérationnel"))
-        self.assertEqual(received, {"jid": ADMIN + "@s.whatsapp.net",
-                                    "text": "✅ état opérationnel"})
+        self.assertEqual(received, {
+            "to": ADMIN,
+            "jid": ADMIN + "@s.whatsapp.net",
+            "number": ADMIN,
+            "text": "✅ état opérationnel",
+            "message": "✅ état opérationnel",
+        })
 
     async def test_text_worker_starts_even_when_voice_is_disabled(self) -> None:
         controller = WhatsAppController(replace(self.settings, voice_enabled=False), self.runtime, self.restart)
