@@ -480,8 +480,16 @@ class JarvisHeadlessBridge:
         return await asyncio.to_thread(self.execute_prompt, user_input, source, session_id)
 
     def get_status(self) -> Dict[str, Any]:
-        """Renvoie l'état du moteur IA (Ollama en ligne/hors-ligne, modèle, outils, mémoire)."""
+        """Renvoie l'état du moteur IA, du fournisseur actif, des outils et de la mémoire."""
         ai_stat = ai_brain.get_ai_status()
+        online = bool(ai_stat.get("online"))
+        mode = ai_stat.get("mode") or ("ollama" if online else "local")
+        provider = ai_stat.get("provider") or mode
+        active_model = ai_stat.get("model") if mode == "gemini" else self.model
+        active_base_url = (
+            ai_stat.get("base_url") or "https://generativelanguage.googleapis.com"
+            if mode == "gemini" else self.base_url
+        )
         mem_counts = {"memories": 0, "messages": 0, "sessions": 0}
         try:
             with self.memory._get_connection() as conn:
@@ -496,11 +504,13 @@ class JarvisHeadlessBridge:
             logger.warning("Impossible de lire les compteurs mémoire : %s", exc)
 
         return {
-            "status": "ready" if ai_stat.get("online") else "degraded",
-            "model": self.model,
-            "base_url": self.base_url,
-            "ollama_online": bool(ai_stat.get("online")),
-            "model_offline": not bool(ai_stat.get("online")),
+            "status": "ready" if online else "degraded",
+            "provider": provider,
+            "mode": mode,
+            "model": active_model,
+            "base_url": active_base_url,
+            "ollama_online": bool(ai_stat.get("ollama_online", online)),
+            "model_offline": not online,
             "autonomous_ready": True,
             "autonomous_tasks_count": len(actions.TOOL_DISPATCHER),
             "tools_count": len(actions.TOOL_DISPATCHER),

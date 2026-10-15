@@ -1,9 +1,13 @@
 import json
 import os
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from urllib.error import HTTPError, URLError
 
 import ai_brain
 
@@ -75,7 +79,7 @@ class AiBrainConfigTests(unittest.TestCase):
             {"OLLAMA_MODEL": "qwen2.5:1.5b", "OPENAI_MODEL": "gpt-4o-mini"},
             clear=True,
         ):
-            brain = ai_brain.AIBrain()
+            brain = ai_brain.AIBrain(api_type="auto")
 
         self.assertEqual("ollama", brain.api_type)
         self.assertEqual("qwen2.5:1.5b", brain.model)
@@ -106,7 +110,7 @@ class AiBrainConfigTests(unittest.TestCase):
             },
             clear=True,
         ):
-            brain = ai_brain.AIBrain()
+            brain = ai_brain.AIBrain(api_type="auto")
 
         self.assertEqual("openai", brain.api_type)
         self.assertEqual("gpt-4o-mini", brain.model)
@@ -132,7 +136,7 @@ class AiBrainConfigTests(unittest.TestCase):
             },
             clear=True,
         ):
-            brain = ai_brain.AIBrain()
+            brain = ai_brain.AIBrain(api_type="auto")
 
         self.assertEqual("ollama", brain.api_type)
         self.assertEqual("qwen2.5:1.5b", brain.model)
@@ -148,7 +152,7 @@ class AiBrainConfigTests(unittest.TestCase):
             },
             clear=True,
         ):
-            brain = ai_brain.AIBrain()
+            brain = ai_brain.AIBrain(api_type="auto")
 
         self.assertEqual("ollama", brain.api_type)
         self.assertEqual("http://192.168.11.103:11434", brain.base_url)
@@ -374,6 +378,293 @@ class AiBrainConfigTests(unittest.TestCase):
         self.assertEqual("message ameliore", answer)
         ask_mock.assert_called_once()
         self.assertIn("Contexte additionnel: scheduler", ask_mock.call_args.args[0])
+
+class GeminiBrainTests(unittest.TestCase):
+    def setUp(self):
+        self.env = patch.dict(os.environ, {
+            "AI_PROVIDER": "hybrid",
+            "GEMINI_API_KEY": "unit-test-gemini-key",
+            "GEMINI_MODEL": "gemini-test-model",
+            "OLLAMA_MODEL": "qwen2.5:1.5b",
+            "OLLAMA_BASE_URL": "http://localhost:11434",
+        }, clear=True)
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.dotenv = patch("ai_brain.load_dotenv")
+        self.dotenv.start()
+        self.addCleanup(self.dotenv.stop)
+        self.genai_patch = patch("ai_brain.genai")
+        self.genai = self.genai_patch.start()
+        self.addCleanup(self.genai_patch.stop)
+        self.client = self.genai.Client.return_value
+        self.client.models.generate_content.return_value = self.gemini_response("Reponse Gemini.")
+
+    @staticmethod
+    def gemini_response(text=None, function_call=None):
+        part = SimpleNamespace(text=text, function_call=function_call, thought=False)
+        candidate = SimpleNamespace(content=SimpleNamespace(parts=[part]), finish_reason="STOP")
+        return SimpleNamespace(candidates=[candidate])
+
+    @staticmethod
+    def ollama_response(raw_payload):
+        response = Mock()
+        response.read.return_value = json.dumps(raw_payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=None)
+        return response
+
+    def test_provider_and_separate_models_are_loaded_from_environment(self):
+        brain = ai_brain.AIBrain()
+
+        self.assertEqual("hybrid", brain.ai_provider)
+        self.assertEqual("qwen2.5:1.5b", brain.model)
+        self.assertEqual("gemini-test-model", brain.gemini_model)
+        self.genai.Client.assert_called_once()
+        self.assertEqual("unit-test-gemini-key", self.genai.Client.call_args.kwargs["api_key"])
+
+    def test_hybrid_prefers_successful_ollama_without_cloud_inference(self):
+        brain = ai_brain.AIBrain(api_type="hybrid")
+        response = self.ollama_response({"message": {"content": "Reponse locale."}})
+        with patch("ai_brain.urlopen", return_value=response) as request:
+            result = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+
+        self.assertEqual("Reponse locale.", result["content"])
+        self.assertEqual("stop", result["finish_reason"])
+        self.assertLessEqual(request.call_args.kwargs["timeout"], 15.0)
+        self.client.models.generate_content.assert_not_called()
+
+    def test_hybrid_uses_gemini_for_local_connection_timeout_http_and_json_failures(self):
+        invalid_json = self.ollama_response({})
+        invalid_json.read.return_value = b"not-json"
+        failures = (
+            URLError("Ollama offline"),
+            TimeoutError("timed out"),
+            HTTPError("http://localhost:11434/api/chat", 500, "failed", {}, None),
+            invalid_json,
+        )
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                brain = ai_brain.AIBrain(api_type="hybrid")
+                self.client.models.generate_content.reset_mock()
+                kwargs = {"side_effect": failure} if isinstance(failure, Exception) else {"return_value": failure}
+                with patch("ai_brain.urlopen", **kwargs):
+                    result = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+
+                self.assertEqual("Reponse Gemini.", result["content"])
+                self.assertEqual("stop", result["finish_reason"])
+                self.assertNotIn("Ollama", result["content"])
+                self.client.models.generate_content.assert_called_once()
+
+    def test_hybrid_uses_gemini_for_invalid_local_payload(self):
+        brain = ai_brain.AIBrain(api_type="hybrid")
+        with patch("ai_brain.urlopen", return_value=self.ollama_response({"unexpected": True})):
+            result = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+
+        self.assertEqual("Reponse Gemini.", result["content"])
+        self.client.models.generate_content.assert_called_once()
+
+    def test_hybrid_uses_gemini_when_local_backend_returns_an_error_or_crashes(self):
+        for kwargs in (
+            {"return_value": {"content": "Ollama inaccessible", "tool_calls": [], "finish_reason": "error"}},
+            {"side_effect": RuntimeError("local crash")},
+        ):
+            with self.subTest(backend=kwargs):
+                brain = ai_brain.AIBrain(api_type="hybrid")
+                self.client.models.generate_content.reset_mock()
+                with patch.object(brain, "_chat_ollama", **kwargs):
+                    result = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+
+                self.assertEqual("Reponse Gemini.", result["content"])
+                self.client.models.generate_content.assert_called_once()
+
+    def test_hybrid_preserves_a_shorter_caller_timeout(self):
+        brain = ai_brain.AIBrain(api_type="hybrid", timeout=0.25)
+        with patch("ai_brain.urlopen", side_effect=TimeoutError("local timeout")) as request:
+            result = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+
+        self.assertEqual("Reponse Gemini.", result["content"])
+        self.assertLessEqual(request.call_args.kwargs["timeout"], 0.25)
+        self.assertEqual(0.25, brain.timeout)
+
+    def test_hybrid_bounds_real_wait_even_if_local_call_ignores_socket_timeout(self):
+        brain = ai_brain.AIBrain(api_type="hybrid", timeout=60)
+        release = threading.Event()
+
+        def stalled_local(*args, **kwargs):
+            release.wait(2.0)
+            return {"content": "Trop tard.", "tool_calls": [], "finish_reason": "stop"}
+
+        try:
+            with patch("ai_brain.HYBRID_OLLAMA_TIMEOUT_SECONDS", 0.03), \
+                    patch.object(brain, "_chat_ollama", side_effect=stalled_local):
+                started = time.monotonic()
+                result = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+                duration = time.monotonic() - started
+        finally:
+            release.set()
+
+        self.assertEqual("Reponse Gemini.", result["content"])
+        self.assertLess(duration, 0.75)
+        self.assertEqual(60.0, brain.timeout)
+
+    def test_gemini_only_never_calls_ollama(self):
+        brain = ai_brain.AIBrain(api_type="gemini")
+        with patch("ai_brain.urlopen") as local:
+            result = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+
+        self.assertEqual("Reponse Gemini.", result["content"])
+        self.client.models.generate_content.assert_called_once()
+        local.assert_not_called()
+
+    def test_explicit_ollama_never_falls_back_to_gemini(self):
+        brain = ai_brain.AIBrain(api_type="ollama")
+        with patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")):
+            result = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+
+        self.assertEqual("error", result["finish_reason"])
+        self.client.models.generate_content.assert_not_called()
+
+    def test_missing_key_or_sdk_preserves_the_local_backend(self):
+        for missing_sdk in (False, True):
+            with self.subTest(missing_sdk=missing_sdk):
+                context = patch("ai_brain.genai", None) if missing_sdk else patch.dict(os.environ, {"GEMINI_API_KEY": ""})
+                with context:
+                    brain = ai_brain.AIBrain(api_type="hybrid")
+                    response = self.ollama_response({"message": {"content": "Local disponible."}})
+                    with patch("ai_brain.urlopen", return_value=response):
+                        result = brain.chat([{"role": "user", "content": "Explique le solaire."}])
+
+                self.assertEqual("Local disponible.", result["content"])
+                self.client.models.generate_content.assert_not_called()
+
+    def test_gemini_preserves_tool_schemas_calls_and_observations(self):
+        brain = ai_brain.AIBrain(api_type="gemini")
+        call = SimpleNamespace(id="gemini-call-1", name="create_note", args={"target": "rapport solaire"})
+        self.client.models.generate_content.side_effect = [
+            self.gemini_response(function_call=call),
+            self.gemini_response("Note creee."),
+        ]
+        tools = [{"type": "function", "function": {
+            "name": "create_note", "description": "Cree une note locale.",
+            "parameters": {"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]},
+        }}]
+        messages = [{"role": "system", "content": "Tu es Jarvis."}, {"role": "user", "content": "Cree la note."}]
+        first = brain.chat(messages, tools=tools)
+
+        self.assertEqual("tool_calls", first["finish_reason"])
+        self.assertEqual([{"id": "gemini-call-1", "name": "create_note", "arguments": {"target": "rapport solaire"}}], first["tool_calls"])
+        request = self.client.models.generate_content.call_args.kwargs
+        self.assertEqual("gemini-test-model", request["model"])
+        self.assertEqual("Tu es Jarvis.", request["config"]["system_instruction"])
+        declaration = request["config"]["tools"][0]["function_declarations"][0]
+        self.assertEqual("create_note", declaration["name"])
+        self.assertEqual(tools[0]["function"]["parameters"], declaration["parameters_json_schema"])
+        self.assertTrue(request["config"]["automatic_function_calling"]["disable"])
+        self.assertEqual([{"role": "user", "parts": [{"text": "Cree la note."}]}], request["contents"])
+
+        observation = {"success": True, "message": "Note creee."}
+        messages.extend([
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "gemini-call-1", "type": "function", "function": {"name": "create_note", "arguments": '{"target": "rapport solaire"}'}}]},
+            {"role": "tool", "name": "create_note", "tool_call_id": "gemini-call-1", "content": json.dumps(observation)},
+        ])
+        second = brain.chat(messages, tools=tools)
+
+        self.assertEqual("Note creee.", second["content"])
+        contents = self.client.models.generate_content.call_args.kwargs["contents"]
+        self.assertEqual("model", contents[1]["role"])
+        self.assertEqual("create_note", contents[1]["parts"][0]["function_call"]["name"])
+        response = contents[2]["parts"][0]["function_response"]
+        self.assertEqual("create_note", response["name"])
+        self.assertEqual(observation, response["response"])
+
+    def test_legacy_ask_helper_keeps_raw_tool_response_with_gemini_fallback(self):
+        call = SimpleNamespace(id="gemini-time", name="time", args={})
+        self.client.models.generate_content.return_value = self.gemini_response(function_call=call)
+        tools = [{"type": "function", "function": {"name": "time", "parameters": {"type": "object", "properties": {}}}}]
+        with patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")):
+            result = ai_brain.ask_ollama("Quelle heure est-il ?", tools=tools)
+
+        self.assertEqual("tool_calls", result["done_reason"])
+        self.assertEqual("time", result["message"]["tool_calls"][0]["function"]["name"])
+        self.assertEqual({}, result["message"]["tool_calls"][0]["function"]["arguments"])
+        self.client.close.assert_called_once()
+
+    def test_legacy_ask_falls_back_when_local_message_has_no_content_or_tools(self):
+        for content in (None, ""):
+            with self.subTest(content=content):
+                self.client.models.generate_content.reset_mock()
+                response = self.ollama_response({"message": {"content": content}})
+                with patch("ai_brain.urlopen", return_value=response):
+                    result = ai_brain.ask_ollama("Explique le fonctionnement du solaire.")
+
+                self.assertEqual("Reponse Gemini.", result)
+                self.client.models.generate_content.assert_called_once()
+
+    def test_explicit_environment_provider_wins_over_cloud_settings_for_remote_ollama(self):
+        for provider in ("hybrid", "ollama"):
+            with self.subTest(provider=provider), patch.dict(os.environ, {
+                "AI_PROVIDER": provider,
+                "OLLAMA_BASE_URL": "http://192.168.11.103:8080",
+                "OPENAI_BASE_URL": "https://api.openai.com/v1",
+                "OPENAI_API_KEY": "test-openai-key",
+                "OPENAI_MODEL": "gpt-4o-mini",
+            }):
+                brain = ai_brain.AIBrain()
+
+                self.assertEqual(provider, brain.ai_provider)
+                self.assertEqual("ollama", brain.api_type)
+                self.assertEqual("http://192.168.11.103:8080", brain.base_url)
+                self.assertEqual("qwen2.5:1.5b", brain.model)
+
+    def test_default_hybrid_provider_takes_precedence_over_legacy_openai_environment(self):
+        with patch.dict(os.environ, {
+            "OPENAI_BASE_URL": "https://api.openai.com/v1",
+            "OPENAI_API_KEY": "test-openai-key",
+            "OPENAI_MODEL": "gpt-4o-mini",
+            "OLLAMA_MODEL": "qwen2.5:1.5b",
+        }, clear=True), patch.object(ai_brain.config, "ai_provider", "hybrid"):
+            brain = ai_brain.AIBrain()
+
+        self.assertEqual("hybrid", brain.ai_provider)
+        self.assertEqual("ollama", brain.api_type)
+        self.assertEqual("qwen2.5:1.5b", brain.model)
+        self.assertNotEqual("https://api.openai.com/v1", brain.base_url)
+
+    def test_local_brain_general_answers_use_gemini_when_ollama_is_offline(self):
+        with patch("ai_brain.can_answer_general_questions", return_value=True), \
+                patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")):
+            result = ai_brain.LocalBrain().answer("Explique le fonctionnement d'un panneau solaire")
+
+        self.assertEqual("Reponse Gemini.", result)
+        self.client.models.generate_content.assert_called_once()
+
+    def test_hybrid_status_reports_cloud_readiness_when_ollama_is_offline(self):
+        with patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")):
+            status = ai_brain.get_ai_status()
+
+        self.assertTrue(status["online"])
+        self.assertFalse(status["ollama_online"])
+        self.assertEqual("gemini", status["mode"])
+        self.assertEqual("gemini-test-model", status["model"])
+        self.client.models.generate_content.assert_not_called()
+
+    def test_gemini_status_does_not_probe_ollama_or_spend_api_quota(self):
+        with patch.dict(os.environ, {"AI_PROVIDER": "gemini"}), patch("ai_brain.urlopen") as local:
+            status = ai_brain.get_ai_status()
+
+        self.assertTrue(status["online"])
+        self.assertEqual("gemini", status["mode"])
+        local.assert_not_called()
+        self.client.models.generate_content.assert_not_called()
+
+    def test_hybrid_status_stays_offline_without_cloud_credentials(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}), \
+                patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")):
+            status = ai_brain.get_ai_status()
+
+        self.assertFalse(status["online"])
+        self.client.models.generate_content.assert_not_called()
+
 
 class LocalBrainTests(unittest.TestCase):
     def setUp(self):

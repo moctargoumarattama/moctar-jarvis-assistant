@@ -52,6 +52,27 @@ class JarvisHeadlessBridgeTests(unittest.TestCase):
         self.assertIn("tools_count", status)
         self.assertIn("memory", status)
         self.assertGreater(status["tools_count"], 10)
+        self.assertTrue(status["ollama_online"])
+
+    def test_gemini_status_reports_ready_when_ollama_is_offline(self):
+        for provider in ("gemini", "hybrid"):
+            with self.subTest(provider=provider), patch("ai_brain.get_ai_status", return_value={
+                "provider": provider,
+                "mode": "gemini",
+                "online": True,
+                "ollama_online": False,
+                "model": "gemini-2.0-flash",
+                "base_url": "https://generativelanguage.googleapis.com",
+            }):
+                status = self.bridge.get_status()
+
+            self.assertEqual("ready", status["status"])
+            self.assertEqual(provider, status["provider"])
+            self.assertEqual("gemini", status["mode"])
+            self.assertEqual("gemini-2.0-flash", status["model"])
+            self.assertEqual("https://generativelanguage.googleapis.com", status["base_url"])
+            self.assertFalse(status["ollama_online"])
+            self.assertFalse(status["model_offline"])
 
     def test_execute_prompt_empty(self):
         res = self.bridge.execute_prompt("")

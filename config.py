@@ -278,7 +278,13 @@ OLLAMA_MODEL = "qwen2.5:1.5b"
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_TIMEOUT_SECONDS = 120.0
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+ai_provider = os.getenv("AI_PROVIDER", "hybrid").strip().lower()
+gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash"
+
 AI_SETTINGS = {
+    "ai_provider": ai_provider,
+    "gemini_model": gemini_model,
     "default_model": os.getenv("OLLAMA_MODEL", OLLAMA_MODEL).strip() or OLLAMA_MODEL,
     "base_url": os.getenv("OLLAMA_BASE_URL", OLLAMA_BASE_URL).strip() or OLLAMA_BASE_URL,
     "enable_general_ai": _optional_bool_env("MOCTAR_ENABLE_GENERAL_AI", True),

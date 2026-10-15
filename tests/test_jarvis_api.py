@@ -3,10 +3,13 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 import json
+import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
+from urllib.error import URLError
 
 from fastapi.testclient import TestClient
 
@@ -329,6 +332,52 @@ class TestJarvisAPI(unittest.TestCase):
                 self.assertEqual(data["status"], "success")
                 self.assertTrue(data.get("model_offline"))
                 self.assertIn("Dimensionnement Solaire", data["reply"])
+
+    def test_jarvis_query_uses_gemini_when_ollama_is_offline(self) -> None:
+        expected_reply = "Un panneau solaire transforme la lumiere en electricite."
+        sdk_response = SimpleNamespace(candidates=[SimpleNamespace(
+            content=SimpleNamespace(parts=[SimpleNamespace(text=expected_reply, thought=False, function_call=None)]),
+            finish_reason="STOP",
+        )])
+        with patch("ai_brain.load_dotenv"), patch.dict(os.environ, {
+            "AI_PROVIDER": "hybrid", "GEMINI_API_KEY": "test-gemini-key",
+            "GEMINI_MODEL": "gemini-test-model",
+        }), patch("ai_brain.genai") as genai, \
+                patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")) as ollama:
+            gemini = genai.Client.return_value.models.generate_content
+            gemini.return_value = sdk_response
+            with self.client as client:
+                response = client.post("/api/jarvis/query", json={"prompt": "Explique simplement le principe photovoltaïque."})
+
+        self.assertEqual(200, response.status_code)
+        data = response.json()
+        self.assertEqual("success", data["status"])
+        self.assertEqual(expected_reply, data["reply"])
+        self.assertFalse(data["model_offline"])
+        self.assertIsNone(data["model_offline_details"])
+        self.assertNotIn("Ollama", data["reply"])
+        self.assertGreaterEqual(ollama.call_count, 1)
+        gemini.assert_called_once()
+        self.assertEqual("gemini-test-model", gemini.call_args.kwargs["model"])
+
+    def test_double_provider_failure_keeps_autonomous_solar_task(self) -> None:
+        with patch("ai_brain.load_dotenv"), patch.dict(os.environ, {
+            "AI_PROVIDER": "hybrid", "GEMINI_API_KEY": "test-gemini-key",
+        }), patch("ai_brain.genai") as genai, \
+                patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")):
+            gemini = genai.Client.return_value.models.generate_content
+            gemini.side_effect = RuntimeError("Gemini unavailable")
+            with self.client as client:
+                response = client.post("/api/jarvis/query", json={"prompt": "dimensionne solaire 10 kwh"})
+
+        self.assertEqual(200, response.status_code)
+        data = response.json()
+        self.assertEqual("success", data["status"])
+        self.assertTrue(data["model_offline"])
+        self.assertTrue(data["autonomous_available"])
+        self.assertIn("Dimensionnement Solaire", data["reply"])
+        self.assertIn("Wc", data["reply"])
+        gemini.assert_called_once()
 
 
 if __name__ == "__main__":

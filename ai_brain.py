@@ -10,6 +10,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 import socket
+from threading import Event, Thread
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -18,6 +19,11 @@ from uuid import uuid4
 
 import config
 from knowledge_library import KnowledgeLibrary
+
+try:
+    from google import genai
+except ImportError:
+    genai = None
 
 try:
     from dotenv import load_dotenv
@@ -32,6 +38,7 @@ OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", str(config.OL
 OLLAMA_MAX_PREDICT = 512
 OLLAMA_TEMPERATURE = 0.15
 OLLAMA_STOP = ("Observation:", "<|im_end|>", "\n\nUser:")
+HYBRID_OLLAMA_TIMEOUT_SECONDS = 15.0
 logger = logging.getLogger("jarvis.ai")
 
 
@@ -41,6 +48,35 @@ class OllamaRequestError(RuntimeError):
 
 class OllamaTimeoutError(OllamaRequestError):
     pass
+
+
+def _ai_provider():
+    provider = os.getenv("AI_PROVIDER", config.ai_provider).strip().lower()
+    return provider if provider in {"ollama", "gemini", "hybrid"} else "hybrid"
+
+
+def _with_ollama_deadline(callback, timeout):
+    """Bound the whole local request, including connect and response decoding."""
+    completed = Event()
+    outcome = {}
+
+    def run():
+        try:
+            outcome["result"] = callback()
+        except Exception as exc:
+            outcome["error"] = exc
+        finally:
+            completed.set()
+
+    # A stalled local server must not hold up cloud fallback or process shutdown.
+    Thread(target=run, daemon=True, name="jarvis-ollama").start()
+    if not completed.wait(timeout):
+        raise OllamaTimeoutError("Ollama request timed out")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["result"]
+
+
 _ALLOWED_MATH_BINOPS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -64,7 +100,7 @@ def normalize_prompt(text):
 
 
 def can_answer_general_questions():
-    """Use the local Ollama model only when local AI is enabled."""
+    """Use the configured AI provider when general AI is enabled."""
     load_dotenv()
     return bool(config.AI_SETTINGS.get("enable_general_ai", True))
 
@@ -317,7 +353,22 @@ def _should_use_ollama_assistant(prompt):
 
 
 def get_ai_status():
+    provider = _ai_provider()
+    cloud_ready = bool(genai is not None and os.getenv("GEMINI_API_KEY", config.GEMINI_API_KEY).strip())
+    cloud_model = os.getenv("GEMINI_MODEL", config.gemini_model).strip() or config.gemini_model
     model, base_url = _ollama_settings()
+    status = {
+        "mode": "local", "provider": provider, "model": model,
+        "base_url": base_url, "online": False, "ollama_online": False,
+        "server_online": False, "model_available": False,
+        "label": f"IA: Local | {model}",
+    }
+    if provider == "gemini":
+        status.update(model=cloud_model, base_url="", online=cloud_ready,
+                      mode="gemini" if cloud_ready else "local",
+                      label=f"IA: Gemini | {cloud_model}")
+        return status
+
     tags_url = f"{base_url.rstrip('/')}/api/tags"
     try:
         with urlopen(tags_url, timeout=1.0) as response:
@@ -333,25 +384,23 @@ def get_ai_status():
         is_online = model in available_models or requested_model in available_models
         mode = "ollama" if is_online else "local"
         label = f"IA: {'Ollama' if is_online else 'Modele absent'} | {model}"
-        return {
+        status.update({
             "mode": mode,
             "model": model,
             "base_url": base_url,
             "online": is_online,
+            "ollama_online": is_online,
             "server_online": True,
             "model_available": is_online,
             "label": label,
-        }
+        })
     except Exception:
-        return {
-            "mode": "local",
-            "model": model,
-            "base_url": base_url,
-            "online": False,
-            "server_online": False,
-            "model_available": False,
-            "label": f"IA: Local | {model}",
-        }
+        pass
+    # This reports configuration readiness; status polling never spends API quota.
+    if provider == "hybrid" and not status["online"] and cloud_ready:
+        status.update(mode="gemini", model=cloud_model, base_url="", online=True,
+                      label=f"IA: Gemini | {cloud_model}")
+    return status
 
 
 def extract_ollama_message(payload):
@@ -559,11 +608,11 @@ class LocalBrain:
         )
         if can_answer_general_questions():
             return (
-                f"{base} Avec Ollama local, je peux aussi t'aider pour l'organisation du travail, "
+                f"{base} Avec l'IA configuree, je peux aussi t'aider pour l'organisation du travail, "
                 "les idees marketing, les plans d'action, les explications, la redaction de messages "
                 "et les decisions quotidiennes en restant coherent avec ton contexte local."
             )
-        return f"{base} Si Ollama local est disponible, je peux encore monter en intelligence sans cloud."
+        return f"{base} Un moteur IA disponible permet aussi d'enrichir ces reponses."
 
     @staticmethod
     def _shorten_text(text, limit=140):
@@ -679,7 +728,7 @@ class LocalBrain:
     @staticmethod
     def _assistant_system_prompt(mode):
         base = (
-            "Tu es M.O.C.T.A.R, assistant personnel local francophone propulse par Ollama. "
+            "Tu es M.O.C.T.A.R, assistant personnel francophone. "
             "Tu aides Moctar dans ses activites quotidiennes, son organisation, ses projets, ses decisions pratiques, "
             "sa communication et son travail. "
             "Tu utilises le contexte local fourni seulement s'il est pertinent. "
@@ -1144,6 +1193,7 @@ def chat_ollama(
     max_predict=OLLAMA_MAX_PREDICT,
     temperature=OLLAMA_TEMPERATURE,
     think=False,
+    timeout=None,
 ):
     default_model, base_url = _ollama_settings()
     model = (model or default_model).strip() or default_model
@@ -1183,7 +1233,7 @@ def chat_ollama(
         method="POST",
     )
     try:
-        with urlopen(request, timeout=OLLAMA_TIMEOUT_SECONDS) as response:
+        with urlopen(request, timeout=OLLAMA_TIMEOUT_SECONDS if timeout is None else timeout) as response:
             response_payload = json.loads(response.read().decode("utf-8"))
     except TimeoutError as exc:
         raise OllamaTimeoutError("Ollama request timed out") from exc
@@ -1221,24 +1271,61 @@ def ask_ollama(
     if encoded_images:
         user_message["images"] = encoded_images
 
-    response_payload = chat_ollama(
-        [
-            {
-                "role": "system",
-                "content": system_prompt or (
-                    "Tu es M.O.C.T.A.R, un assistant personnel francophone, utile au quotidien. "
-                    "Reponds clairement, naturellement et de facon concise. N'invente rien. "
-                    "Pour les sujets medicaux, juridiques ou financiers, signale les limites et conseille une verification professionnelle."
-                ),
-            },
-            user_message,
-        ],
-        tools=tools,
-        model=model,
-        max_predict=max_predict,
-        temperature=temperature,
-        think=think,
-    )
+    messages = [
+        {
+            "role": "system",
+            "content": system_prompt or (
+                "Tu es M.O.C.T.A.R, un assistant personnel francophone, utile au quotidien. "
+                "Reponds clairement, naturellement et de facon concise. N'invente rien. "
+                "Pour les sujets medicaux, juridiques ou financiers, signale les limites et conseille une verification professionnelle."
+            ),
+        },
+        user_message,
+    ]
+    provider = _ai_provider()
+
+    def local_request():
+        options = {}
+        if provider == "hybrid":
+            options["timeout"] = min(OLLAMA_TIMEOUT_SECONDS, HYBRID_OLLAMA_TIMEOUT_SECONDS)
+        payload = chat_ollama(
+            messages, tools=tools, model=model, max_predict=max_predict,
+            temperature=temperature, think=think, **options,
+        )
+        message = extract_ollama_message(payload)
+        if not message.get("content") and not message.get("tool_calls"):
+            raise OllamaRequestError("Ollama returned an empty message")
+        return payload
+
+    def cloud_request():
+        brain = AIBrain(api_type="gemini")
+        try:
+            reply = brain.chat(messages, tools=tools, temperature=temperature)
+        finally:
+            if brain.gemini_client is not None:
+                brain.gemini_client.close()
+        if reply.get("finish_reason") == "error":
+            raise OllamaRequestError("AI providers are unavailable")
+        message = {"role": "assistant", "content": reply.get("content") or ""}
+        if reply.get("tool_calls"):
+            message["tool_calls"] = [
+                {"id": call["id"], "type": "function", "function": {
+                    "name": call["name"], "arguments": call["arguments"],
+                }} for call in reply["tool_calls"]
+            ]
+        return {"message": message, "done_reason": reply["finish_reason"]}
+
+    if provider == "gemini":
+        response_payload = cloud_request()
+    elif provider == "hybrid":
+        try:
+            response_payload = _with_ollama_deadline(
+                local_request, min(OLLAMA_TIMEOUT_SECONDS, HYBRID_OLLAMA_TIMEOUT_SECONDS),
+            )
+        except Exception:
+            response_payload = cloud_request()
+    else:
+        response_payload = local_request()
     if return_full_response or tools is not None:
         return response_payload
     return _extract_ollama_content(response_payload)
@@ -1261,6 +1348,7 @@ class AIBrain:
 
     Prend en charge nativement :
     - Les modèles Ollama locaux (/api/chat)
+    - Gemini et le repli hybride Ollama / Gemini
     - Les API compatibles OpenAI (/v1/chat/completions)
     - La normalisation stricte des réponses en format unifié :
       {
@@ -1278,15 +1366,16 @@ class AIBrain:
         model: Optional[str] = None,
         api_key: Optional[str] = None,
         timeout: Optional[float] = None,
-        api_type: str = "auto",
+        api_type: Optional[str] = None,
     ) -> None:
         load_dotenv()
         env_model, env_base_url = _ollama_settings()
-        requested_type = api_type.lower()
+        requested_type = (api_type or _ai_provider()).lower()
+        self.ai_provider = _ai_provider() if requested_type == "auto" else requested_type
         # Explicit Ollama configuration must not inherit the cloud API settings.
         default_base_url = (
             env_base_url
-            if requested_type == "ollama"
+            if requested_type in {"ollama", "gemini", "hybrid"} or os.getenv("AI_PROVIDER")
             else os.getenv("OPENAI_BASE_URL") or env_base_url
         )
         self.base_url = (base_url or default_base_url or DEFAULT_BASE_URL).rstrip("/")
@@ -1294,7 +1383,9 @@ class AIBrain:
         self.timeout = float(timeout or os.getenv("LLM_TIMEOUT_SECONDS") or OLLAMA_TIMEOUT_SECONDS)
 
         # Détection automatique du type de backend
-        if requested_type == "auto":
+        if requested_type == "auto" and (os.getenv("AI_PROVIDER") or self.ai_provider == "gemini"):
+            self.api_type = "gemini" if self.ai_provider == "gemini" else "ollama"
+        elif requested_type == "auto":
             endpoint = urlsplit(self.base_url)
             is_ollama = endpoint.hostname in {"localhost", "127.0.0.1", "::1"} or endpoint.port == 11434
             if "/v1" in self.base_url or "openai.com" in self.base_url or (self.api_key and not is_ollama):
@@ -1302,10 +1393,25 @@ class AIBrain:
             else:
                 self.api_type = "ollama"
         else:
-            self.api_type = requested_type
+            self.api_type = "ollama" if requested_type == "hybrid" else requested_type
+
+        if self.api_type == "openai":
+            self.ai_provider = "openai"
 
         backend_model = os.getenv("OPENAI_MODEL") if self.api_type == "openai" else env_model
         self.model = (model or backend_model or env_model or DEFAULT_MODEL).strip()
+        # The bridge may pass an explicit Ollama model, so keep cloud selection separate.
+        self.gemini_model = os.getenv("GEMINI_MODEL", config.gemini_model).strip() or config.gemini_model
+        self.gemini_client = None
+        gemini_key = os.getenv("GEMINI_API_KEY", config.GEMINI_API_KEY).strip()
+        if gemini_key and genai is not None:
+            try:
+                self.gemini_client = genai.Client(
+                    api_key=gemini_key,
+                    http_options={"timeout": max(1, int(self.timeout * 1000))},
+                )
+            except Exception:
+                logger.warning("Initialisation Gemini indisponible")
 
         logger.info(
             "AIBrain initialisé [type=%s, model=%s, base_url=%s, timeout=%ss]",
@@ -1442,12 +1548,126 @@ class AIBrain:
                 "finish_reason": str
             }
         """
+        if self.ai_provider == "gemini":
+            return self._chat_gemini(messages, tools=tools, temperature=0.2 if temperature is None else temperature)
         if self.api_type == "openai":
             return self._chat_openai(messages=messages, tools=tools, temperature=0.2 if temperature is None else temperature)
+        if self.ai_provider == "hybrid":
+            try:
+                result = _with_ollama_deadline(
+                    lambda: self._chat_ollama(
+                        messages=messages, tools=tools,
+                        temperature=OLLAMA_TEMPERATURE if temperature is None else temperature,
+                    ),
+                    min(self.timeout, HYBRID_OLLAMA_TIMEOUT_SECONDS),
+                )
+                if result.get("finish_reason") != "error" and (result.get("content") or result.get("tool_calls")):
+                    return result
+            except Exception:
+                pass
+            logger.info("Repli automatique vers Gemini")
+            return self._chat_gemini(messages, tools=tools, temperature=0.2 if temperature is None else temperature)
         return self._chat_ollama(
             messages=messages, tools=tools,
             temperature=OLLAMA_TEMPERATURE if temperature is None else temperature,
         )
+
+    def _chat_gemini(self, messages, tools=None, temperature=0.2):
+        """Translate model/tool turns without letting the SDK execute local actions."""
+        error = {"content": "Le moteur IA est indisponible pour le moment.",
+                 "tool_calls": [], "finish_reason": "error"}
+        if self.gemini_client is None:
+            return error
+        try:
+            contents = []
+            instructions = []
+            for message in messages:
+                role = message.get("role")
+                content = message.get("content")
+                if role == "system":
+                    if content:
+                        instructions.append(str(content))
+                    continue
+                parts = []
+                if role == "tool":
+                    observation = content
+                    if isinstance(observation, str):
+                        try:
+                            observation = json.loads(observation)
+                        except ValueError:
+                            pass
+                    if not isinstance(observation, dict):
+                        observation = {"result": observation}
+                    function_response = {"name": message["name"], "response": observation}
+                    if message.get("tool_call_id"):
+                        function_response["id"] = message["tool_call_id"]
+                    parts.append({"function_response": function_response})
+                else:
+                    if content:
+                        parts.append({"text": str(content)})
+                    for encoded in message.get("images") or []:
+                        data = base64.b64decode(encoded)
+                        mime_type = "image/png" if data.startswith(b"\x89PNG") else "image/jpeg"
+                        parts.append({"inline_data": {"mime_type": mime_type, "data": data}})
+                    for call in message.get("tool_calls") or []:
+                        function = call.get("function") or call
+                        function_call = {"name": function["name"],
+                                         "args": self._parse_arguments(function.get("arguments"))}
+                        if call.get("id"):
+                            function_call["id"] = call["id"]
+                        parts.append({"function_call": function_call})
+                if not parts:
+                    continue
+                gemini_role = "model" if role == "assistant" else "user"
+                if contents and contents[-1]["role"] == gemini_role:
+                    contents[-1]["parts"].extend(parts)
+                else:
+                    contents.append({"role": gemini_role, "parts": parts})
+
+            generation_config = {
+                "temperature": temperature, "max_output_tokens": OLLAMA_MAX_PREDICT,
+                "automatic_function_calling": {"disable": True},
+                "http_options": {"timeout": max(1, int(self.timeout * 1000))},
+            }
+            if instructions:
+                generation_config["system_instruction"] = "\n\n".join(instructions)
+            if tools:
+                declarations = []
+                for tool in tools:
+                    function = tool.get("function") or tool
+                    declarations.append({
+                        "name": function["name"], "description": function.get("description", ""),
+                        "parameters_json_schema": function.get("parameters") or {"type": "object", "properties": {}},
+                    })
+                generation_config["tools"] = [{"function_declarations": declarations}]
+            response = self.gemini_client.models.generate_content(
+                model=self.gemini_model, contents=contents, config=generation_config,
+            )
+            candidates = response.candidates or []
+            if not candidates or not candidates[0].content:
+                return error
+            text_parts = []
+            tool_calls = []
+            for part in candidates[0].content.parts or []:
+                if part.thought:
+                    continue
+                if part.text:
+                    text_parts.append(part.text)
+                if part.function_call:
+                    call = part.function_call
+                    tool_calls.append({"id": call.id or f"call_{call.name}_{uuid4().hex[:8]}",
+                                       "name": call.name, "arguments": dict(call.args or {})})
+            content = "".join(text_parts) or None
+            if not content and not tool_calls:
+                return error
+            if not tool_calls and content:
+                tool_calls = self._extract_text_tool_calls(content)
+            return {"content": content, "tool_calls": tool_calls,
+                    "finish_reason": "tool_calls" if tool_calls else "stop"}
+        except Exception:
+            # Do not expose credentials or transport details in user-facing replies.
+            logger.warning("Appel Gemini indisponible")
+            return error
 
     def _chat_ollama(
         self,
@@ -1473,7 +1693,8 @@ class AIBrain:
         )
 
         try:
-            with urlopen(req, timeout=self.timeout) as resp:
+            request_timeout = min(self.timeout, HYBRID_OLLAMA_TIMEOUT_SECONDS) if self.ai_provider == "hybrid" else self.timeout
+            with urlopen(req, timeout=request_timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="ignore") if hasattr(exc, "read") else ""
@@ -1539,7 +1760,8 @@ class AIBrain:
         )
 
         try:
-            with urlopen(req, timeout=self.timeout) as resp:
+            request_timeout = min(self.timeout, HYBRID_OLLAMA_TIMEOUT_SECONDS) if self.ai_provider == "hybrid" else self.timeout
+            with urlopen(req, timeout=request_timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="ignore") if hasattr(exc, "read") else ""

@@ -11,6 +11,7 @@ from copy import deepcopy
 from email.message import Message
 from io import BytesIO
 import json
+import os
 import socket
 from unittest.mock import patch
 from urllib.parse import urlsplit
@@ -149,7 +150,8 @@ def offline_ollama():
             raise AssertionError("A test attempted a real Ollama connection; mock its HTTP transport.")
         return original_create_connection(address, *args, **kwargs)
 
-    with patch.object(ai_brain, "urlopen", side_effect=urlopen), \
+    with patch.dict(os.environ, {"AI_PROVIDER": "ollama", "GEMINI_API_KEY": ""}), \
+            patch.object(ai_brain, "urlopen", side_effect=urlopen), \
             patch.object(urllib.request, "urlopen", side_effect=urlopen), \
             patch.object(urllib.request.OpenerDirector, "open", new=opener_open), \
             patch.object(socket, "create_connection", side_effect=create_connection):
