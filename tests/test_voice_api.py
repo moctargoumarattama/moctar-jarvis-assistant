@@ -158,13 +158,13 @@ class VoiceAPITests(unittest.TestCase):
 
     def test_simulate_restart_updates_sse_state_without_restarting_or_replying(self):
         revision, collected = self.runtime.revision, self.runtime.last_published
-        result = self.client.post("/api/voice/simulate", json={"text": "restart babamarket"}, headers={"X-Admin-Token": "admin-secret"})
+        result = self.client.post("/api/voice/simulate", json={"text": "restart klasora"}, headers={"X-Admin-Token": "admin-secret"})
         self.assertEqual(result.status_code, 202)
         self.assertTrue(result.json()["simulated"])
         self.drain()
         state = self.client.get("/api/overview").json()["voice"]
         self.assertEqual(state["last_command"]["action"], "restart")
-        self.assertEqual(state["last_command"]["service"], "babamarket")
+        self.assertEqual(state["last_command"]["service"], "klasora")
         self.assertEqual(state["last_command"]["source"], "simulation")
         self.assertTrue(state["last_command"]["simulated"])
         self.assertIn("SIMULATION", state["last_command"]["response"])
@@ -298,7 +298,7 @@ class VoiceAPITests(unittest.TestCase):
     def test_simulation_works_before_whatsapp_is_configured(self):
         app = create_app(replace(self.settings, whatsapp_webhook_token=""))
         client = self.stack.enter_context(TestClient(app))
-        result = client.post("/api/voice/simulate", json={"text": "restart babamarket"}, headers={"X-Admin-Token": "admin-secret"})
+        result = client.post("/api/voice/simulate", json={"text": "restart klasora"}, headers={"X-Admin-Token": "admin-secret"})
         self.assertEqual(result.status_code, 202)
         async def join():
             await asyncio.wait_for(app.state.runtime.whatsapp.queue.join(), 2)
@@ -318,8 +318,8 @@ class VoiceAPITests(unittest.TestCase):
         for mime in ("audio/mpeg", "audio/wav", "audio/opus"):
             message = parse_message({"from": ADMIN, "id": "a", "audio": {"path": "a", "mimetype": mime}}, ADMIN)
             self.assertEqual(message["source"], "voice")
-        self.assertEqual(parse_intent("restart babamarket"), ("restart", "babamarket"))
-        self.assertEqual(parse_intent("do not restart babamarket"), ("unknown", None))
+        self.assertEqual(parse_intent("restart klasora"), ("restart", "klasora"))
+        self.assertEqual(parse_intent("do not restart klasora"), ("unknown", None))
 
 
 if __name__ == "__main__":

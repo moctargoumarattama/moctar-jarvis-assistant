@@ -553,7 +553,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else:
                     payload = enriched
         try:
-            return await application.state.runtime.whatsapp.accept(payload)
+            result = await application.state.runtime.whatsapp.accept(payload)
+            LOGGER.info("Webhook WhatsApp accepté=%s doublon=%s",
+                        result.get("accepted"), result.get("duplicate", False))
+            return result
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from None
         except ValueError:

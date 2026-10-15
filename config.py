@@ -446,8 +446,8 @@ class Settings:
     whatsapp_admin_numbers: tuple[str, ...] | None = None
     whatsapp_webhook_token: str = ""
     whatsapp_session_id: str = "1"
-    whatsapp_send_url: str = "http://127.0.0.1:3001/message/send"
-    whatsapp_send_to_field: str = "to"
+    whatsapp_send_url: str = "http://127.0.0.1:3001/session/{session_id}/send"
+    whatsapp_send_to_field: str = "jid"
     whatsapp_send_text_field: str = "text"
     whatsapp_send_timeout: float = 10.0
     whatsapp_media_dir: str = "/var/lib/klasora-whatsapp/media"
@@ -494,9 +494,12 @@ class Settings:
             )),
             whatsapp_webhook_token=os.environ.get("NOC_WHATSAPP_WEBHOOK_TOKEN", ""),
             whatsapp_session_id=os.environ.get("NOC_WHATSAPP_SESSION_ID", "1"),
-            whatsapp_send_url=os.environ.get("NOC_WHATSAPP_SEND_URL", "http://127.0.0.1:3001/message/send"),
-            whatsapp_send_to_field=os.environ.get("NOC_WHATSAPP_SEND_TO_FIELD", "to"),
-            whatsapp_send_text_field=os.environ.get("NOC_WHATSAPP_SEND_TEXT_FIELD", "text"),
+            whatsapp_send_url=os.environ.get("NOC_WHATSAPP_SEND_URL", os.environ.get(
+                "WHATSAPP_SEND_URL", "http://127.0.0.1:3001/session/{session_id}/send")),
+            whatsapp_send_to_field=os.environ.get("NOC_WHATSAPP_SEND_TO_FIELD", os.environ.get(
+                "WHATSAPP_SEND_TO_FIELD", "jid")),
+            whatsapp_send_text_field=os.environ.get("NOC_WHATSAPP_SEND_TEXT_FIELD", os.environ.get(
+                "WHATSAPP_SEND_TEXT_FIELD", "text")),
             whatsapp_send_timeout=_noc_number("NOC_WHATSAPP_SEND_TIMEOUT", 10, 3, 30),
             whatsapp_media_dir=os.environ.get("NOC_WHATSAPP_MEDIA_DIR", "/var/lib/klasora-whatsapp/media"),
             whatsapp_max_audio_bytes=int(_noc_number("NOC_WHATSAPP_MAX_AUDIO_BYTES", 8388608, 1024, 8388608)),

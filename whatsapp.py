@@ -9,6 +9,7 @@ import asyncio
 import contextlib
 import ipaddress
 import json
+import logging
 import os
 import re
 import shutil
@@ -21,13 +22,15 @@ import unicodedata
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Awaitable, Callable
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 
 from collector import utc_now
 from config import Settings
 import system_manager
+
+LOGGER = logging.getLogger(__name__)
 
 AUDIO_MIME_TYPES = frozenset({"audio/ogg", "audio/opus", "application/ogg",
                               "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav"})
@@ -281,7 +284,9 @@ class WhatsAppController:
     async def start(self) -> None:
         if self.webhook_configured:
             admin_numbers(self.settings)
-            send = urlsplit(self.settings.whatsapp_send_url)
+            send_url = self.settings.whatsapp_send_url.replace(
+                "{session_id}", quote(self.settings.whatsapp_session_id, safe=""))
+            send = urlsplit(send_url)
             if (send.scheme != "http" or send.hostname not in {"127.0.0.1", "::1"}
                     or send.port != 3001 or send.username or send.password or send.fragment):
                 raise ValueError("API WhatsApp d'envoi limitée à la passerelle locale:3001")
@@ -308,6 +313,8 @@ class WhatsAppController:
         self.conversation_worker = asyncio.create_task(
             self._worker(self.conversation_queue), name="noc-whatsapp-conversation")
         self.readiness_task = asyncio.create_task(self._readiness_loop(), name="noc-voice-readiness")
+        LOGGER.info("Workers WhatsApp prêts : traitement texte indépendant de Whisper (voice_enabled=%s)",
+                    self.settings.voice_enabled)
 
     async def _readiness_loop(self) -> None:
         while True:
@@ -399,6 +406,8 @@ class WhatsAppController:
                 "status": "active" if self.enabled and self.busy else self._voice["status"],
                 "webhook_configured": self.webhook_configured,
                 "webhook_status": "configured" if self.webhook_configured else "missing_configuration",
+                "text_enabled": self.webhook_configured and self.worker is not None and not self.worker.done(),
+                "voice_enabled": self.enabled,
                 "busy": self.busy, "queued": self.queue.qsize() + self.conversation_queue.qsize(),
                 "last_command": command}
 
@@ -413,6 +422,8 @@ class WhatsAppController:
             raise
         if message is None:
             return {"accepted": False, "ignored": True}
+        LOGGER.info("WhatsApp reçu: expéditeur=%s texte=%r", message["sender"],
+                    message["text"] if message["text"] else "[audio]")
         message["session"] = self.settings.whatsapp_session_id
         now = time.monotonic()
         while self._seen and now - next(iter(self._seen.values())) > 86400:
@@ -433,6 +444,8 @@ class WhatsAppController:
         self._seen[identity] = now
         if len(self._seen) > 256:
             self._seen.popitem(last=False)
+        LOGGER.info("WhatsApp en file: id=%s voie=%s commande=%s", message["id"],
+                    "vocale" if queue is self.conversation_queue else "opérateur", action)
         return {"accepted": True, "duplicate": False}
 
     def authorize(self, payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -487,6 +500,8 @@ class WhatsAppController:
                     await self._publish()
                     text = await self._transcribe(message["audio"]) if message["audio"] else message["text"]
                     action, service = parse_intent(text)
+                    LOGGER.info("WhatsApp commande détectée: expéditeur=%s commande=%s cible=%s",
+                                message.get("sender", "simulation"), action, service or "-")
                     command.update(transcription=text[:1000], action=action, service=service)
                     command["_private"] = message.get("simulated") is not True and action == "unknown"
                     await self._publish()
@@ -500,12 +515,15 @@ class WhatsAppController:
                             response, success = "SIMULATION · Commande non reconnue. Aucune inférence exécutée.", False
                     else:
                         response, success = await self._execute(action, service, {**message, "text": text})
+                    LOGGER.info("WhatsApp action terminée: commande=%s cible=%s succès=%s",
+                                action, service or "-", success)
                     if len(response) > 4096:
                         response = response[:4050] + "\n… Réponse abrégée (limite WhatsApp)."
                     command.update(response=response, status="completed" if success else "failed", timestamp=utc_now())
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    LOGGER.exception("Échec du traitement WhatsApp: id=%s", message.get("id"))
                     # Ne publier ni chemins, ni secrets, ni erreurs natives.
                     response = "Commande impossible : " + (
                         str(exc) if isinstance(exc, ValueError) else type(exc).__name__
@@ -525,14 +543,17 @@ class WhatsAppController:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                pass
+                LOGGER.exception("Erreur non gérée dans le worker WhatsApp: id=%s", message.get("id"))
             finally:
                 self._active_commands -= 1
                 self.busy = self._active_commands > 0
                 self._remove_upload(message)
                 queue.task_done()
-                with contextlib.suppress(Exception):
+                try:
                     await self._publish()
+                except Exception:
+                    LOGGER.exception("Échec de publication après la commande WhatsApp: id=%s",
+                                     message.get("id"))
 
     async def _execute(self, action: str, service: str | None,
                        message: dict[str, Any] | None = None) -> tuple[str, bool]:
@@ -613,18 +634,28 @@ class WhatsAppController:
 
     async def _send_reply(self, response: str, recipient: str | None = None) -> bool:
         if self.client is None:
+            LOGGER.error("Réponse WhatsApp impossible: client HTTP non initialisé")
             return False
+        number = normalize_phone(recipient or self.settings.admin_phone_number)
+        recipient_value = number + "@s.whatsapp.net" if self.settings.whatsapp_send_to_field == "jid" else number
         payload = {
-            self.settings.whatsapp_send_to_field: normalize_phone(recipient or self.settings.admin_phone_number),
+            self.settings.whatsapp_send_to_field: recipient_value,
             self.settings.whatsapp_send_text_field: response[:4096],
         }
+        url = self.settings.whatsapp_send_url.replace(
+            "{session_id}", quote(self.settings.whatsapp_session_id, safe=""))
+        LOGGER.info("WhatsApp envoi passerelle: POST %s destinataire=%s", url, recipient_value)
         try:
             async with asyncio.timeout(self.settings.whatsapp_send_timeout):
-                async with self.client.stream("POST", self.settings.whatsapp_send_url, json=payload,
+                async with self.client.stream("POST", url, json=payload,
                                               headers={"x-gateway-secret": self.settings.gateway_secret},
                                               timeout=self.settings.whatsapp_send_timeout) as reply:
+                    LOGGER.info("WhatsApp passerelle réponse: HTTP %s", reply.status_code)
+                    if not reply.is_success:
+                        LOGGER.error("Échec passerelle WhatsApp: HTTP %s", reply.status_code)
                     return reply.is_success
         except (httpx.HTTPError, TimeoutError):
+            LOGGER.exception("Échec HTTP vers la passerelle WhatsApp: POST %s", url)
             return False
 
     def _copy_local_audio(self, source: str, destination: Path) -> None:

@@ -32,6 +32,19 @@ class EnvironmentConfigTests(unittest.TestCase):
             self.assertEqual(settings.admin_phone_number, '212770010265')
             self.assertEqual(settings.whatsapp_admin_numbers, ('212770010265',))
 
+    def test_whatsapp_send_fallback_uses_session_endpoint_and_jid_body(self):
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings.from_env()
+        self.assertEqual(settings.whatsapp_send_url, 'http://127.0.0.1:3001/session/{session_id}/send')
+        self.assertEqual(settings.whatsapp_send_to_field, 'jid')
+        with patch.dict(os.environ, {'WHATSAPP_SEND_URL': 'http://127.0.0.1:3001/custom/send',
+                                     'WHATSAPP_SEND_TO_FIELD': 'number',
+                                     'WHATSAPP_SEND_TEXT_FIELD': 'message'}, clear=True):
+            settings = Settings.from_env()
+        self.assertEqual(settings.whatsapp_send_url, 'http://127.0.0.1:3001/custom/send')
+        self.assertEqual(settings.whatsapp_send_to_field, 'number')
+        self.assertEqual(settings.whatsapp_send_text_field, 'message')
+
     def test_vps_token_is_environment_value_or_empty(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(Settings.from_env().vps_token, '')

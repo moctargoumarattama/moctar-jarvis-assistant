@@ -253,16 +253,29 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(self.controller.conversation_queue.join(), 1)
         self.assertFalse(self.controller.busy)
 
-    async def test_reply_uses_exact_gateway_contract_and_never_reads_body(self) -> None:
+    async def test_reply_uses_session_gateway_contract_and_never_reads_body(self) -> None:
         received = {}
         def handler(request: httpx.Request) -> httpx.Response:
             received.update(json.loads(request.content))
+            self.assertEqual(request.url.path, "/session/1/send")
             self.assertEqual(request.headers["x-gateway-secret"], self.settings.gateway_secret)
             return httpx.Response(200, json={"ok": True})
         self.controller.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         self.assertTrue(await self.controller._send_reply("✅ état opérationnel"))
-        self.assertEqual(received, {"to": ADMIN,
+        self.assertEqual(received, {"jid": ADMIN + "@s.whatsapp.net",
                                     "text": "✅ état opérationnel"})
+
+    async def test_text_worker_starts_even_when_voice_is_disabled(self) -> None:
+        controller = WhatsAppController(replace(self.settings, voice_enabled=False), self.runtime, self.restart)
+        await controller.start()
+        try:
+            self.assertIsNotNone(controller.worker)
+            self.assertFalse(controller.worker.done())
+            self.assertFalse(controller.enabled)
+            self.assertTrue(controller.snapshot()["text_enabled"])
+            self.assertFalse(controller.snapshot()["voice_enabled"])
+        finally:
+            await controller.close()
 
     async def test_media_paths_and_size_are_confined(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
