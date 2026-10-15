@@ -101,7 +101,7 @@ class MessageTests(unittest.TestCase):
 
     def test_phrase_grammar_rejects_negations_and_shell_fragments(self) -> None:
         self.assertEqual(parse_intent("ÉTAT."), ("status", None))
-        self.assertEqual(parse_intent("Redémarre BabaMarket !"), ("restart", "babamarket"))
+        self.assertEqual(parse_intent("redemarre klasora"), ("restart", "klasora"))
         self.assertEqual(parse_intent("sauvegarde babamarket"), ("backup", "babamarket"))
         for text in ("ne redémarre pas klasora", "redémarre nginx", "redémarre klasora; id",
                      "redémarre klasora et babamarket", "sauvegarde klasora", "redémarre whatsapp-gateway"):

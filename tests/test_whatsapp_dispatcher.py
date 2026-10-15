@@ -41,7 +41,9 @@ class AdminNumbersTests(unittest.TestCase):
 
     def test_new_commands_use_exact_allowlist(self):
         self.assertEqual(parse_intent("ARRÊTE JARVIS !"), ("stop", "jarvis"))
-        self.assertEqual(parse_intent("REDÉMARRE JARVIS"), ("restart", "jarvis"))
+        self.assertEqual(parse_intent("restart klasora"), ("restart", "klasora"))
+        self.assertEqual(parse_intent("restart apps"), ("restart", "apps"))
+        self.assertEqual(parse_intent("demarrage ollama"), ("start", "ollama"))
         self.assertEqual(parse_intent("ReBoOt"), ("reboot", None))
         self.assertEqual(parse_intent("CONFIRMER REBOOT"), ("confirm_reboot", None))
         for text in ("stop nginx", "restart klasora; reboot", "ne redémarre pas jarvis", "reboot maintenant"):
@@ -162,9 +164,9 @@ class DispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.jarvis.execute_prompt_async.assert_not_awaited()
 
     async def test_service_actions_use_manager_and_check_failed_results(self):
-        await self.send("restart jarvis")
-        self.restart.assert_called_once_with("jarvis")
-        self.assertIn("redémarré avec succès (actif)", self.controller.last_command["response"])
+        await self.send("restart klasora")
+        self.restart.assert_called_once_with("klasora")
+        self.assertIn("avec succ", self.controller.last_command["response"])
         await self.send("stop klasora", "stop")
         self.stop.assert_called_once_with("klasora")
         self.assertIn("arrêté avec succès", self.controller.last_command["response"])
@@ -173,44 +175,30 @@ class DispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.last_command["status"], "failed")
         self.assertNotIn("avec succès", self.controller.last_command["response"])
 
-    async def test_reboot_requires_same_admin_and_one_live_confirmation(self):
-        await self.send("CONFIRMER REBOOT", "no-pending")
+    async def test_jarvis_cannot_be_stopped_and_managed_targets_start(self):
+        await self.send("restart jarvis", "restart-jarvis")
+        self.assertIn("superviseur permanent", self.controller.last_command["response"])
+        self.restart.assert_not_called()
+        await self.send("arret jarvis", "lock")
+        self.assertIn("superviseur permanent", self.controller.last_command["response"])
+        self.stop.assert_not_called()
+        with patch("whatsapp.system_manager.start_system_service", return_value={"ok": True}) as start:
+            await self.send("demarrage ollama", "start-ollama")
+        start.assert_called_once_with("ollama")
+        self.assertEqual(self.controller.last_command["status"], "completed")
+
+    async def test_restart_apps_restarts_only_fixed_managed_services(self):
+        await self.send("restart apps", "restart-apps")
+        self.assertEqual([call.args[0] for call in self.restart.call_args_list],
+                         ["klasora", "ollama", "tunnel"])
+        self.assertEqual(self.controller.last_command["status"], "completed")
+
+    async def test_host_reboot_commands_are_refused_to_keep_supervisor_alive(self):
+        for index, text in enumerate(("reboot", "CONFIRMER REBOOT")):
+            await self.send(text, f"host-reboot-{index}")
+            self.assertIn("superviseur permanent", self.controller.last_command["response"])
+        self.assertEqual(self.controller._pending_reboot, {})
         self.reboot.assert_not_called()
-        await self.send("reboot", "arm")
-        expires = self.controller._pending_reboot[(ADMIN, "1")]
-        self.assertGreater(expires, time.monotonic() + 58)
-        await self.send("CONFIRMER REBOOT", "other-admin", SECOND)
-        self.reboot.assert_not_called()
-        self.assertIn((ADMIN, "1"), self.controller._pending_reboot)
-        await self.send("CONFIRMER REBOOT", "confirm")
-        self.reboot.assert_called_once_with()
-        self.assertNotIn((ADMIN, "1"), self.controller._pending_reboot)
-        duplicate = await self.send("CONFIRMER REBOOT", "confirm")
-        self.assertTrue(duplicate["duplicate"])
-        await self.send("CONFIRMER REBOOT", "new-id")
-        self.reboot.assert_called_once_with()
-
-    async def test_expired_or_other_session_confirmation_cannot_reboot(self):
-        await self.send("reboot", "arm")
-        with self.assertRaises(PermissionError):
-            await self.controller.accept({**payload("CONFIRMER REBOOT", "other-session"), "sessionId": "2"})
-        self.controller._pending_reboot[(ADMIN, "1")] = time.monotonic() - 1
-        await self.send("CONFIRMER REBOOT", "expired")
-        self.reboot.assert_not_called()
-
-    async def test_failed_reboot_consumes_confirmation_and_notifies_before_execution(self):
-        await self.send("reboot", "arm")
-
-        def fail_reboot():
-            self.assertNotIn((ADMIN, "1"), self.controller._pending_reboot)
-            self.assertTrue(any("Confirmation reçue" in call.args[0]
-                                for call in self.controller._send_reply.await_args_list))
-            return {"ok": False}
-
-        self.reboot.side_effect = fail_reboot
-        await self.send("CONFIRMER REBOOT", "confirm")
-        await self.send("CONFIRMER REBOOT", "repeat")
-        self.reboot.assert_called_once_with()
 
     async def test_dedup_is_scoped_to_sender_and_session(self):
         await self.send("restart klasora", "same-id")
@@ -245,7 +233,7 @@ class DispatcherTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_disabled_system_controls_cannot_bypass_existing_setting(self):
         self.controller.settings = replace(self.settings, enable_restart=False)
-        for index, text in enumerate(("restart jarvis", "stop klasora", "reboot", "CONFIRMER REBOOT")):
+        for index, text in enumerate(("restart klasora", "stop klasora", "reboot", "CONFIRMER REBOOT")):
             await self.send(text, str(index))
             self.assertEqual(self.controller.last_command["status"], "failed")
             self.assertIn("NOC_ENABLE_RESTART", self.controller.last_command["response"])
@@ -254,18 +242,12 @@ class DispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.stop.assert_not_called()
         self.reboot.assert_not_called()
 
-    async def test_voice_cannot_arm_or_confirm_host_reboot(self):
+    async def test_voice_cannot_restart_host(self):
         self.controller._transcribe = AsyncMock(return_value="reboot")
-        await self.controller.accept({**payload("", "voice-arm"), "audio": {"path": "voice.ogg"}})
+        await self.controller.accept({**payload("", "voice-reboot"), "audio": {"path": "sample.ogg"}})
         await self.drain()
-        self.assertEqual(self.controller._pending_reboot, {})
-        await self.send("reboot", "text-arm")
-        self.controller._transcribe.return_value = "CONFIRMER REBOOT"
-        await self.controller.accept({**payload("", "voice-confirm"), "audio": {"path": "voice.ogg"}})
-        await self.drain()
+        self.assertIn("superviseur permanent", self.controller.last_command["response"])
         self.reboot.assert_not_called()
-        self.assertIn((ADMIN, "1"), self.controller._pending_reboot)
-        self.assertIn("messages texte", self.controller.last_command["response"])
 
     async def test_public_snapshots_hide_private_conversation_from_first_publish(self):
         snapshots = []

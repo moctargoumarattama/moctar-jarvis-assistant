@@ -30,9 +30,10 @@ except Exception:
 
 import config
 from config import SERVICES
+from ai_brain import get_ai_status
 
 
-SERVICES_ALLOWLIST = ("merca-market", "klasora", "babamarket", "moc-mal", "jarvis")
+SERVICES_ALLOWLIST = tuple(config.MANAGED_SERVICES)
 SYSTEMCTL = "/usr/bin/systemctl"
 COMMAND_TIMEOUT = 15
 VERIFY_TIMEOUT = 5
@@ -154,7 +155,7 @@ def _service_command(service_name: str, action: str) -> dict[str, Any]:
             or re.fullmatch(r"[a-z][a-z0-9-]*", service_name) is None
             or service_name not in SERVICES_ALLOWLIST):
         return _result(False, "ALERTE : service non autorisé.")
-    unit = service_name + ".service"
+    unit = config.MANAGED_SERVICES[service_name]
     try:
         command = _run(["sudo", "-n", SYSTEMCTL, action, unit], COMMAND_TIMEOUT)
         if command.returncode != 0:
@@ -168,8 +169,9 @@ def _service_command(service_name: str, action: str) -> dict[str, Any]:
     state = verification.stdout.strip()
     if state not in {"active", "inactive", "failed", "activating", "deactivating", "reloading", "maintenance"}:
         state = "unknown"
-    if action == "restart" and verification.returncode == 0 and state == "active":
-        return _result(True, f"Service {service_name} redémarré avec succès (actif).", service_name, state)
+    if action in {"restart", "start"} and verification.returncode == 0 and state == "active":
+        verb = "redémarré" if action == "restart" else "démarré"
+        return _result(True, f"Service {service_name} {verb} avec succès (actif).", service_name, state)
     if action == "stop" and verification.returncode in {0, 3} and state == "inactive":
         return _result(True, f"Service {service_name} arrêté avec succès (inactif).", service_name, state)
     return _result(False, f"Commande envoyée pour {service_name}, mais résultat non confirmé : état {state}.", service_name, state)
@@ -178,6 +180,11 @@ def _service_command(service_name: str, action: str) -> dict[str, Any]:
 def restart_system_service(service_name: str) -> dict[str, Any]:
     """Redémarre uniquement une unité autorisée, puis vérifie qu'elle est active."""
     return _service_command(service_name, "restart")
+
+
+def start_system_service(service_name: str) -> dict[str, Any]:
+    """Démarre uniquement une unité supervisée et confirme son état actif."""
+    return _service_command(service_name, "start")
 
 
 def stop_system_service(service_name: str) -> dict[str, Any]:
@@ -281,9 +288,41 @@ class SystemManager:
             f"RAM : {_capacity(hardware.get('memory'))}",
             f"Disque système : {_capacity(_mapping(hardware.get('disks')).get('root'))}",
         ])
+        memory_metrics = _mapping(hardware.get("memory"))
+        used, total = memory_metrics.get("used"), memory_metrics.get("total")
+        available = total - used if isinstance(total, (int, float)) and isinstance(used, (int, float)) else None
+        lines.append(f"RAM disponible : {_number(available, divisor=1024 ** 3)} Go")
         temp_val = hardware.get("temperature_c")
         if temp_val is not None:
             lines.append(f"Température : {_number(temp_val, suffix=' °C')}")
+        else:
+            lines.append("Température : indisponible")
+
+        lines.extend(["━━━━━━━━━━━━━━━━━━━━", "Applications supervisées :"])
+        managed_states: dict[str, dict[str, str]] = {}
+        units = list(config.MANAGED_SERVICES.values())
+        try:
+            result = _run([SYSTEMCTL, "show", *units, "--property=Id,ActiveState,MemoryCurrent"], 2)
+            for block in result.stdout.split("\n\n") if result.returncode == 0 else ():
+                properties = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+                unit_id = properties.get("Id", "")
+                if unit_id in units:
+                    managed_states[unit_id] = properties
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        for target, unit in config.MANAGED_SERVICES.items():
+            properties = managed_states.get(unit, {})
+            state = properties.get("ActiveState", "inconnu")
+            memory = properties.get("MemoryCurrent", "")
+            try:
+                memory_text = f"{int(memory) / 1024 ** 2:.0f} Mio"
+            except (TypeError, ValueError, OverflowError):
+                memory_text = "indisponible"
+            badge = "🟢" if state == "active" else "🔴"
+            lines.append(f"{badge} {target} ({unit}) : {state} · mémoire {memory_text}")
+        ai_status = get_ai_status()
+        ai_state = "Opérationnel" if ai_status.get("gemini_online") else "indisponible"
+        lines.append(f"🧠 Moteur IA : {ai_status.get('label', 'Gemini Cloud')} · {ai_state}")
 
         lines.extend([
             "━━━━━━━━━━━━━━━━━━━━",

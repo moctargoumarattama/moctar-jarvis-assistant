@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import config
 from config import SERVICES, Settings, parse_whatsapp_admin_numbers
 import system_manager
 from whatsapp import admin_numbers, parse_message
@@ -49,7 +50,7 @@ class SystemCommandAuthorizationTests(unittest.TestCase):
 class SystemServiceCommandTests(unittest.TestCase):
     @patch("system_manager.subprocess.run")
     def test_only_exact_allowlisted_units_can_reach_subprocess(self, run):
-        invalid = ["nginx", "ollama", "JARVIS", "jarvis.service", " jarvis", "--all", "jarvis\n", "jarvis;reboot", "$(reboot)", None, 7]
+        invalid = ["nginx", "JARVIS", "jarvis.service", " jarvis", "--all", "jarvis\n", "jarvis;reboot", "$(reboot)", None, 7]
         for name in invalid:
             for operation in (system_manager.restart_system_service, system_manager.stop_system_service):
                 with self.subTest(name=name, operation=operation.__name__):
@@ -60,7 +61,7 @@ class SystemServiceCommandTests(unittest.TestCase):
 
     @patch("system_manager.subprocess.run")
     def test_each_authorized_restart_is_checked_for_active_state(self, run):
-        self.assertEqual(set(system_manager.SERVICES_ALLOWLIST), {"merca-market", "klasora", "babamarket", "moc-mal", "jarvis"})
+        self.assertEqual(set(system_manager.SERVICES_ALLOWLIST), {"klasora", "ollama", "tunnel"})
         for name in system_manager.SERVICES_ALLOWLIST:
             run.reset_mock()
             run.side_effect = [completed(), completed(0, "active\n")]
@@ -69,8 +70,9 @@ class SystemServiceCommandTests(unittest.TestCase):
             self.assertTrue(result["success"])
             self.assertEqual(result["state"], "active")
             self.assertEqual(result["service"], name)
-            self.assertEqual(run.call_args_list[0].args[0], ["sudo", "-n", "/usr/bin/systemctl", "restart", name + ".service"])
-            self.assertEqual(run.call_args_list[1].args[0], ["/usr/bin/systemctl", "is-active", name + ".service"])
+            unit = config.MANAGED_SERVICES[name]
+            self.assertEqual(run.call_args_list[0].args[0], ["sudo", "-n", "/usr/bin/systemctl", "restart", unit])
+            self.assertEqual(run.call_args_list[1].args[0], ["/usr/bin/systemctl", "is-active", unit])
             for call in run.call_args_list:
                 self.assertIs(call.kwargs["shell"], False)
                 self.assertEqual(call.kwargs["stdin"], subprocess.DEVNULL)
@@ -87,19 +89,19 @@ class SystemServiceCommandTests(unittest.TestCase):
     @patch("system_manager.subprocess.run")
     def test_stop_requires_inactive_state_not_a_running_or_failed_service(self, run):
         run.side_effect = [completed(), completed(3, "inactive\n")]
-        result = system_manager.stop_system_service("babamarket")
+        result = system_manager.stop_system_service("klasora")
         self.assertTrue(result["ok"])
         self.assertEqual(result["state"], "inactive")
-        self.assertEqual(run.call_args_list[0].args[0], ["sudo", "-n", "/usr/bin/systemctl", "stop", "babamarket.service"])
+        self.assertEqual(run.call_args_list[0].args[0], ["sudo", "-n", "/usr/bin/systemctl", "stop", "klasora.service"])
         for state, code in (("active", 0), ("failed", 3), ("deactivating", 0), ("inactive", 4)):
             with self.subTest(state=state, code=code):
                 run.side_effect = [completed(), completed(code, state)]
-                self.assertFalse(system_manager.stop_system_service("jarvis")["ok"])
+                self.assertFalse(system_manager.stop_system_service("klasora")["ok"])
 
     @patch("system_manager.subprocess.run")
     def test_failure_timeout_and_missing_systemctl_are_controlled(self, run):
         run.return_value = completed(1, stderr="secret sudo error")
-        result = system_manager.restart_system_service("moc-mal")
+        result = system_manager.restart_system_service("klasora")
         self.assertFalse(result["ok"])
         self.assertNotIn("secret", result["message"])
         self.assertEqual(run.call_count, 1)
@@ -107,9 +109,9 @@ class SystemServiceCommandTests(unittest.TestCase):
             for operation in (system_manager.restart_system_service, system_manager.stop_system_service):
                 with self.subTest(error=type(error), operation=operation.__name__):
                     run.side_effect = error
-                    self.assertFalse(operation("jarvis")["ok"])
+                    self.assertFalse(operation("klasora")["ok"])
         run.side_effect = [completed(), subprocess.TimeoutExpired("is-active", 5)]
-        self.assertFalse(system_manager.restart_system_service("jarvis")["ok"])
+        self.assertFalse(system_manager.restart_system_service("klasora")["ok"])
 
     @patch("system_manager.subprocess.run", return_value=completed())
     def test_reboot_uses_only_fixed_noninteractive_command(self, run):
@@ -144,7 +146,7 @@ class InfrastructureStatusTests(unittest.TestCase):
         return SimpleNamespace(latest=snapshot, settings=Settings(), vps_snapshot=Mock(return_value=[]),
                                collector=SimpleNamespace(collect=Mock(side_effect=AssertionError("No live collection"))))
 
-    @patch("system_manager.subprocess.run", side_effect=AssertionError("No status subprocess"))
+    @patch("system_manager.subprocess.run", return_value=completed(0, "Id=klasora.service\nActiveState=active\nMemoryCurrent=1048576\n\nId=ollama.service\nActiveState=inactive\nMemoryCurrent=0\n\nId=cloudflared.service\nActiveState=active\nMemoryCurrent=2097152\n"))
     def test_status_is_instant_cached_real_metrics_and_four_local_http_probes(self, run):
         runtime = self.runtime()
         started = time.perf_counter()
@@ -156,7 +158,12 @@ class InfrastructureStatusTests(unittest.TestCase):
         for service in SERVICES:
             self.assertIn(f"{service.label} : systemd active ; HTTP 200 (127.0.0.1:{service.port})", text)
         runtime.collector.collect.assert_not_called()
-        run.assert_not_called()
+        self.assertEqual(run.call_count, 1)
+        self.assertIn("RAM disponible : 12.0 Go", text)
+        self.assertIn("klasora (klasora.service) : active", text)
+        self.assertIn("ollama (ollama.service) : inactive", text)
+        self.assertIn("1 Mio", text)
+        self.assertIn("Gemini Cloud", text)
 
     def test_standalone_realtime_metrics_never_unavailable(self):
         text = system_manager.get_full_infrastructure_status()

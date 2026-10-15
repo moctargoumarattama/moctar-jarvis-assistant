@@ -26,6 +26,12 @@ class EnvironmentConfigTests(unittest.TestCase):
         with patch.dict(os.environ, {'ADMIN_PHONE_NUMBER':''}, clear=True):
             self.assertEqual(Settings.from_env().admin_phone_number, '')
 
+    def test_whatsapp_admin_phone_is_supported_as_single_admin(self):
+        with patch.dict(os.environ, {'WHATSAPP_ADMIN_PHONE': '+212 770-010-265'}, clear=True):
+            settings = Settings.from_env()
+            self.assertEqual(settings.admin_phone_number, '212770010265')
+            self.assertEqual(settings.whatsapp_admin_numbers, ('212770010265',))
+
     def test_vps_token_is_environment_value_or_empty(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(Settings.from_env().vps_token, '')

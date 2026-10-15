@@ -374,6 +374,14 @@ SERVICES = (
 )
 RESTART_ALLOWLIST = frozenset(service.name for service in SERVICES)
 
+# Services contrôlés par WhatsApp ; jarvis.service reste le superviseur permanent.
+MANAGED_SERVICES = {
+    "klasora": "klasora.service",
+    "ollama": "ollama.service",
+    "tunnel": "cloudflared.service",
+}
+MANAGED_SERVICE_GROUPS = {"apps": tuple(MANAGED_SERVICES)}
+
 
 def _noc_number(name: str, default: float, minimum: float, maximum: float) -> float:
     value = float(os.environ.get(name, str(default)))
@@ -411,7 +419,8 @@ def parse_whatsapp_admin_numbers(raw: str) -> tuple[str, ...]:
 
 
 WHATSAPP_ADMIN_NUMBERS = parse_whatsapp_admin_numbers(os.environ.get(
-    "WHATSAPP_ADMIN_NUMBERS", os.environ.get("ADMIN_PHONE_NUMBER", "212770010264")
+    "WHATSAPP_ADMIN_NUMBERS", os.environ.get("WHATSAPP_ADMIN_PHONE",
+    os.environ.get("ADMIN_PHONE_NUMBER", "212770010264"))
 ))
 
 
@@ -477,9 +486,11 @@ class Settings:
             vps_state_path=os.environ.get("NOC_VPS_STATE_PATH", str(Path(os.environ.get("STATE_DIRECTORY") or DATA_DIR) / "vps-registry.json")),
             max_vps=int(_noc_number("NOC_MAX_VPS", 128, 1, 1024)),
             max_streams=int(_noc_number("NOC_MAX_STREAMS", 32, 1, 128)),
-            admin_phone_number=re.sub(r"\D", "", os.environ.get("ADMIN_PHONE_NUMBER", "212770010264")),
+            admin_phone_number=re.sub(r"\D", "", os.environ.get(
+                "WHATSAPP_ADMIN_PHONE", os.environ.get("ADMIN_PHONE_NUMBER", "212770010264"))),
             whatsapp_admin_numbers=parse_whatsapp_admin_numbers(os.environ.get(
-                "WHATSAPP_ADMIN_NUMBERS", os.environ.get("ADMIN_PHONE_NUMBER", "212770010264")
+                "WHATSAPP_ADMIN_NUMBERS", os.environ.get("WHATSAPP_ADMIN_PHONE",
+                os.environ.get("ADMIN_PHONE_NUMBER", "212770010264"))
             )),
             whatsapp_webhook_token=os.environ.get("NOC_WHATSAPP_WEBHOOK_TOKEN", ""),
             whatsapp_session_id=os.environ.get("NOC_WHATSAPP_SESSION_ID", "1"),

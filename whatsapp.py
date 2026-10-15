@@ -185,12 +185,15 @@ def parse_intent(text: str) -> tuple[str, str | None]:
         return "status", None
     if normalized in {"aide", "help"}:
         return "help", None
-    match = re.fullmatch(r"(?:redemarre|restart) ([a-z0-9-]+)", normalized)
-    if match and match[1] in system_manager.SERVICES_ALLOWLIST:
+    match = re.fullmatch(r"(?:redemarre|redemarrage|restart) ([a-z0-9-]+)", normalized)
+    if match and (match[1] in system_manager.SERVICES_ALLOWLIST or match[1] in {"apps", "tout", "jarvis"}):
         return "restart", match[1]
-    match = re.fullmatch(r"(?:arrete|stop) ([a-z0-9-]+)", normalized)
-    if match and match[1] in system_manager.SERVICES_ALLOWLIST:
+    match = re.fullmatch(r"(?:arrete|arret|stop) ([a-z0-9-]+)", normalized)
+    if match and (match[1] in system_manager.SERVICES_ALLOWLIST or match[1] == "jarvis"):
         return "stop", match[1]
+    match = re.fullmatch(r"(?:demarre|demarrage|start) ([a-z0-9-]+)", normalized)
+    if match and match[1] in system_manager.SERVICES_ALLOWLIST:
+        return "start", match[1]
     if normalized == "reboot":
         return "reboot", None
     if normalized == "confirmer reboot":
@@ -491,7 +494,7 @@ class WhatsAppController:
                         if action == "status":
                             response, success = await self._execute(action, service)
                             response = "SIMULATION · " + response
-                        elif action in {"restart", "stop", "backup", "reboot", "confirm_reboot"}:
+                        elif action in {"restart", "start", "stop", "backup", "reboot", "confirm_reboot"}:
                             response, success = f"SIMULATION · {action} {service or ''} reconnu. Aucune action exécutée.", True
                         else:
                             response, success = "SIMULATION · Commande non reconnue. Aucune inférence exécutée.", False
@@ -533,48 +536,37 @@ class WhatsAppController:
 
     async def _execute(self, action: str, service: str | None,
                        message: dict[str, Any] | None = None) -> tuple[str, bool]:
-        if action in {"restart", "stop", "reboot", "confirm_reboot"} and not self.settings.enable_restart:
+        if action == "stop" and service == "jarvis":
+            return "Action refusée : M.O.C.T.A.R est le superviseur permanent et doit rester actif.", False
+        if action in {"restart", "start"} and service == "jarvis":
+            return "Action refusée : M.O.C.T.A.R est le superviseur permanent et ne peut pas être redémarré par WhatsApp.", False
+        if action in {"restart", "start", "stop", "reboot", "confirm_reboot"} and not self.settings.enable_restart:
             self._pending_reboot.clear()
             return "Commandes système désactivées par NOC_ENABLE_RESTART.", False
+        if action in {"reboot", "confirm_reboot"}:
+            self._pending_reboot.clear()
+            return "Action refusée : M.O.C.T.A.R est le superviseur permanent; le redémarrage de l’hôte est interdit par WhatsApp.", False
         if action == "help":
-            return ("Commandes : statut ; restart/redémarre <service> ; stop/arrête <service> ; "
-                    "reboot puis CONFIRMER REBOOT (60 s) ; sauvegarde babamarket ; aide. "
-                    "Services : merca-market, klasora, babamarket, moc-mal, jarvis. "
+            return ("Commandes : statut ; restart/redémarre <service|apps|tout> ; start/démarre <service> ; stop/arrête <service> ; "
+                    "sauvegarde babamarket ; aide. "
+                    "Services : klasora, ollama, tunnel. jarvis.service reste toujours actif. "
                     "Les autres questions sont transmises à M.O.C.T.A.R.", True)
         if action == "status":
             return await asyncio.to_thread(self.system_manager.get_full_infrastructure_status), True
-        if action in {"restart", "stop"} and service in system_manager.SERVICES_ALLOWLIST:
-            operation = (system_manager.restart_system_service if action == "restart"
-                         else system_manager.stop_system_service)
-            result = await asyncio.to_thread(operation, service)
-            success = result.get("ok") is True
+        if action in {"restart", "start", "stop"}:
+            targets = (system_manager.config.MANAGED_SERVICE_GROUPS["apps"]
+                       if service in {"apps", "tout"} and action == "restart" else (service,))
+            operation = {"restart": system_manager.restart_system_service,
+                         "start": system_manager.start_system_service,
+                         "stop": system_manager.stop_system_service}[action]
+            results = [await asyncio.to_thread(operation, target) for target in targets]
+            success = all(result.get("ok") is True for result in results)
             if success:
-                return (f"Service {service} redémarré avec succès (actif)." if action == "restart"
-                        else f"Service {service} arrêté avec succès (inactif)."), True
-            return f"Service {service} : {str(result.get('message', 'opération échouée'))[:240]}", False
-        if action in {"reboot", "confirm_reboot"}:
-            if message and message.get("source") != "text":
-                return "Sécurité : envoyez REBOOT puis CONFIRMER REBOOT par messages texte, sans note vocale.", False
-            if not message or message.get("sender") not in admin_numbers(self.settings):
-                return "ALERTE : redémarrage refusé, administrateur non authentifié.", False
-            identity = (message["sender"], message["session"])
-            now = time.monotonic()
-            self._pending_reboot = {key: expires for key, expires in self._pending_reboot.items()
-                                    if expires > now}
-            if action == "reboot":
-                self._pending_reboot[identity] = now + 60
-                return ("ATTENTION : Confirmez le redémarrage du serveur hôte en envoyant "
-                        "'CONFIRMER REBOOT' dans les 60 secondes.", True)
-            # Consommer AVANT l'appel : répétitions et échecs ne relancent jamais le reboot.
-            expires = self._pending_reboot.pop(identity, None)
-            if expires is None or expires <= now:
-                return "Redémarrage refusé : aucune demande REBOOT en attente, ou confirmation expirée.", False
-            self.runtime.collector.add_event("warning", "WhatsApp · redémarrage hôte confirmé par un administrateur.")
-            await self._send_reply("Confirmation reçue : redémarrage du serveur hôte en cours.", message["sender"])
-            result = await asyncio.to_thread(system_manager.reboot_host)
-            success = result.get("ok") is True
-            return ("Redémarrage du serveur hôte demandé." if success
-                    else "Redémarrage du serveur hôte refusé ou en échec."), success
+                verb = {"restart": "redémarré", "start": "démarré", "stop": "arrêté"}[action]
+                return "; ".join(f"{target} {verb} avec succès" for target in targets), True
+            failures = [str(result.get("message", "opération échouée"))[:180]
+                        for result in results if result.get("ok") is not True]
+            return "Échec : " + "; ".join(failures), False
         if action == "backup":
             return await self._backup()
         if action == "unknown" and message and not is_control_message(message["text"]):
