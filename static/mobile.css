@@ -1,5 +1,5 @@
 /* Mobile overrides only: desktop and laptop rules remain in their original files. */
-@media (max-width: 767px) {
+@media (max-width: 767px), (max-width: 1023px) and (max-height: 600px) and (hover: none) and (pointer: coarse) {
   html, body { width: 100%; overflow-x: hidden; }
 
   main.cosmos-home {
@@ -184,6 +184,7 @@
   @keyframes mobile-dialog-out { to { opacity: 0; } }
 }
 
-@media (max-width: 767px) and (prefers-reduced-motion: reduce) {
+@media (max-width: 767px) and (prefers-reduced-motion: reduce),
+       (max-width: 1023px) and (max-height: 600px) and (hover: none) and (pointer: coarse) and (prefers-reduced-motion: reduce) {
   dialog[open], dialog[open][data-closing] { animation-duration: .01ms !important; }
 }

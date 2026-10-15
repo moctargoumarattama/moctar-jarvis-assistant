@@ -1,11 +1,12 @@
 """PWA resources stay available over HTTP in tests and never cache NOC data."""
+import re
 import struct
 
 import pytest
 from fastapi.testclient import TestClient
 
 from config import Settings
-from main import create_app
+from main import BASE_DIR, create_app
 
 
 @pytest.fixture
@@ -62,3 +63,21 @@ def test_ios_installation_uses_native_sized_logo(client):
 def test_pwa_icon_route_cannot_serve_other_files(client):
     assert client.get("/static/icons/config.py").status_code == 404
     assert client.get("/static/icons/unknown.png").status_code == 404
+
+
+@pytest.mark.parametrize("name,media_type", [
+    ("mobile.css", "text/css"),
+    ("mobile.js", "application/javascript"),
+])
+def test_dashboard_mobile_resources_are_served_with_version_query(client, name, media_type):
+    page = client.get("/")
+    assert page.status_code == 200
+    resource = re.search(rf'(?:href|src)="(/static/{re.escape(name)}\?[^\"]+)"', page.text)
+    assert resource is not None, f"The dashboard must load {name}"
+
+    response = client.get(resource.group(1))
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(media_type)
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.content == (BASE_DIR / "static" / name).read_bytes()

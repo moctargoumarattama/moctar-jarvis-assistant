@@ -28,7 +28,10 @@ function frontend({mobile = true, visualViewport = true} = {}) {
     }},
     visualViewport: viewport,
     innerHeight: 900,
-    matchMedia: query => {assert.equal(query, '(max-width: 767px)'); return media;},
+    matchMedia: query => {
+      assert.equal(query, '(max-width: 767px), (max-width: 1023px) and (max-height: 600px) and (hover: none) and (pointer: coarse)');
+      return media;
+    },
     addEventListener: (name, handler) => {events['window:' + name] = handler;},
     requestAnimationFrame: handler => {frames.push(handler);},
   };

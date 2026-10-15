@@ -332,6 +332,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def cosmos_styles():
         return FileResponse(BASE_DIR / "static" / "cosmos.css", media_type="text/css")
 
+    @application.get("/static/mobile.js", include_in_schema=False)
+    async def mobile_script():
+        return FileResponse(BASE_DIR / "static" / "mobile.js", media_type="application/javascript")
+
+    @application.get("/static/mobile.css", include_in_schema=False)
+    async def mobile_styles():
+        return FileResponse(BASE_DIR / "static" / "mobile.css", media_type="text/css")
+
     @application.get("/manifest.webmanifest", include_in_schema=False)
     async def pwa_manifest():
         return FileResponse(BASE_DIR / "static" / "manifest.webmanifest", media_type="application/manifest+json")

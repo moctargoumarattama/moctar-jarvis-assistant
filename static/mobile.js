@@ -4,7 +4,10 @@
   const root = window.document?.documentElement;
   if (!root || !window.matchMedia) return;
 
-  const mobile = window.matchMedia('(max-width: 767px)');
+  // A phone remains mobile after rotation beyond the portrait width breakpoint.
+  const mobile = window.matchMedia(
+    '(max-width: 767px), (max-width: 1023px) and (max-height: 600px) and (hover: none) and (pointer: coarse)'
+  );
   const viewport = window.visualViewport;
   let scheduled = false;
 
