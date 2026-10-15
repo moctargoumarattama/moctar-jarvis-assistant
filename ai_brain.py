@@ -23,8 +23,13 @@ from knowledge_library import KnowledgeLibrary
 
 try:
     from google import genai
-except ImportError:
+    from google.genai import types as genai_types
+except ImportError as exc:
     genai = None
+    genai_types = None
+    _GENAI_IMPORT_ERROR = str(exc)
+else:
+    _GENAI_IMPORT_ERROR = None
 
 try:
     from dotenv import load_dotenv
@@ -1330,8 +1335,8 @@ def ask_ollama(
             if brain.gemini_client is not None:
                 try:
                     brain.gemini_client.close()
-                except Exception:
-                    logger.debug("Fermeture du client Gemini indisponible")
+                except Exception as exc:
+                    logger.warning("Échec fermeture Gemini: %s", exc, exc_info=True)
         if reply.get("finish_reason") == "error":
             raise OllamaRequestError("AI providers are unavailable")
         message = {"role": "assistant", "content": reply.get("content") or ""}
@@ -1409,7 +1414,7 @@ class AIBrain:
         self.base_url = (base_url or default_base_url or DEFAULT_BASE_URL).rstrip("/")
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.timeout = float(timeout or os.getenv("LLM_TIMEOUT_SECONDS") or OLLAMA_TIMEOUT_SECONDS)
-        self.gemini_timeout = min(self.timeout, 30.0)
+        self.gemini_timeout = max(10.0, float(os.getenv("GEMINI_TIMEOUT_SECONDS", "15.0")))
         self.last_provider = None
         self._provider_online = {"ollama": None, "gemini": None, "openai": None}
         self._provider_checked_at = {}
@@ -1440,11 +1445,13 @@ class AIBrain:
             try:
                 self.gemini_client = genai.Client(
                     api_key=gemini_key,
-                    http_options={"timeout": max(1, int(self.gemini_timeout * 1000)),
-                                  "retry_options": {"attempts": 1}},
+                    http_options=genai_types.HttpOptions(
+                        timeout=max(10000, int(self.gemini_timeout * 1000)),
+                        retry_options=genai_types.HttpRetryOptions(attempts=1),
+                    ),
                 )
-            except Exception:
-                logger.warning("Initialisation Gemini indisponible")
+            except Exception as exc:
+                logger.warning("Échec initialisation Gemini: %s", exc, exc_info=True)
 
         logger.info(
             "AIBrain initialisé [type=%s, model=%s, base_url=%s, timeout=%ss]",
@@ -1604,9 +1611,34 @@ class AIBrain:
 
         return tool_calls
 
+    @staticmethod
+    def _chat_messages(messages):
+        """Accept simple prompts, bridge messages and native Gemini content objects."""
+        if isinstance(messages, str):
+            return [{"role": "user", "content": messages}]
+        if isinstance(messages, dict):
+            messages = [messages]
+        normalized = []
+        for message in messages:
+            if callable(getattr(message, "model_dump", None)):
+                message = message.model_dump(mode="json", exclude_none=True)
+            if not isinstance(message, dict):
+                raise TypeError("Each chat message must be a role/content or role/parts object")
+            message = dict(message)
+            if message.get("role") == "model":
+                message["role"] = "assistant"
+            if "parts" in message and "content" not in message:
+                message["content"] = "".join(part.get("text", "") for part in message["parts"])
+            normalized.append(message)
+        return normalized
+
+    def ask(self, prompt, **kwargs):
+        """Convenience entry point for scripts; chat retains the bridge response contract."""
+        return self.chat(prompt, **kwargs).get("content") or ""
+
     def chat(
         self,
-        messages: List[Dict[str, Any]],
+        messages: Union[str, List[Dict[str, Any]]],
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: Optional[float] = None,
     ) -> Dict[str, Any]:
@@ -1625,14 +1657,16 @@ class AIBrain:
                 "finish_reason": str
             }
         """
+        messages = self._chat_messages(messages)
+
         def cloud_request():
             try:
                 result = _with_inference_deadline(
                     lambda: self._chat_gemini(messages, tools=tools, temperature=0.2 if temperature is None else temperature),
                     self.gemini_timeout,
                 )
-            except Exception:
-                logger.warning("Appel Gemini indisponible")
+            except Exception as exc:
+                logger.warning("Échec appel Gemini: %s", exc, exc_info=True)
                 result = {"content": "Le moteur IA est indisponible pour le moment.",
                           "tool_calls": [], "finish_reason": "error"}
             self._record_provider_result("gemini", result)
@@ -1674,9 +1708,13 @@ class AIBrain:
         """Translate model/tool turns without letting the SDK execute local actions."""
         error = {"content": "Le moteur IA est indisponible pour le moment.",
                  "tool_calls": [], "finish_reason": "error"}
-        if self.gemini_client is None:
-            return error
         try:
+            if self.gemini_client is None or genai_types is None:
+                raise RuntimeError(
+                    "Client Gemini non initialisé : vérifier GEMINI_API_KEY et google-genai"
+                    + (f" ({_GENAI_IMPORT_ERROR})" if _GENAI_IMPORT_ERROR else "")
+                )
+            messages = self._chat_messages(messages)
             contents = []
             instructions = []
             for message in messages:
@@ -1702,6 +1740,8 @@ class AIBrain:
                     parts.append({"function_response": function_response})
                 elif role == "assistant" and message.get("_gemini_parts"):
                     parts = message["_gemini_parts"]
+                elif message.get("parts"):
+                    parts = message["parts"]
                 else:
                     if content:
                         parts.append({"text": str(content)})
@@ -1728,33 +1768,61 @@ class AIBrain:
                 else:
                     contents.append({"role": gemini_role, "parts": parts})
 
-            generation_config = {
+            generation_options = {
                 "temperature": temperature,
                 "max_output_tokens": GENERATION_CONFIG["max_tokens"],
                 "top_p": GENERATION_CONFIG["top_p"],
                 "automatic_function_calling": {"disable": True},
-                "http_options": {"timeout": max(1, int(self.gemini_timeout * 1000)),
-                                 "retry_options": {"attempts": 1}},
+                "http_options": genai_types.HttpOptions(
+                    timeout=max(10000, int(self.gemini_timeout * 1000)),
+                    retry_options=genai_types.HttpRetryOptions(attempts=1),
+                ),
             }
             if self.gemini_model.startswith("gemini-3"):
-                generation_config["thinking_config"] = {"thinking_level": "minimal"}
+                generation_options["thinking_config"] = genai_types.ThinkingConfig(thinking_level="minimal")
             if instructions:
-                generation_config["system_instruction"] = "\n\n".join(instructions)
+                generation_options["system_instruction"] = "\n\n".join(instructions)
             if tools:
                 declarations = []
                 for tool in tools:
                     function = tool.get("function") or tool
-                    declarations.append({
-                        "name": function["name"], "description": function.get("description", ""),
-                        "parameters_json_schema": function.get("parameters") or {"type": "object", "properties": {}},
-                    })
-                generation_config["tools"] = [{"function_declarations": declarations}]
-            response = self.gemini_client.models.generate_content(
-                model=self.gemini_model, contents=contents, config=generation_config,
-            )
+                    declarations.append(genai_types.FunctionDeclaration(
+                        name=function["name"], description=function.get("description", ""),
+                        parameters_json_schema=function.get("parameters") or {"type": "object", "properties": {}},
+                    ))
+                generation_options["tools"] = [genai_types.Tool(function_declarations=declarations)]
+            generation_config = genai_types.GenerateContentConfig(**generation_options)
+            contents = [genai_types.Content(
+                role=content["role"], parts=[genai_types.Part.model_validate(part) for part in content["parts"]],
+            ) for content in contents]
+            try:
+                response = self.gemini_client.models.generate_content(
+                    model=self.gemini_model, contents=contents, config=generation_config,
+                )
+            except Exception as exc:
+                detail = str(exc).lower()
+                bad_tool_schema = getattr(exc, "code", None) == 400 and any(
+                    marker in detail for marker in ("function_declarations", "function declaration", "json schema", "tools[")
+                ) and "deadline" not in detail
+                has_tool_history = any(message.get("role") == "tool" or message.get("tool_calls")
+                                       or message.get("_gemini_parts") for message in messages)
+                if not tools or not bad_tool_schema or has_tool_history:
+                    raise
+                logger.warning("Échec appel Gemini: %s", exc, exc_info=True)
+                # Retry only schema rejection, before any action; never retry auth/quota errors.
+                generation_config = generation_config.model_copy(update={
+                    "tools": None, "tool_config": None,
+                    "system_instruction": "\n\n".join(instructions + [
+                        "Les outils sont indisponibles pour cet appel. Réponds directement avec les informations "
+                        "disponibles ; ne prétends pas exécuter une action et n'invente aucune mesure."
+                    ]),
+                })
+                response = self.gemini_client.models.generate_content(
+                    model=self.gemini_model, contents=contents, config=generation_config,
+                )
             candidates = response.candidates or []
             if not candidates or not candidates[0].content:
-                return error
+                raise RuntimeError(f"Gemini returned no content (prompt_feedback={response.prompt_feedback})")
             text_parts = []
             tool_calls = []
             for part in candidates[0].content.parts or []:
@@ -1768,7 +1836,7 @@ class AIBrain:
                                        "name": call.name, "arguments": dict(call.args or {})})
             content = "".join(text_parts) or None
             if not content and not tool_calls:
-                return error
+                raise RuntimeError(f"Gemini returned no text or tool calls (finish_reason={candidates[0].finish_reason})")
             if not tool_calls and content:
                 tool_calls = self._extract_text_tool_calls(content)
             result = {"content": content, "tool_calls": tool_calls,
@@ -1781,9 +1849,8 @@ class AIBrain:
                 if serialized and any(getattr(part, "function_call", None) for part in parts):
                     result["_gemini_parts"] = serialized
             return result
-        except Exception:
-            # Do not expose credentials or transport details in user-facing replies.
-            logger.warning("Appel Gemini indisponible")
+        except Exception as exc:
+            logger.warning("Échec appel Gemini: %s", exc, exc_info=True)
             return error
 
     def _chat_ollama(

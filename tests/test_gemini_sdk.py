@@ -1,7 +1,9 @@
 """Exercise Gemini serialization with the real SDK and an offline HTTP transport."""
 
 import base64
+from contextlib import ExitStack
 import json
+import logging
 import os
 from unittest.mock import Mock, patch
 
@@ -13,6 +15,48 @@ from actions import get_all_tools_schema
 from agent_core import AgentCore
 from assistant_plugins import PluginRegistry
 from assistant_security import SecurityPolicy
+
+
+SDK_TEST_TOOLS = [{
+    "type": "function",
+    "function": {
+        "name": "test_clock",
+        "description": "Read the test clock",
+        "parameters": {
+            "type": "object", "properties": {}, "additionalProperties": False,
+        },
+    },
+}]
+
+
+def sdk_text_response(text="Gemini operationnel."):
+    return httpx.Response(200, json={"candidates": [{
+        "content": {"role": "model", "parts": [{"text": text}]},
+        "finishReason": "STOP",
+    }]})
+
+
+@pytest.fixture
+def sdk_brain_factory():
+    """Keep the real client/serializer; replace only the network transport."""
+    genai = pytest.importorskip("google.genai")
+    with ExitStack() as stack:
+        def create(respond, provider="gemini"):
+            http = stack.enter_context(httpx.Client(transport=httpx.MockTransport(respond)))
+            client = stack.enter_context(genai.Client(
+                api_key="offline-validation", http_options={"httpx_client": http},
+            ))
+            with patch.dict(os.environ, {
+                "GEMINI_API_KEY": "", "GEMINI_MODEL": "gemini-3.5-flash-lite",
+            }):
+                brain = ai_brain.AIBrain(api_type=provider)
+            brain.gemini_client = client
+            generate = stack.enter_context(patch.object(
+                client.models, "generate_content", wraps=client.models.generate_content,
+            ))
+            return brain, generate
+
+        yield create
 
 
 def assert_fast_generation_config(generation):
@@ -121,3 +165,185 @@ def test_real_sdk_and_agent_preserve_signed_hybrid_tool_turns_on_gemini():
     assert observation["response"]["result"] == "12:00"
     assert requests[0]["generationConfig"] == requests[1]["generationConfig"]
     assert_fast_generation_config(requests[0]["generationConfig"])
+
+
+@pytest.mark.parametrize("entrypoint", ["ask", "chat"])
+def test_real_sdk_accepts_simple_text_and_typed_config(sdk_brain_factory, entrypoint):
+    from google.genai import types
+
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return sdk_text_response()
+
+    brain, generate = sdk_brain_factory(respond)
+    result = getattr(brain, entrypoint)("Verifie le relais Gemini.")
+
+    if entrypoint == "ask":
+        assert result == "Gemini operationnel."
+    else:
+        assert result == {
+            "content": "Gemini operationnel.", "tool_calls": [], "finish_reason": "stop",
+        }
+    assert generate.call_count == len(requests) == 1
+    kwargs = generate.call_args.kwargs
+    assert kwargs["model"] == "gemini-3.5-flash-lite"
+    assert isinstance(kwargs["config"], types.GenerateContentConfig)
+    assert all(isinstance(content, types.Content) for content in kwargs["contents"])
+    assert all(isinstance(part, types.Part) for content in kwargs["contents"] for part in content.parts)
+    payload = json.loads(requests[0].content)
+    assert payload["contents"][-1] == {
+        "role": "user", "parts": [{"text": "Verifie le relais Gemini."}],
+    }
+    assert_fast_generation_config(payload["generationConfig"])
+    assert requests[0].url.path.endswith("/models/gemini-3.5-flash-lite:generateContent")
+
+
+def test_real_sdk_serializes_system_messages_and_converted_tools(sdk_brain_factory):
+    from google.genai import types
+
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return sdk_text_response()
+
+    brain, generate = sdk_brain_factory(respond)
+    messages = [
+        {"role": "system", "content": "Reponds en francais."},
+        {"role": "user", "content": "Question precedente"},
+        {"role": "assistant", "content": "Reponse precedente"},
+        {"role": "user", "content": "Consulte l'horloge."},
+    ]
+    result = brain.chat(messages, tools=SDK_TEST_TOOLS)
+
+    assert result["content"] == "Gemini operationnel."
+    assert generate.call_count == len(requests) == 1
+    config = generate.call_args.kwargs["config"]
+    assert isinstance(config, types.GenerateContentConfig)
+    assert isinstance(config.tools[0], types.Tool)
+    assert isinstance(config.tools[0].function_declarations[0], types.FunctionDeclaration)
+    assert config.automatic_function_calling.disable is True
+    assert requests[0]["systemInstruction"]["parts"] == [{"text": "Reponds en francais."}]
+    assert [content["role"] for content in requests[0]["contents"]] == ["user", "model", "user"]
+    declaration = requests[0]["tools"][0]["functionDeclarations"][0]
+    assert declaration["name"] == "test_clock"
+    # google-genai 2.31 serializes the JSON schema extension in snake_case.
+    schema = declaration.get("parameters_json_schema", declaration.get("parametersJsonSchema"))
+    assert schema == SDK_TEST_TOOLS[0]["function"]["parameters"]
+    assert_fast_generation_config(requests[0]["generationConfig"])
+
+
+def test_real_sdk_gemini_deadline_remains_at_least_ten_seconds(sdk_brain_factory, monkeypatch):
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "8")
+    monkeypatch.setenv("GEMINI_TIMEOUT_SECONDS", "1")
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return sdk_text_response()
+
+    brain, generate = sdk_brain_factory(respond)
+    result = brain.ask("Verifie le delai Google.")
+
+    assert result == "Gemini operationnel."
+    assert brain.gemini_timeout >= 10.0
+    assert generate.call_args.kwargs["config"].http_options.timeout >= 10000
+    assert generate.call_count == len(requests) == 1
+    assert float(requests[0].headers["x-server-timeout"]) >= 10.0
+
+
+def test_real_sdk_retries_schema_rejection_once_without_tools(sdk_brain_factory, caplog):
+    requests = []
+    error_message = (
+        "Invalid JSON schema in GenerateContentRequest.tools[0].function_declarations[0]."
+        "parameters.properties: unsupported schema."
+    )
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(400, json={"error": {
+                "code": 400, "status": "INVALID_ARGUMENT", "message": error_message,
+            }})
+        return sdk_text_response("Reponse texte de secours.")
+
+    brain, generate = sdk_brain_factory(respond)
+    with caplog.at_level(logging.WARNING, logger="jarvis.ai"):
+        result = brain.chat("Explique la situation.", tools=SDK_TEST_TOOLS)
+
+    assert result == {
+        "content": "Reponse texte de secours.", "tool_calls": [], "finish_reason": "stop",
+    }
+    assert generate.call_count == len(requests) == 2
+    assert "tools" in requests[0]
+    assert not requests[1].get("tools")
+    assert requests[0]["contents"] == requests[1]["contents"]
+    assert brain.last_provider == "gemini"
+    assert brain.get_health_status(probe=False)["online"] is True
+    assert any(record.exc_info for record in caplog.records if error_message in record.getMessage())
+
+
+@pytest.mark.parametrize("status, error_status, message", [
+    (400, "INVALID_ARGUMENT", "API key not valid. Please pass a valid API key."),
+    (400, "INVALID_ARGUMENT", "The request deadline is 8.0s, but must be at least 10.0s."),
+    (403, "PERMISSION_DENIED", "Permission denied for this API key."),
+    (404, "NOT_FOUND", "models/gemini-3.5-flash-lite is not found for generateContent."),
+    (429, "RESOURCE_EXHAUSTED", "Quota exhausted for this API key."),
+    (500, "INTERNAL", "Internal server error."),
+])
+def test_real_sdk_failure_logs_traceback_without_text_retry(
+    sdk_brain_factory, caplog, status, error_status, message,
+):
+    from google.genai import errors
+
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(status, json={"error": {
+            "code": status, "status": error_status, "message": message,
+        }})
+
+    brain, generate = sdk_brain_factory(respond)
+    with caplog.at_level(logging.WARNING, logger="jarvis.ai"):
+        result = brain.chat("Verifie l'IA.", tools=SDK_TEST_TOOLS)
+
+    assert result["finish_reason"] == "error"
+    assert result["tool_calls"] == []
+    assert message not in result["content"]
+    assert generate.call_count == len(requests) == 1
+    failures = [record for record in caplog.records if record.msg == "Échec appel Gemini: %s"]
+    assert failures
+    assert message in failures[-1].getMessage()
+    assert failures[-1].exc_info is not None
+    assert isinstance(failures[-1].exc_info[1], errors.APIError)
+    assert failures[-1].exc_info[2] is not None
+
+
+def test_real_sdk_does_not_retry_without_tools_during_function_history(sdk_brain_factory, caplog):
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(400, json={"error": {
+            "code": 400, "status": "INVALID_ARGUMENT",
+            "message": "GenerateContentRequest.tools[0].function_declarations: invalid JSON schema.",
+        }})
+
+    brain, generate = sdk_brain_factory(respond)
+    messages = [
+        {"role": "user", "content": "Quelle heure est-il ?"},
+        {"role": "assistant", "content": "", "tool_calls": [{
+            "id": "clock-call", "function": {"name": "test_clock", "arguments": "{}"},
+        }]},
+        {"role": "tool", "name": "test_clock", "tool_call_id": "clock-call", "content": "12:00"},
+    ]
+    with caplog.at_level(logging.WARNING, logger="jarvis.ai"):
+        result = brain.chat(messages, tools=SDK_TEST_TOOLS)
+
+    assert result["finish_reason"] == "error"
+    assert generate.call_count == len(requests) == 1
+    assert requests[0]["contents"][-1]["parts"][0]["functionResponse"]["name"] == "test_clock"
+    assert any(record.exc_info for record in caplog.records if record.msg == "Échec appel Gemini: %s")

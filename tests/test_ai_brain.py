@@ -528,6 +528,79 @@ class GeminiBrainTests(unittest.TestCase):
         self.client.models.generate_content.assert_called_once()
         local.assert_not_called()
 
+    def test_gemini_accepts_a_plain_text_prompt(self):
+        brain = ai_brain.AIBrain(api_type="gemini")
+
+        result = brain.chat("Explique le solaire.")
+
+        self.assertEqual("Reponse Gemini.", result["content"])
+        contents = self.client.models.generate_content.call_args.kwargs["contents"]
+        self.assertEqual("user", contents[0].role)
+        self.assertEqual("Explique le solaire.", contents[0].parts[0].text)
+
+    def test_ask_returns_text_for_plain_prompts_and_message_history(self):
+        brain = ai_brain.AIBrain(api_type="gemini")
+        for prompt in ("Explique le solaire.", [{"role": "user", "content": "Explique le solaire."}]):
+            with self.subTest(prompt=prompt):
+                self.client.models.generate_content.reset_mock()
+
+                result = brain.ask(prompt)
+
+                self.assertEqual("Reponse Gemini.", result)
+                self.client.models.generate_content.assert_called_once()
+
+    def test_gemini_generation_error_logs_original_exception_and_traceback(self):
+        brain = ai_brain.AIBrain(api_type="gemini")
+        failure = RuntimeError("Google 400: unsupported generation configuration")
+        self.client.models.generate_content.side_effect = failure
+
+        with self.assertLogs(ai_brain.logger, level="WARNING") as captured:
+            result = brain.chat("Explique le solaire.")
+
+        self.assertEqual("error", result["finish_reason"])
+        self.assertNotIn(str(failure), result["content"])
+        record = next(record for record in captured.records if str(failure) in record.getMessage())
+        self.assertIs(failure, record.exc_info[1])
+        self.assertIsNotNone(record.exc_info[2])
+        self.assertIn("Traceback (most recent call last)", "\n".join(captured.output))
+
+    def test_gemini_initialization_error_logs_original_exception_and_traceback(self):
+        failure = RuntimeError("Google SDK client initialization failed")
+        self.genai.Client.side_effect = failure
+
+        with self.assertLogs(ai_brain.logger, level="WARNING") as captured:
+            brain = ai_brain.AIBrain(api_type="gemini")
+
+        self.assertIsNone(brain.gemini_client)
+        record = next(record for record in captured.records if str(failure) in record.getMessage())
+        self.assertIs(failure, record.exc_info[1])
+        self.assertIsNotNone(record.exc_info[2])
+
+    def test_outer_cloud_request_error_logs_original_exception_and_traceback(self):
+        brain = ai_brain.AIBrain(api_type="gemini")
+        failure = RuntimeError("Unexpected cloud worker failure")
+
+        with patch.object(brain, "_chat_gemini", side_effect=failure), \
+                self.assertLogs(ai_brain.logger, level="WARNING") as captured:
+            result = brain.chat("Explique le solaire.")
+
+        self.assertEqual("error", result["finish_reason"])
+        record = next(record for record in captured.records if str(failure) in record.getMessage())
+        self.assertIs(failure, record.exc_info[1])
+        self.assertIsNotNone(record.exc_info[2])
+
+    def test_missing_gemini_client_logs_configuration_failure_with_traceback(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}):
+            brain = ai_brain.AIBrain(api_type="gemini")
+
+        with self.assertLogs(ai_brain.logger, level="WARNING") as captured:
+            result = brain.chat("Explique le solaire.")
+
+        self.assertEqual("error", result["finish_reason"])
+        self.client.models.generate_content.assert_not_called()
+        self.assertTrue(any(record.exc_info and record.exc_info[2] is not None
+                            for record in captured.records))
+
     def test_explicit_ollama_never_falls_back_to_gemini(self):
         brain = ai_brain.AIBrain(api_type="ollama")
         with patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")):
@@ -567,15 +640,18 @@ class GeminiBrainTests(unittest.TestCase):
         self.assertEqual([{"id": "gemini-call-1", "name": "create_note", "arguments": {"target": "rapport solaire"}}], first["tool_calls"])
         request = self.client.models.generate_content.call_args.kwargs
         self.assertEqual("gemini-test-model", request["model"])
-        self.assertEqual("Tu es Jarvis.", request["config"]["system_instruction"])
-        self.assertEqual(0.2, request["config"]["temperature"])
-        self.assertEqual(350, request["config"]["max_output_tokens"])
-        self.assertEqual(0.8, request["config"]["top_p"])
-        declaration = request["config"]["tools"][0]["function_declarations"][0]
+        self.assertIsInstance(request["config"], ai_brain.genai_types.GenerateContentConfig)
+        generation_config = request["config"].model_dump(mode="json", exclude_none=True)
+        self.assertEqual("Tu es Jarvis.", generation_config["system_instruction"])
+        self.assertEqual(0.2, generation_config["temperature"])
+        self.assertEqual(350, generation_config["max_output_tokens"])
+        self.assertEqual(0.8, generation_config["top_p"])
+        declaration = generation_config["tools"][0]["function_declarations"][0]
         self.assertEqual("create_note", declaration["name"])
         self.assertEqual(tools[0]["function"]["parameters"], declaration["parameters_json_schema"])
-        self.assertTrue(request["config"]["automatic_function_calling"]["disable"])
-        self.assertEqual([{"role": "user", "parts": [{"text": "Cree la note."}]}], request["contents"])
+        self.assertTrue(generation_config["automatic_function_calling"]["disable"])
+        contents = [content.model_dump(mode="json", exclude_none=True) for content in request["contents"]]
+        self.assertEqual([{"role": "user", "parts": [{"text": "Cree la note."}]}], contents)
 
         observation = {"success": True, "message": "Note creee."}
         messages.extend([
@@ -585,8 +661,9 @@ class GeminiBrainTests(unittest.TestCase):
         second = brain.chat(messages, tools=tools, temperature=0.15)
 
         self.assertEqual("Note creee.", second["content"])
-        self.assertEqual(0.15, self.client.models.generate_content.call_args.kwargs["config"]["temperature"])
-        contents = self.client.models.generate_content.call_args.kwargs["contents"]
+        self.assertEqual(0.15, self.client.models.generate_content.call_args.kwargs["config"].temperature)
+        contents = [content.model_dump(mode="json", exclude_none=True)
+                    for content in self.client.models.generate_content.call_args.kwargs["contents"]]
         self.assertEqual("model", contents[1]["role"])
         self.assertEqual("create_note", contents[1]["parts"][0]["function_call"]["name"])
         response = contents[2]["parts"][0]["function_response"]
@@ -688,9 +765,24 @@ class GeminiBrainTests(unittest.TestCase):
             result = brain.chat([{"role": "user", "content": "Analyse ces mesures."}])
 
         self.assertEqual("Reponse Gemini.", result["content"])
-        self.assertEqual(30000, self.client.models.generate_content.call_args.kwargs["config"]["http_options"]["timeout"])
+        self.assertEqual(15000, self.client.models.generate_content.call_args.kwargs["config"].http_options.timeout)
         self.assertEqual(0.05, brain.timeout)
         self.assertTrue(brain.get_health_status(probe=False)["gemini_online"])
+
+    def test_gemini_http_deadline_is_at_least_ten_seconds_despite_eight_second_local_budget(self):
+        for requested, expected_milliseconds in (("1", 10000), ("8", 10000), ("9.99", 10000),
+                                                  ("10", 10000), ("15", 15000)):
+            with self.subTest(requested=requested), \
+                    patch.dict(os.environ, {"GEMINI_TIMEOUT_SECONDS": requested}):
+                brain = ai_brain.AIBrain(api_type="gemini", timeout=8)
+                result = brain.chat("Explique le solaire.")
+
+                self.assertEqual("Reponse Gemini.", result["content"])
+                self.assertEqual(8.0, brain.timeout)
+                self.assertEqual(expected_milliseconds / 1000, brain.gemini_timeout)
+                self.assertEqual(expected_milliseconds, self.genai.Client.call_args.kwargs["http_options"].timeout)
+                self.assertEqual(expected_milliseconds,
+                                 self.client.models.generate_content.call_args.kwargs["config"].http_options.timeout)
 
     def test_gemini_exception_is_normalized_and_both_failed_providers_are_offline(self):
         brain = ai_brain.AIBrain(api_type="hybrid")

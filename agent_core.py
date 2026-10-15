@@ -184,13 +184,10 @@ class AgentCore:
 
         if self.chat_client is not None:
             think_flag = self._should_think(messages[-1].get("content", "")) if think is None else think
-            try:
-                response = self.chat_client(
-                    messages, tools=active_tools, think=think_flag,
-                    temperature=ai_brain.OLLAMA_TEMPERATURE,
-                )
-            except Exception as exc:
-                raise exc
+            response = self.chat_client(
+                messages, tools=active_tools, think=think_flag,
+                temperature=ai_brain.OLLAMA_TEMPERATURE,
+            )
 
             # Normalisation selon la forme de la réponse du chat_client
             if isinstance(response, dict) and "message" in response:
@@ -297,7 +294,7 @@ class AgentCore:
             try:
                 llm_response = self._call_llm(messages, tools=active_tools)
             except Exception as exc:
-                logger.error("[ERROR] Échec lors de l'appel LLM: %s", exc)
+                logger.error("[ERROR] Échec lors de l'appel LLM: %s", exc, exc_info=True)
                 return f"Désolé, une erreur est survenue lors de l'inférence : {exc}"
 
             if llm_response.get("finish_reason") == "error":
@@ -465,7 +462,7 @@ class AgentCore:
             forced_response = self._call_llm(messages, tools=None)
             final_text = (forced_response.get("content") or "").strip()
         except Exception as exc:
-            logger.warning("Erreur lors de la synthese forcee LLM : %s", exc)
+            logger.warning("Erreur lors de la synthese forcee LLM : %s", exc, exc_info=True)
             final_text = ""
 
         if not final_text:
@@ -583,7 +580,7 @@ class AgentCore:
             try:
                 llm_response = self._call_llm(state.messages, tools=active_tools, think=state.thinking)
             except Exception as exc:
-                logger.warning("Exception lors de l'appel LLM dans run(): %s", exc)
+                logger.warning("Exception lors de l'appel LLM dans run(): %s", exc, exc_info=True)
                 if fallback is not None:
                     return AgentResult(response=fallback(), status="fallback", used_fallback=True)
                 return AgentResult(response=f"Erreur d'inférence : {exc}", status="error")
@@ -891,6 +888,7 @@ class AgentCore:
             content = llm_response.get("content") or "Action effectuée avec succès."
             return AgentResult(response=content.strip(), status="final")
         except Exception as exc:
+            logger.warning("Exception lors de l'appel LLM après confirmation : %s", exc, exc_info=True)
             if fallback is not None:
                 return AgentResult(response=fallback(), status="fallback", used_fallback=True)
             return AgentResult(response=f"Erreur après confirmation : {exc}", status="error")

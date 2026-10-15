@@ -1,7 +1,7 @@
 from copy import deepcopy
 import json
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from agent_core import AGENT_SYSTEM_PROMPT, AgentCore
 from assistant_plugins import PluginRegistry
@@ -384,16 +384,74 @@ class AgentCoreTests(unittest.TestCase):
         self.assertEqual(2, handler.call_count)
 
     def test_ollama_failure_uses_historical_fallback(self):
-        chat = ScriptedChat([RuntimeError("ollama offline")])
+        failure = RuntimeError("ollama offline")
+        chat = ScriptedChat([failure])
         fallback = Mock(return_value="Reponse locale de secours.")
         agent = AgentCore(self.registry, self.security, chat_client=chat)
 
-        result = agent.run("Aide-moi.", fallback=fallback)
+        with self.assertLogs("jarvis.agent", level="WARNING") as logs:
+            result = agent.run("Aide-moi.", fallback=fallback)
 
         self.assertEqual("fallback", result.status)
         self.assertTrue(result.used_fallback)
         self.assertEqual("Reponse locale de secours.", result.response)
         fallback.assert_called_once_with()
+        self.assertIs(failure, logs.records[-1].exc_info[1])
+        self.assertIsNotNone(logs.records[-1].exc_info[2])
+        self.assertIn("Traceback", logs.output[-1])
+
+    def test_process_query_logs_model_exception_with_traceback(self):
+        failure = RuntimeError("gemini SDK rejected the request")
+        agent = AgentCore(self.registry, self.security, chat_client=ScriptedChat([failure]))
+
+        with self.assertLogs("jarvis.agent", level="ERROR") as logs:
+            response = agent.process_query("Explique le fonctionnement du solaire.")
+
+        self.assertIn(str(failure), response)
+        self.assertIs(failure, logs.records[-1].exc_info[1])
+        self.assertIsNotNone(logs.records[-1].exc_info[2])
+
+    def test_forced_synthesis_logs_failure_and_retains_tool_results(self):
+        failure = RuntimeError("gemini synthesis failed")
+        chat = ScriptedChat([
+            assistant_response(tool_name="time", arguments={}),
+            failure,
+        ])
+        agent = AgentCore(self.registry, self.security, chat_client=chat, max_steps=1)
+        observation = {"ok": True, "message": "Il est 10:00."}
+
+        with patch("agent_core.execute_tool", return_value=observation):
+            with self.assertLogs("jarvis.agent", level="WARNING") as logs:
+                response = agent.process_query("Quelle heure est-il ?")
+
+        self.assertIn("Il est 10:00.", response)
+        failure_logs = [record for record in logs.records if record.exc_info]
+        self.assertEqual(1, len(failure_logs))
+        self.assertIs(failure, failure_logs[0].exc_info[1])
+        self.assertIsNotNone(failure_logs[0].exc_info[2])
+
+    def test_resume_logs_model_failure_and_preserves_fallback(self):
+        handler = Mock(return_value="Application fermee.")
+        self.register("close_app", handler, parameters=target_arguments())
+        failure = RuntimeError("gemini response failed after confirmation")
+        chat = ScriptedChat([
+            assistant_response(tool_name="close_app", arguments={"target": "edge"}),
+            failure,
+        ])
+        fallback = Mock(return_value="Action executee, synthese indisponible.")
+        agent = AgentCore(self.registry, self.security, chat_client=chat)
+        pending = agent.run("Ferme Edge.")
+
+        with self.assertLogs("jarvis.agent", level="WARNING") as logs:
+            result = agent.resume(pending.pending_action, confirmed=True, fallback=fallback)
+
+        self.assertEqual("fallback", result.status)
+        self.assertTrue(result.used_fallback)
+        self.assertEqual("Action executee, synthese indisponible.", result.response)
+        handler.assert_called_once()
+        fallback.assert_called_once_with()
+        self.assertIs(failure, logs.records[-1].exc_info[1])
+        self.assertIsNotNone(logs.records[-1].exc_info[2])
 
     def test_thinking_is_conditional(self):
         simple_chat = ScriptedChat([assistant_response("Chrome peut etre ouvert.")])
