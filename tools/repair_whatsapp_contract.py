@@ -229,9 +229,12 @@ def api_base_url(values=None) -> str:
     values = os.environ if values is None else values
     configured = values.get("NOC_API_BASE_URL", "").strip()
     if not configured:
-        enabled = all(Path(values.get(name, default)).is_file() for name, default in (
-            ("NOC_SSL_KEYFILE", "/opt/jarvis/certs/server.key"),
-            ("NOC_SSL_CERTFILE", "/opt/jarvis/certs/server.crt")))
+        try:
+            enabled = all(Path(values.get(name, default)).is_file() for name, default in (
+                ("NOC_SSL_KEYFILE", "/opt/jarvis/certs/server.key"),
+                ("NOC_SSL_CERTFILE", "/opt/jarvis/certs/server.crt")))
+        except OSError:
+            enabled = False
         configured = ("https" if enabled else "http") + "://127.0.0.1:5050"
     parsed = urllib.parse.urlsplit(configured)
     if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password

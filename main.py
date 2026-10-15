@@ -786,6 +786,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 app = create_app()
 
+
 def run_server(settings: Settings | None = None) -> None:
     """Launch HTTPS when both certificate files are present, otherwise HTTP."""
     import uvicorn

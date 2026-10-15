@@ -85,6 +85,25 @@ class OutgoingDeployTests(unittest.TestCase):
         self.assertIn('NOC_API_BASE_URL="https://127.0.0.1:5050"', updated)
         self.assertIn('PORT=3001\nOTHER_SECRET=preserved\n', updated)
 
+    def test_gateway_url_tracks_native_tls_certificate_detection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key, cert = Path(directory) / 'server.key', Path(directory) / 'server.crt'
+            config = {'NOC_SSL_KEYFILE': str(key), 'NOC_SSL_CERTFILE': str(cert)}
+            key.write_text('mock key', encoding='utf-8')
+            http_config = gateway_environment('', config, 'private-outgoing-test')
+            self.assertIn('NOC_API_BASE_URL="http://127.0.0.1:5050"', http_config)
+            cert.write_text('mock certificate', encoding='utf-8')
+            https_config = gateway_environment(http_config, config, 'private-outgoing-test')
+            self.assertIn('NOC_API_BASE_URL="https://127.0.0.1:5050"', https_config)
+            self.assertNotIn('http://127.0.0.1:5050', https_config)
+
+    def test_restart_health_probe_uses_the_configured_https_url(self):
+        with patch('tools.deploy_dashboard_update.systemctl', return_value=SimpleNamespace(returncode=0)), \
+             patch('tools.deploy_dashboard_update.http', return_value={'status': 'ok'}) as health, \
+             patch('tools.deploy_dashboard_update.alias_available', return_value=True):
+            restart_and_verify('private-mock-secret', base_url='https://127.0.0.1:5050')
+        health.assert_called_once_with('/api/health', base_url='https://127.0.0.1:5050')
+
     def test_multiple_admins_are_synced_and_explicit_empty_revokes_previous_list(self):
         updated = gateway_environment('PORT=3001\n', {
             'ADMIN_PHONE_NUMBER': '', 'WHATSAPP_ADMIN_NUMBERS': '+212600000001,+22790000000',

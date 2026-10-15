@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import Settings, parse_whatsapp_admin_numbers
-from tools.repair_whatsapp_contract import (Change, checked_file, http, read_env,
+from tools.repair_whatsapp_contract import (Change, api_base_url, checked_file, http, read_env,
                                            relay_ready, systemctl, update_env, write_atomic)
 
 MARKER = "NOC_WHATSAPP_SEND_ALIAS_V1"
@@ -135,8 +135,8 @@ def gateway_environment(original: str, config: dict[str, str], secret: str) -> s
     phone = re.sub(r'\D', '', config.get('ADMIN_PHONE_NUMBER', '212770010264'))
     values = {'NOC_GATEWAY_SECRET': secret,
               'NOC_WHATSAPP_SESSION_ID': config.get('NOC_WHATSAPP_SESSION_ID', '1')}
-    if config.get('NOC_API_BASE_URL'):
-        values['NOC_API_BASE_URL'] = config['NOC_API_BASE_URL']
+    # Match native Uvicorn TLS even when only the certificate pair was configured.
+    values['NOC_API_BASE_URL'] = api_base_url(config)
     admins = parse_whatsapp_admin_numbers(config.get('WHATSAPP_ADMIN_NUMBERS', config.get('ADMIN_PHONE_NUMBER', '212770010264')))
     if admins:
         values['WHATSAPP_ADMIN_NUMBERS'] = ','.join(admins)
@@ -159,13 +159,13 @@ def gateway_environment(original: str, config: dict[str, str], secret: str) -> s
     return updated
 
 
-def restart_and_verify(secret: str, *, require_relay: bool = False) -> None:
+def restart_and_verify(secret: str, *, require_relay: bool = False, base_url: str | None = None) -> None:
     # Nécessaire aussi si git pull a déjà remplacé les sources sous /opt.
     systemctl('daemon-reload')
     systemctl('restart', 'noc-dashboard.service', 'klasora-whatsapp.service')
     for _ in range(30):
         try:
-            if http('/api/health').get('status') == 'ok' and alias_available(secret) and all(
+            if http('/api/health', base_url=base_url).get('status') == 'ok' and alias_available(secret) and all(
                 systemctl('is-active', '--quiet', unit, check=False).returncode == 0
                 for unit in ('noc-dashboard.service', 'klasora-whatsapp.service')) and (
                     not require_relay or relay_ready()):
@@ -271,7 +271,7 @@ def main() -> int:
             subprocess.run(account + ['--', 'node', '--input-type=module', '-'],
                 input='\n'.join('await import(' + json.dumps(str(module)) + ');' for module in (MODULE, BRIDGE)),
                 text=True, capture_output=True, check=True, timeout=10)
-            restart_and_verify(secret, require_relay=require_relay)
+            restart_and_verify(secret, require_relay=require_relay, base_url=api_base_url(config))
         except BaseException:
             for path in reversed(written):
                 if originals[path] is None:
@@ -288,7 +288,7 @@ def main() -> int:
             raise ValueError('Mise à jour annulée : fichiers restaurés. Sauvegarde : ' + str(backup)) from None
         print('Mise à jour appliquée. Sauvegarde :', backup)
     else:
-        restart_and_verify(secret, require_relay=require_relay)
+        restart_and_verify(secret, require_relay=require_relay, base_url=api_base_url(config))
     if not alias_available(secret):
         raise ValueError('Alias non disponible : vérifier le journal de la passerelle')
     print('NOC disponible, alias /message/send actif, actions web directes sans saisie de jeton.')

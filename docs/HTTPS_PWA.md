@@ -28,6 +28,8 @@ NOC_API_BASE_URL=https://127.0.0.1:5050
 ```
 
 Recharger le relais Baileys modifie et sa configuration lors du deploiement.
+Les helpers de synchronisation recopient cette adresse ou detectent la paire
+de certificats afin de choisir le meme protocole que le serveur natif.
 Le relais accepte un certificat auto-signe uniquement sur une IP locale, privee ou Tailscale.
 Les destinations HTTPS publiques conservent la verification TLS.
 Il n'utilise pas `NODE_TLS_REJECT_UNAUTHORIZED=0`.

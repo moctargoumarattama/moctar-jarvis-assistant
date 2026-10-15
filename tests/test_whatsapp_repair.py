@@ -80,6 +80,10 @@ class RepairTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 api_base_url({"NOC_API_BASE_URL": value})
 
+    def test_probe_matches_http_fallback_when_certificate_files_are_inaccessible(self):
+        with patch.object(Path, 'is_file', side_effect=PermissionError('unreadable')):
+            self.assertEqual(api_base_url({}), 'http://127.0.0.1:5050')
+
     def test_https_probe_relaxes_verification_only_for_local_targets(self):
         for base, unverified in (("https://192.168.11.103:5050", True),
                                  ("https://localhost:5050", True),
