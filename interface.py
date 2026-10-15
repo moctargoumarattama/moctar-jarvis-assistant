@@ -284,7 +284,7 @@ if PYQT_AVAILABLE:
             """)
             self.ai_status_btn.clicked.connect(self.ai_status_requested.emit)
             self.ai_status_message = ""
-            self.set_ai_status(config.AI_SETTINGS.get("default_model", config.OLLAMA_MODEL), config.AI_SETTINGS.get("base_url", "http://localhost:11434"), online=True)
+            self.set_ai_status(config.gemini_model, config.AI_SETTINGS.get("base_url", "https://generativelanguage.googleapis.com"), online=bool(config.GEMINI_API_KEY))
 
             self.manual_label = QLabel("Commande manuelle")
             self.manual_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #7fffd4;")
@@ -374,7 +374,7 @@ if PYQT_AVAILABLE:
             self.label.setText(text)
 
         def set_ai_status(self, model, base_url, online=True):
-            engine = "Ollama" if online else "Local"
+            engine = "Gemini Cloud" if online else "Mode autonome"
             self.ai_status_message = f"Etat IA: {engine} | modele {model} | {base_url}"
             self.ai_status_btn.setText(f"IA: {engine} | {model}")
 

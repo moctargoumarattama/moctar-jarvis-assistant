@@ -535,7 +535,7 @@
     }
   </style>
   <link rel="stylesheet" href="/static/live_metrics.css?v=1">
-  <link rel="stylesheet" href="/static/cosmos.css?v=2">
+  <link rel="stylesheet" href="/static/cosmos.css?v=3">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/moctar-logo-v2-192.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/moctar-logo-v2-180.png">
@@ -543,7 +543,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="M.O.C.T.A.R">
   <link rel="stylesheet" href="/static/pwa.css">
-  <link rel="stylesheet" href="/static/mobile.css?v=3">
+  <link rel="stylesheet" href="/static/mobile.css?v=4">
   <script src="/static/mobile.js?v=2" defer></script>
   <script src="/static/pwa.js" defer></script>
 </head>
@@ -564,7 +564,7 @@
     </nav>
     <div class="cosmos-core">
       <button id="jarvis-open-btn" class="core-btn" type="button" aria-label="Ouvrir l'assistant IA MOCTAR" title="Parler à MOCTAR · Ctrl+Espace ou touche M" aria-haspopup="dialog" aria-controls="jarvis-modal"><span class="core-ring r1"></span><span class="core-ring r2"></span><span class="core-ring r3"></span></button>
-      <div class="core-label"><span class="core-name">MOCTAR</span><span class="jarvis-badge-status" id="jarvis-strip-badge">MOCTAR</span><span class="ai-runtime-badge" id="home-ai-badge" role="status" aria-live="polite" aria-atomic="true" data-tone="warning">IA · Vérification…</span><span class="core-hint">Touchez le soleil pour parler</span></div>
+      <div class="core-label"><span class="core-name">MOCTAR</span><span class="jarvis-badge-status" id="jarvis-strip-badge">MOCTAR</span><span class="ai-runtime-badge" id="home-ai-badge" role="status" aria-live="polite" aria-atomic="true" data-tone="success">gemini-3.5-flash-lite @ Gemini Cloud</span><span class="core-hint">Touchez le soleil pour parler</span></div>
     </div>
     <nav class="cosmos-col cosmos-right" aria-label="Outils et automatisations">
       <button class="orb-tile" type="button" id="live-metrics-open" data-live-metrics-open="central" data-planet="4" data-key="5" aria-haspopup="dialog" aria-controls="live-metrics-dialog"><span class="orb-tile-head"><span class="orb-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18M6 14l4-5 4 4 6-8"/></svg></span><span class="orb-title">Courbes en direct</span><kbd>5</kbd></span><span class="orb-main"><strong id="home-spark-value">—</strong><small>% CPU · session</small></span><canvas class="orb-spark" id="home-spark" aria-hidden="true"></canvas></button>
@@ -629,7 +629,7 @@
         </div>
       </div>
       <div class="jarvis-header-badges">
-        <span class="jarvis-model-badge ai-runtime-badge" id="jarvis-model-badge" role="status" aria-live="polite" aria-atomic="true" data-tone="warning">IA · Vérification…</span>
+        <span class="jarvis-model-badge ai-runtime-badge" id="jarvis-model-badge" role="status" aria-live="polite" aria-atomic="true" data-tone="success">gemini-3.5-flash-lite @ Gemini Cloud</span>
         <span class="jarvis-tools-badge" id="jarvis-tools-badge">46 outils ReAct</span>
         <button type="button" class="jarvis-btn-icon" id="jarvis-clear-btn" title="Vider l'historique">
           <svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
@@ -831,90 +831,6 @@
     <div class="live-metrics-toolbar"><div class="live-metrics-host-field"><label for="live-metrics-host">Hôte observé</label><select id="live-metrics-host"><option value="central">Hôte central</option></select></div><fieldset class="live-metrics-period"><legend>Fenêtre d’observation</legend><div class="live-metrics-period-buttons"><button type="button" data-live-metrics-minutes="5" aria-pressed="true">5 min</button><button type="button" data-live-metrics-minutes="15" aria-pressed="false">15 min</button><button type="button" data-live-metrics-minutes="60" aria-pressed="false">1 h</button></div></fieldset><div class="live-metrics-status" id="live-metrics-status" data-tone="warning" role="status"><span class="led"></span><span id="live-metrics-status-text">EN ATTENTE</span></div></div>
     <div class="live-metrics-scroll"><div class="live-metrics-context"><div><h3 id="live-metrics-host-title">Hôte central · en attente</h3><p id="live-metrics-last-seen">En attente du premier relevé.</p></div><span class="live-metrics-count" id="live-metrics-count">0 relevé</span></div><div class="live-metrics-notice" id="live-metrics-notice">L’historique se construit pendant cette session, même lorsque cette fenêtre est fermée.</div><div class="live-metrics-grid" id="live-metrics-charts"></div><section class="live-metrics-services" id="live-metrics-services" aria-labelledby="live-metrics-services-title" hidden><h3 id="live-metrics-services-title">Services · dernier état connu</h3><div class="live-metrics-service-grid" id="live-metrics-service-list"></div></section></div>
     <footer class="live-metrics-footer"><span>Historique de session · 1 h maximum · Les coupures de mesure restent visibles. Aucun point simulé.</span><span>Échap pour fermer</span></footer>
-  </dialog>
-  <dialog id="model-offline-modal" class="cyber-modal" aria-labelledby="model-offline-title" aria-describedby="model-offline-desc" style="max-width:760px;width:92vw;border:1px solid rgba(255, 115, 138, 0.45);box-shadow:0 0 35px rgba(255, 80, 100, 0.25), 0 20px 60px rgba(0,0,0,0.85);background:linear-gradient(170deg,#121927 0%,#090e17 100%);border-radius:18px;padding:0;color:#c5d9ec;">
-    <header class="cyber-header" style="border-bottom:1px solid rgba(255, 115, 138, 0.25);padding:18px 24px;display:flex;justify-content:space-between;align-items:flex-start;">
-      <div>
-        <div class="eyebrow" style="color:#ff738a;font-weight:700;letter-spacing:.14em;margin-bottom:4px">⚠️ DISRUPTEUR NEURONAL · ALERTE SYSTÈME</div>
-        <h2 id="model-offline-title" style="margin:0;font-size:1.35rem;color:#ffffff;display:flex;align-items:center;gap:8px">
-          Moteur IA Hors-Ligne <span style="font-size:0.8rem;background:rgba(255,115,138,0.2);color:#ff738a;border:1px solid rgba(255,115,138,0.5);padding:2px 8px;border-radius:999px;">MODE AUTONOME ACTIF</span>
-        </h2>
-        <p id="model-offline-desc" style="margin:4px 0 0;font-size:0.85rem;color:#8fa9c5">
-          Les moteurs Ollama local et Gemini Cloud sont tous les deux inaccessibles. M.O.C.T.A.R reste disponible avec ses <strong>46 tâches autonomes locales</strong> pendant leur reconnexion.
-        </p>
-      </div>
-      <button type="button" class="jarvis-btn-icon" id="model-offline-close-icon" aria-label="Fermer la modale" style="background:rgba(255,115,138,0.15);color:#ff738a;border:1px solid rgba(255,115,138,0.3);width:32px;height:32px;border-radius:8px;cursor:pointer;">✕</button>
-    </header>
-
-    <div class="cyber-scroll" style="padding:20px 24px;max-height:65vh;overflow-y:auto;">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px">
-        <div style="background:rgba(255,80,100,0.1);border:1px solid rgba(255,115,138,0.35);padding:12px;border-radius:10px;">
-          <div style="font-size:10px;font-weight:700;color:#ff738a;letter-spacing:.1em;margin-bottom:4px">MOTEURS IA (OLLAMA + GEMINI)</div>
-          <div style="font-size:13px;font-weight:700;color:#ff9aa8;display:flex;align-items:center;gap:6px">
-            <span class="led-blink" style="background:#ff4757;box-shadow:0 0 8px #ff4757"></span> HORS SERVICE / SANS RÉPONSE
-          </div>
-          <small id="model-offline-details-text" style="color:#8fa9c5;display:block;margin-top:4px;font-size:10px">Aucun moteur IA disponible après vérification du relais Cloud.</small>
-        </div>
-
-        <div style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.35);padding:12px;border-radius:10px;">
-          <div style="font-size:10px;font-weight:700;color:#4ade80;letter-spacing:.1em;margin-bottom:4px">MOTEUR AUTONOME M.O.C.T.A.R</div>
-          <div style="font-size:13px;font-weight:700;color:#86efac;display:flex;align-items:center;gap:6px">
-            <span class="led-blink" style="background:#22c55e;box-shadow:0 0 8px #22c55e"></span> 46 TÂCHES DISPONIBLES (100% LOCAL)
-          </div>
-          <small style="color:#8fa9c5;display:block;margin-top:4px;font-size:10px">Télémétrie M4800, services, tâches, calculs, web & domotique.</small>
-        </div>
-      </div>
-
-      <h3 style="font-size:12px;color:#5ed9ec;letter-spacing:.12em;text-transform:uppercase;margin:0 0 10px 0;display:flex;align-items:center;gap:6px">
-        <span>⚡ BIBLIOTHÈQUE D'ACTIONS OPÉRATIONNELLES (SANS IA)</span>
-      </h3>
-      
-      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(210px, 1fr));gap:10px;">
-        <div style="background:rgba(18,29,46,0.7);border:1px solid rgba(94,217,236,0.2);padding:10px;border-radius:8px;">
-          <strong style="color:#7ee5f4;font-size:11px;display:block;margin-bottom:4px">🖥️ Surveillance & Jauges</strong>
-          <span style="font-size:10px;color:#94a3b8;display:block;line-height:1.4">Télémétrie Dell M4800, RAM, CPU, disques, services Linux.</span>
-          <code style="font-size:9px;color:#38bdf8;background:rgba(56,189,248,0.1);padding:2px 4px;border-radius:4px;display:inline-block;margin-top:4px">« état du système »</code>
-        </div>
-
-        <div style="background:rgba(18,29,46,0.7);border:1px solid rgba(94,217,236,0.2);padding:10px;border-radius:8px;">
-          <strong style="color:#7ee5f4;font-size:11px;display:block;margin-bottom:4px">🌐 Navigation & Apps</strong>
-          <span style="font-size:10px;color:#94a3b8;display:block;line-height:1.4">Ouverture directe de sites et recherches dans le navigateur.</span>
-          <code style="font-size:9px;color:#38bdf8;background:rgba(56,189,248,0.1);padding:2px 4px;border-radius:4px;display:inline-block;margin-top:4px">« ouvre youtube »</code>
-        </div>
-
-        <div style="background:rgba(18,29,46,0.7);border:1px solid rgba(94,217,236,0.2);padding:10px;border-radius:8px;">
-          <strong style="color:#7ee5f4;font-size:11px;display:block;margin-bottom:4px">📝 Tâches & Notes SQLite</strong>
-          <span style="font-size:10px;color:#94a3b8;display:block;line-height:1.4">Ajout et consultation des todos, mémorisation, rappels.</span>
-          <code style="font-size:9px;color:#38bdf8;background:rgba(56,189,248,0.1);padding:2px 4px;border-radius:4px;display:inline-block;margin-top:4px">« liste mes tâches »</code>
-        </div>
-
-        <div style="background:rgba(18,29,46,0.7);border:1px solid rgba(94,217,236,0.2);padding:10px;border-radius:8px;">
-          <strong style="color:#7ee5f4;font-size:11px;display:block;margin-bottom:4px">⚡ Solaire & Énergie</strong>
-          <span style="font-size:10px;color:#94a3b8;display:block;line-height:1.4">Dimensionnement de panneaux, batteries 24V, onduleurs.</span>
-          <code style="font-size:9px;color:#38bdf8;background:rgba(56,189,248,0.1);padding:2px 4px;border-radius:4px;display:inline-block;margin-top:4px">« solaire 6 kwh »</code>
-        </div>
-
-        <div style="background:rgba(18,29,46,0.7);border:1px solid rgba(94,217,236,0.2);padding:10px;border-radius:8px;">
-          <strong style="color:#7ee5f4;font-size:11px;display:block;margin-bottom:4px">⚙️ Outils Système OS</strong>
-          <span style="font-size:10px;color:#94a3b8;display:block;line-height:1.4">Heure, date, niveau batterie, ajustement volume, capture.</span>
-          <code style="font-size:9px;color:#38bdf8;background:rgba(56,189,248,0.1);padding:2px 4px;border-radius:4px;display:inline-block;margin-top:4px">« heure », « batterie »</code>
-        </div>
-
-        <div style="background:rgba(18,29,46,0.7);border:1px solid rgba(94,217,236,0.2);padding:10px;border-radius:8px;">
-          <strong style="color:#7ee5f4;font-size:11px;display:block;margin-bottom:4px">🛠️ Git & Projets</strong>
-          <span style="font-size:10px;color:#94a3b8;display:block;line-height:1.4">Statut git, commits récents, checklist maintenance.</span>
-          <code style="font-size:9px;color:#38bdf8;background:rgba(56,189,248,0.1);padding:2px 4px;border-radius:4px;display:inline-block;margin-top:4px">« statut git »</code>
-        </div>
-      </div>
-    </div>
-
-    <footer class="cyber-footer" style="padding:14px 24px;border-top:1px solid rgba(255, 115, 138, 0.25);display:flex;justify-content:space-between;align-items:center;">
-      <span style="font-size:11px;color:#8fa9c5">M.O.C.T.A.R reste réactif même sans réseau neuronal.</span>
-      <div style="display:flex;gap:10px">
-        <button type="button" class="button" id="model-offline-retry-btn" style="background:rgba(94,217,236,0.15);border:1px solid #5ed9ec;color:#5ed9ec;padding:7px 14px;border-radius:8px;font-size:11px;cursor:pointer;">🔄 Retester les moteurs IA</button>
-        <button type="button" class="button primary" id="model-offline-close-btn" style="padding:7px 16px;border-radius:8px;font-size:11px;cursor:pointer;">Continuer en mode autonome</button>
-      </div>
-    </footer>
   </dialog>
   <div class="toast" id="toast" role="status" hidden></div>
   <script src="/static/cosmos.js?v=1"></script>
@@ -1646,33 +1562,24 @@
       };
 
       function jarvisAiHealth(data = {}) {
-        if (data.online === true || data.gemini_online === true || data.ollama_online === true) return 'online';
-        if (data.all_providers_offline === true || (data.ollama_online === false && data.gemini_online === false)) return 'offline';
-        if (data.online !== false && data.model_offline !== true &&
-            (data.model_offline === false || ['ready', 'ok', 'online', 'hybrid_active'].includes(data.status))) return 'online';
+        if (data.online === true || data.gemini_online === true) return 'online';
+        if (data.online === false || data.gemini_online === false || data.model_offline === true) return 'offline';
+        if (['ready', 'ok', 'online'].includes(data.status)) return 'online';
         return 'unknown';
       }
 
-      function renderJarvisAiStatus(data, notifyOffline = false) {
+      function renderJarvisAiStatus(data) {
         jarvisState.aiStatusRevision = (jarvisState.aiStatusRevision || 0) + 1;
         const health = jarvisAiHealth(data);
         const badge = $('jarvis-strip-badge');
         if (badge) {
-          badge.textContent = health === 'online' ? 'MOCTAR EN LIGNE' : health === 'offline' ? 'MOCTAR HORS LIGNE' : 'MOCTAR STANDBY';
-          badge.style.color = health === 'online' ? 'var(--green)' : health === 'offline' ? 'var(--red)' : 'var(--amber)';
-          badge.style.borderColor = health === 'online' ? 'rgba(81, 220, 170, 0.4)' : health === 'offline' ? 'rgba(255, 115, 138, 0.4)' : 'rgba(243, 189, 101, 0.4)';
+          badge.textContent = health === 'online' ? 'MOCTAR EN LIGNE' : health === 'offline' ? 'MODE AUTONOME' : 'MOCTAR STANDBY';
+          badge.style.color = health === 'online' ? 'var(--green)' : 'var(--amber)';
+          badge.style.borderColor = health === 'online' ? 'rgba(81, 220, 170, 0.4)' : 'rgba(243, 189, 101, 0.4)';
         }
-        if (health === 'online') $('model-offline-modal')?.close();
-        else if (health === 'offline' && notifyOffline) showModelOfflinePopup(data.model_offline_details, data);
-        const activeProvider = data.active_provider || data.mode || data.provider;
-        let label = 'IA · Statut indisponible';
-        if (health === 'offline' || (health !== 'online' && ['local', 'autonomous'].includes(activeProvider))) {
-          label = 'Mode autonome · sans modèle IA';
-        } else if (health === 'online') {
-          const providerLabel = {gemini: 'Gemini Cloud', ollama: 'Ollama local', openai: 'OpenAI'}[activeProvider];
-          const model = data.model || (activeProvider === 'gemini' ? data.gemini_model : data.ollama_model) || 'modèle non communiqué';
-          label = providerLabel ? (data.provider === 'hybrid' ? 'Hybride · ' : '') + providerLabel + ' · ' + model : 'IA en ligne · modèle non communiqué';
-        }
+        const model = data.model || data.gemini_model || 'gemini-3.5-flash-lite';
+        const label = health === 'online' ? model + ' @ Gemini Cloud' :
+          health === 'offline' ? 'Gemini Cloud indisponible · Mode autonome' : 'IA · Statut indisponible';
         ['home-ai-badge', 'jarvis-model-badge'].forEach(id => {
           const node = $(id);
           if (!node) return;
@@ -1682,7 +1589,7 @@
         });
       }
 
-      async function fetchJarvisStatus(notifyOffline = false) {
+      async function fetchJarvisStatus() {
         if (jarvisState.statusPending) return jarvisState.status;
         jarvisState.statusPending = true;
         const revision = jarvisState.aiStatusRevision || 0;
@@ -1691,11 +1598,11 @@
           if (!res.ok) throw new Error('Statut IA indisponible (HTTP ' + res.status + ').');
           if (res.ok) {
             const data = await res.json();
-            // A slow status probe must not overwrite the provider from a newer answer.
+            // A slow status probe must not overwrite the model from a newer answer.
             if (revision !== (jarvisState.aiStatusRevision || 0)) return jarvisState.status;
             jarvisState.status = data;
             jarvisState.available = data.available !== false;
-            renderJarvisAiStatus(data, notifyOffline);
+            renderJarvisAiStatus(data);
             if ($('jarvis-tools-badge')) {
               set('jarvis-tools-badge', (data.tools_count || 46) + ' outils ReAct');
             }
@@ -1885,7 +1792,7 @@
           }, 60000);
 
           const data = await readResponse(res);
-          renderJarvisAiStatus(data, true);
+          renderJarvisAiStatus(data);
           if (res.ok && data.status === 'success') {
             // Exécution automatique de l'action open_browser sur le navigateur du client
             let targetUrl = data.url;
@@ -1926,8 +1833,8 @@
         } catch (err) {
           const errMsg = err.name === 'AbortError' ? 'Délai d’attente dépassé pour la réponse du modèle IA.' : (err.message || 'Erreur réseau vers le moteur Moctar.');
           appendChatMessage('assistant', '⚠️ ' + errMsg);
-          // Un timeout HTTP ne prouve pas que les deux moteurs IA sont indisponibles.
-          await fetchJarvisStatus(true);
+          // Une erreur de transport ne prouve pas que Gemini est indisponible.
+          await fetchJarvisStatus();
         } finally {
           clearInterval(typingInterval);
           $('jarvis-typing-bubble')?.remove();
@@ -1939,49 +1846,6 @@
           set('jarvis-reactor-status', 'PRÊT');
         }
       }
-
-      function showModelOfflinePopup(details, health) {
-        if (jarvisAiHealth(health) !== 'offline') return;
-        const modal = $('model-offline-modal');
-        if (!modal) return;
-        if (details && $('model-offline-details-text')) {
-          set('model-offline-details-text', String(details).slice(0, 160));
-        }
-        if (!modal.open) {
-          try {
-            modal.showModal();
-          } catch (e) {
-            console.warn('Erreur ouverture modal offline:', e);
-          }
-        }
-      }
-
-      $('model-offline-close-btn')?.addEventListener('click', () => $('model-offline-modal')?.close());
-      $('model-offline-close-icon')?.addEventListener('click', () => $('model-offline-modal')?.close());
-      $('model-offline-retry-btn')?.addEventListener('click', async () => {
-        const btn = $('model-offline-retry-btn');
-        if (btn) {
-          btn.disabled = true;
-          btn.textContent = 'Connexion en cours...';
-        }
-        try {
-          const data = await fetchJarvisStatus();
-          if (data && jarvisAiHealth(data) === 'offline') {
-            set('model-offline-details-text', 'Ollama et Gemini sont toujours inaccessibles. Les 46 tâches locales restent disponibles.');
-          } else if (!data || jarvisAiHealth(data) === 'unknown') {
-            set('model-offline-details-text', 'Vérification des moteurs IA indisponible. Réessayez la connexion au serveur.');
-          }
-        } catch (e) {
-          if ($('model-offline-details-text')) {
-            set('model-offline-details-text', 'Erreur réseau vers le serveur local.');
-          }
-        } finally {
-          if (btn) {
-            btn.disabled = false;
-            btn.textContent = '🔄 Retester les moteurs IA';
-          }
-        }
-      });
 
       function speakJarvisText(text) {
         if (!('speechSynthesis' in window) || !$('jarvis-tts-toggle')?.checked) return;

@@ -253,12 +253,13 @@ main.cosmos-home > .connection-banner {
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
 }
 .core-hint { font-size: 10.5px; color: #7f93b0; letter-spacing: .04em; }
-.ai-runtime-badge { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.ai-runtime-badge { min-width: 0; max-width: 100%; overflow-wrap: anywhere; animation: none; transition: none; }
 .cosmos-core .core-label { max-width: 100%; }
 .core-label > .ai-runtime-badge {
   padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(94, 217, 236, .25);
   background: rgba(6, 12, 22, .75); color: var(--cyan); font: 10px/1.5 var(--mono);
 }
+.ai-runtime-badge[data-tone="success"] { color: var(--green); border-color: rgba(81, 220, 170, .4); }
 .ai-runtime-badge[data-tone="warning"] { color: var(--amber); border-color: rgba(243, 189, 101, .3); }
 
 /* ------------------------------------------------------------------ Dock / commande */

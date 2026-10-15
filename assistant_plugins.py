@@ -44,7 +44,7 @@ class PluginRoute:
         """Backward-compatible alias used by the historical intent engine."""
         return self.name
 
-    def as_ollama_tool(self):
+    def as_tool_schema(self):
         return {
             "type": "function",
             "function": {
@@ -53,6 +53,10 @@ class PluginRoute:
                 "parameters": deepcopy(self.parameters),
             },
         }
+
+    def as_ollama_tool(self):
+        """Deprecated compatibility alias; returns a provider-neutral tool schema."""
+        return self.as_tool_schema()
 
 
 class PluginRegistry:
@@ -90,11 +94,15 @@ class PluginRegistry:
     def ai_routes(self):
         return tuple(route for route in self._routes.values() if route.ai_enabled)
 
-    def ollama_tools(self, domain_allowed=None):
+    def tools_schema(self, domain_allowed=None):
         routes = self.ai_routes()
         if domain_allowed is not None:
             routes = tuple(route for route in routes if domain_allowed(route.domain))
-        return [route.as_ollama_tool() for route in routes]
+        return [route.as_tool_schema() for route in routes]
+
+    def ollama_tools(self, domain_allowed=None):
+        """Deprecated compatibility alias; performs no inference or network request."""
+        return self.tools_schema(domain_allowed=domain_allowed)
 
 
 def build_default_registry(assistant):

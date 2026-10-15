@@ -111,7 +111,7 @@ def test_real_sdk_serializes_the_tool_catalog_and_observations():
     assert observation["response"] == {"success": True, "message": "12:00"}
 
 
-def test_real_sdk_and_agent_preserve_signed_hybrid_tool_turns_on_gemini():
+def test_real_sdk_and_agent_preserve_signed_tool_turns_directly_on_gemini():
     genai = pytest.importorskip("google.genai")
     signature = base64.b64encode(b"opaque-signed-gemini-tool-turn\x00\xff").decode("ascii")
     requests = []
@@ -141,13 +141,13 @@ def test_real_sdk_and_agent_preserve_signed_hybrid_tool_turns_on_gemini():
                 brain = ai_brain.AIBrain(api_type="hybrid")
             brain.gemini_client = client
             agent = AgentCore(registry, security, ai_brain_instance=brain)
-            with patch.object(brain, "_chat_ollama", side_effect=TimeoutError("Ollama offline")) as local:
+            with patch("urllib.request.urlopen", side_effect=AssertionError("retired local provider")) as local:
                 result = agent.run("Consulte l'horloge de test.")
 
     assert result.status == "final"
     assert result.response == "Il est 12:00."
     handler.assert_called_once_with({"intent": "test_clock", "target": "", "slots": {}})
-    local.assert_called_once()
+    local.assert_not_called()
     assert len(requests) == 2
     assert brain.last_provider == "gemini"
     signed_parts = [
@@ -252,6 +252,33 @@ def test_real_sdk_gemini_deadline_remains_at_least_ten_seconds(sdk_brain_factory
     assert generate.call_args.kwargs["config"].http_options.timeout >= 10000
     assert generate.call_count == len(requests) == 1
     assert float(requests[0].headers["x-server-timeout"]) >= 10.0
+
+
+@pytest.mark.parametrize("image_data, expected_mime", [
+    (b"\x89PNG\r\n\x1a\nimage-content", "image/png"),
+    (b"\xff\xd8\xffimage-content", "image/jpeg"),
+])
+def test_real_sdk_preserves_vision_image_payload(sdk_brain_factory, image_data, expected_mime):
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return sdk_text_response("Capture analysee.")
+
+    brain, generate = sdk_brain_factory(respond)
+    result = brain.chat([{
+        "role": "user", "content": "Decris cette capture.",
+        "images": [base64.b64encode(image_data).decode("ascii")],
+    }])
+
+    assert result["content"] == "Capture analysee."
+    assert generate.call_count == len(requests) == 1
+    parts = requests[0]["contents"][0]["parts"]
+    assert parts[0]["text"] == "Decris cette capture."
+    image = parts[1]["inlineData"]
+    assert image.get("mimeType", image.get("mime_type")) == expected_mime
+    assert generate.call_args.kwargs["contents"][0].parts[1].inline_data.mime_type == expected_mime
+    assert base64.urlsafe_b64decode(image["data"]) == image_data
 
 
 def test_real_sdk_retries_schema_rejection_once_without_tools(sdk_brain_factory, caplog):

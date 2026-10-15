@@ -4,13 +4,13 @@ Assistant personnel Windows local, modulaire, fiable et extensible, avec interfa
 
 ## Etat actuel
 
-Le coeur actif est offline-first :
+Les actions autonomes restent locales ; les requetes IA utilisent Gemini Cloud :
 - `main_jarvis.py` est l'unique point d'entree reel
 - `assistant_core.py` orchestre les actions via un registre de plugins
 - `intent_engine.py` detecte les commandes localement avec regles explicites + `rapidfuzz`
 - `actions/` regroupe la logique metier par domaine
 - `wake_word_simple.py` gere le wake word moderne local
-- la reponse generique est locale par defaut, sans dependance obligatoire a ChatGPT
+- les reponses IA et le tool calling utilisent exclusivement Google Gemini
 - `ai_brain.py` peut maintenant produire des briefs quotidiens, des priorites et des suggestions locales sans cloud
 
 Les anciens modules `JarvisGUI/`, `Gesture Control/` et autres scripts legacy ont ete regroupes sous `legacy/`. Ils sont conserves pour reference, mais ils ne pilotent plus le coeur moderne.
@@ -56,18 +56,18 @@ pip install -r requirements.txt
 ## Configuration
 
 1. Edite le fichier `.env`.
-2. `OLLAMA_MODEL`, `OLLAMA_VISION_MODEL` et `OLLAMA_BASE_URL` pilotent le moteur local.
-3. La couche agentique utilise le tool calling natif d'Ollama et reste bornee a cinq etapes par defaut.
+2. Definis `GEMINI_API_KEY` et `AI_PROVIDER=gemini`. Le modele par defaut est `gemini-3.5-flash-lite`.
+3. La couche agentique utilise le tool calling natif de Gemini et reste bornee a cinq etapes par defaut. Le delai Cloud vaut 15 secondes, avec un minimum strict de 10 secondes.
 4. Ajuste les chemins projets et dossiers dans [config.py](config.py) si besoin.
 
 Variables utiles :
-- `OLLAMA_MODEL`
-- `OLLAMA_VISION_MODEL`
-- `OLLAMA_BASE_URL`
-- `OLLAMA_TIMEOUT_SECONDS`
+- `AI_PROVIDER=gemini` (les anciennes valeurs sont ignorees)
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+- `GEMINI_TIMEOUT_SECONDS` (15 par defaut, minimum 10)
 - `MOCTAR_AGENT_ENABLED`
-- `OLLAMA_AGENT_MAX_STEPS`
-- `OLLAMA_AGENT_THINKING` (`auto`, `always` ou `never`)
+- `MOCTAR_AGENT_MAX_STEPS`
+- `MOCTAR_AGENT_THINKING` (`auto`, `always` ou `never`)
 - `ENABLE_SOFT_WAKE_WORD`
 - `SOFT_WAKE_LANGUAGE`
 - `SOFT_WAKE_TIMEOUT`
@@ -121,7 +121,7 @@ Si la transcription courte mange le wake word mais capte une commande claire com
 
 La capture de commande utilise le microphone `2` par defaut sur cette installation. Elle calibre le bruit periodiquement, retente une transcription une fois et distingue les erreurs de micro, de delai et de transcription. Les reglages `JARVIS_MIC_ENERGY_RATIO`, `JARVIS_MIC_PAUSE_THRESHOLD` et `JARVIS_MIC_PHRASE_THRESHOLD` permettent d'ajuster la sensibilite lorsque de la musique joue dans la piece. Pour forcer un autre peripherique, definis `JARVIS_MIC_INDEX` dans `.env`.
 
-Le coeur reste autonome : les commandes, la memoire, les briefs, les priorites et les reponses conversationnelles courantes ne necessitent aucune API d'IA externe. Le chemin IA local passe par Ollama.
+Le coeur reste autonome pour les commandes, la memoire, les briefs et les priorites. Les reponses conversationnelles et les outils IA passent directement par Gemini Cloud ; aucun serveur IA local n'est sonde ou utilise.
 
 ## Commandes vocales supportees
 

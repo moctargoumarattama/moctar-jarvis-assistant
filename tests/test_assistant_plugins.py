@@ -40,7 +40,7 @@ class PluginRegistryTests(unittest.TestCase):
             {route.name for route in registry.ai_routes()},
         )
         open_app = registry.get("open_app")
-        schema = open_app.as_ollama_tool()
+        schema = open_app.as_tool_schema()
         self.assertTrue(open_app.ai_enabled)
         self.assertEqual("function", schema["type"])
         self.assertEqual("open_app", schema["function"]["name"])

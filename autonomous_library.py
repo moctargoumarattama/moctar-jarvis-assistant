@@ -1,8 +1,8 @@
 """Bibliothèque et moteur de tâches autonomes déterministes pour M.O.C.T.A.R / JARVIS.
 
 Fournit l'exécution garantie à 100% de 46 tâches locales (infrastructure, télémétrie,
-système, web, tâches/notes, énergie, IoT, Git) sans aucune dépendance au modèle neuronal (Ollama).
-Permet de maintenir un fonctionnement continu sans rupture même si Ollama est éteint,
+système, web, tâches/notes, énergie, IoT, Git) sans dépendance à un modèle IA.
+Permet de maintenir un fonctionnement continu même si Gemini Cloud est indisponible,
 saturé ou en panne.
 """
 
@@ -124,7 +124,7 @@ def get_catalog_markdown() -> str:
     """Génère une présentation claire et structurée du catalogue des tâches autonomes."""
     lines = [
         "### 🛡️ BIBLIOTHÈQUE DES 46 TÂCHES AUTONOMES M.O.C.T.A.R",
-        "*(Exécutables à 100% en local de manière déterministe, même si le modèle neuronal Ollama est éteint)*\n",
+        "*(Exécutables à 100% en local de manière déterministe, même si Gemini Cloud est indisponible)*\n",
     ]
     for category_id, cat in AUTONOMOUS_TASKS_CATALOG.items():
         lines.append(f"#### {cat['title']}")

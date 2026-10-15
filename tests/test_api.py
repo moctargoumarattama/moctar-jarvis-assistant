@@ -487,8 +487,8 @@ class APITests(unittest.TestCase):
         for online in (False, True):
             with self.subTest(ai_online=online), patch.object(self.runtime.jarvis, "get_status", return_value={
                 "status": "ready" if online else "degraded",
-                "online": online, "provider": "hybrid", "gemini_online": online,
-                "ollama_online": False, "model_offline": not online,
+                "online": online, "provider": "gemini", "gemini_online": online,
+                "model_offline": not online,
                 "all_providers_offline": not online,
             }):
                 self.runtime.last_published = time.monotonic()

@@ -1,6 +1,6 @@
 """Module de base pour la standardisation des actions et outils JARVIS.
 
-Définit le conteneur de retour unifié pour le Function Calling (OpenAI / Ollama)
+Définit le conteneur de retour unifié pour le Function Calling (JSON Schema / Google GenAI)
 et les fonctions d'aide pour garantir un format de réponse prédictible et robuste.
 """
 

@@ -76,7 +76,7 @@ class DispatcherTests(unittest.IsolatedAsyncioTestCase):
         await self.drain()
         return accepted
 
-    async def test_status_responds_to_effective_admin_without_ollama(self):
+    async def test_status_responds_to_effective_admin_without_inference(self):
         started = time.monotonic()
         await self.send("ÉTAT", sender=SECOND)
         self.assertLess(time.monotonic() - started, 0.5)
@@ -84,7 +84,7 @@ class DispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.jarvis.execute_prompt_async.assert_not_awaited()
         self.controller._send_reply.assert_awaited_once_with(self.status.return_value, SECOND)
 
-    async def test_slow_ollama_does_not_block_status_lane(self):
+    async def test_slow_cloud_inference_does_not_block_status_lane(self):
         entered, release = asyncio.Event(), asyncio.Event()
 
         async def delayed(**kwargs):

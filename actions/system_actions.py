@@ -1,6 +1,6 @@
 """Module d'actions système pour le contrôle de l'OS et le monitoring de JARVIS.
 
-Fournit des outils standardisés pour le Function Calling (OpenAI / Ollama) permettant
+Fournit des outils standardisés pour le Function Calling (JSON Schema / Google GenAI) permettant
 d'interagir avec le système d'exploitation Windows (heure, date, batterie, capture d'écran,
 contrôle du volume sonore, lancement et fermeture d'applications, ouverture de dossiers).
 """
@@ -612,7 +612,7 @@ def analyze_screen(
     question: str = "Que vois-tu à l'écran ? Résume et analyse précisément ce qui est affiché.",
     pyautogui_module: Any = pyautogui,
 ) -> Dict[str, Any]:
-    """Capture l'affichage de l'écran hôte et l'analyse visuellement via le modèle d'IA vision local.
+    """Capture l'affichage de l'écran hôte et l'analyse visuellement via Google Gemini Cloud.
 
     Critères d'utilisation:
         - L'agent DOIT appeler cet outil dès que l'utilisateur lui demande de regarder son écran,
@@ -649,16 +649,10 @@ def analyze_screen(
             screenshot.save(filename)
 
         import ai_brain
-        vision_model = (
-            os.getenv("OLLAMA_VISION_MODEL")
-            or "gemma3"
-        ).strip()
-
         try:
-            analysis = ai_brain.ask_ollama(
+            analysis = ai_brain.ask_ai(
                 question,
                 images=[str(filename)],
-                model=vision_model,
                 max_predict=300,
                 temperature=0.2,
                 system_prompt=(
@@ -674,17 +668,17 @@ def analyze_screen(
                 data={"file_path": str(filename), "analysis": str(analysis).strip()},
                 error=None,
             )
-        except Exception as ollama_err:
+        except Exception as gemini_err:
             msg = (
-                f"Capture enregistrée ({filename.name}), mais le modèle de vision local n'a pas répondu ({ollama_err}). "
-                f"Assure-toi qu'Ollama est lancé avec un modèle de vision comme '{vision_model}' ou 'llava'."
+                f"Capture enregistrée ({filename.name}), mais l'analyse Gemini Cloud est indisponible. "
+                "Vérifie la connexion réseau et la configuration Gemini."
             )
             return format_action_result(
                 action=action_name,
                 success=True,
                 message=msg,
                 data={"file_path": str(filename), "analysis": None},
-                error=str(ollama_err),
+                error=str(gemini_err),
             )
     except Exception as exc:
         return format_action_result(

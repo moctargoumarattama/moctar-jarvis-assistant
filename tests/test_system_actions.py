@@ -112,7 +112,7 @@ class SystemActionsTests(unittest.TestCase):
         mock_img = Mock()
         mock_pyautogui.screenshot.return_value = mock_img
 
-        with patch("ai_brain.ask_ollama", return_value="Je vois VS Code ouvert sur main_jarvis.py"):
+        with patch("ai_brain.ask_ai", return_value="Je vois VS Code ouvert sur main_jarvis.py"):
             res = system_actions.analyze_screen(
                 question="Que vois-tu ?",
                 pyautogui_module=mock_pyautogui,
@@ -123,12 +123,12 @@ class SystemActionsTests(unittest.TestCase):
         self.assertIn("VS Code", res["message"])
         self.assertEqual("Je vois VS Code ouvert sur main_jarvis.py", res["data"]["analysis"])
 
-    def test_analyze_screen_ollama_offline_fallback(self):
+    def test_analyze_screen_cloud_offline_preserves_capture(self):
         mock_pyautogui = Mock()
         mock_img = Mock()
         mock_pyautogui.screenshot.return_value = mock_img
 
-        with patch("ai_brain.ask_ollama", side_effect=RuntimeError("connection refused")):
+        with patch("ai_brain.ask_ai", side_effect=RuntimeError("cloud unavailable")):
             res = system_actions.analyze_screen(
                 question="Que vois-tu ?",
                 pyautogui_module=mock_pyautogui,

@@ -3,7 +3,7 @@
 Fournit la classe AgentCore qui implémente :
 - Une boucle ReAct (Reasoning + Acting) multi-tours avec auto-correction.
 - L'utilisation automatique du catalogue d'outils standardisés via actions.
-- L'intégration de la couche d'inférence AIBrain (Ollama / OpenAI).
+- L'intégration de la couche d'inférence AIBrain (Google Gemini Cloud).
 - Le respect strict des politiques de sécurité et des confirmations sensibles.
 - La traçabilité complète des étapes via logging ([THOUGHT], [ACTION], [OBSERVATION], [FINAL_RESPONSE]).
 """
@@ -111,11 +111,15 @@ class AgentCore:
         ).strip().lower()
 
         # Chargement des schémas d'outils
+        schema_factory = getattr(self.registry, "tools_schema", None)
+        if not callable(schema_factory):
+            # Deprecated registry alias for schema formatting, never local inference.
+            schema_factory = getattr(self.registry, "ollama_tools", None)
         if tools is not None:
             self.tools = list(tools)
-        elif self.registry is not None and hasattr(self.registry, "ollama_tools"):
+        elif callable(schema_factory):
             domain_allowed = getattr(self.security, "is_domain_allowed", None)
-            self.tools = self.registry.ollama_tools(domain_allowed=domain_allowed)
+            self.tools = schema_factory(domain_allowed=domain_allowed)
         else:
             try:
                 self.tools = get_all_tools_schema()
@@ -186,12 +190,12 @@ class AgentCore:
             think_flag = self._should_think(messages[-1].get("content", "")) if think is None else think
             response = self.chat_client(
                 messages, tools=active_tools, think=think_flag,
-                temperature=ai_brain.OLLAMA_TEMPERATURE,
+                temperature=ai_brain.GENERATION_CONFIG["temperature"],
             )
 
             # Normalisation selon la forme de la réponse du chat_client
             if isinstance(response, dict) and "message" in response:
-                return self.brain._normalize_ollama_payload(response)
+                return self.brain._normalize_chat_payload(response)
             if isinstance(response, dict) and "choices" in response:
                 return self.brain._normalize_openai_payload(response)
             if isinstance(response, dict) and "finish_reason" in response:
@@ -203,7 +207,7 @@ class AgentCore:
             }
 
         return self.brain.chat(
-            messages, tools=active_tools, temperature=ai_brain.OLLAMA_TEMPERATURE,
+            messages, tools=active_tools, temperature=ai_brain.GENERATION_CONFIG["temperature"],
         )
 
     # --------------------------------------------------------------------------

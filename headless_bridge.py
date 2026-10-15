@@ -101,7 +101,7 @@ def _format_telemetry_report(result: Dict[str, Any]) -> str:
 def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
     """Sélectionne un ensemble pertinent et réduit d'outils selon l'intention du prompt.
 
-    Évite de saturer les modèles légers locaux (ex: qwen2.5:1.5b sur CPU) avec les 46 outils.
+    Limite les schémas transmis à Gemini aux outils pertinents parmi les 46 actions.
     """
     p = (prompt or "").lower()
     tools: set[str] = set()
@@ -208,10 +208,10 @@ class JarvisHeadlessBridge:
             self.db_path = Path(db_path or (self.base_dir / "data" / "jarvis_memory.db")).resolve()
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Inférence IA locale Ollama
-        self.model = model or config.AI_SETTINGS.get("default_model", config.OLLAMA_MODEL)
-        self.base_url = base_url or config.AI_SETTINGS.get("base_url", "http://localhost:11434")
-        self.brain = AIBrain(model=self.model, base_url=self.base_url)
+        # Inférence exclusivement Google Gemini Cloud.
+        self.brain = AIBrain(model=model, api_type="gemini")
+        self.model = self.brain.gemini_model
+        self.base_url = self.brain.base_url
 
         # Mémoire SQLite
         self.memory = AssistantMemory(db_path=self.db_path)
@@ -295,7 +295,7 @@ class JarvisHeadlessBridge:
                 }})
                 targeted_tools = tuple(name for name in targeted_tools if name != "get_system_telemetry")
                 if not targeted_tools:
-                    # Une seule synthèse sans schémas d'outils ; repli local si le CPU est occupé.
+                    # Une seule synthèse ; le rapport déterministe reste disponible si l'API échoue.
                     telemetry_deadline = time.monotonic() + 1.0
 
             # Interception des pensées intermédiaires du LLM
@@ -444,8 +444,8 @@ class JarvisHeadlessBridge:
                 agent_core.execute_tool = orig_agent_execute_tool
 
             # Une réponse déterministe ou une erreur d'outil ne prouve pas une
-            # panne IA. Seuls les échecs observés de tous les fournisseurs
-            # autorisent l'alerte autonome ; cette lecture ne fait aucun appel réseau.
+            # panne IA. Seul l'échec observé de Gemini signale son indisponibilité ;
+            # cette lecture ne fait aucun appel réseau.
             ai_status = self.brain.get_health_status(probe=False)
             model_offline = fallback_required and ai_status.get("all_providers_offline") is True
             resp_dict: Dict[str, Any] = {
@@ -459,7 +459,7 @@ class JarvisHeadlessBridge:
                 "source": source,
                 "model_offline": model_offline,
                 "model_offline_details": (
-                    "Aucun moteur IA configuré n'est accessible (mode autonome activé)"
+                    "Gemini Cloud est indisponible (actions autonomes disponibles)"
                     if model_offline else None
                 ),
                 "autonomous_available": True,
@@ -488,13 +488,8 @@ class JarvisHeadlessBridge:
         """Renvoie l'état du moteur IA, du fournisseur actif, des outils et de la mémoire."""
         ai_stat = self.brain.get_health_status()
         online = bool(ai_stat.get("online"))
-        mode = ai_stat.get("mode") or ("ollama" if online else "local")
-        provider = ai_stat.get("provider") or mode
-        active_model = ai_stat.get("model") if mode == "gemini" else self.model
-        active_base_url = (
-            ai_stat.get("base_url") or "https://generativelanguage.googleapis.com"
-            if mode == "gemini" else self.base_url
-        )
+        mode = ai_stat.get("mode") or ("gemini" if online else "local")
+        active_model = ai_stat.get("model") or self.model
         mem_counts = {"memories": 0, "messages": 0, "sessions": 0}
         try:
             with self.memory._get_connection() as conn:
@@ -511,12 +506,11 @@ class JarvisHeadlessBridge:
         return {
             "status": "ready" if online else "degraded",
             "online": online,
-            "provider": provider,
+            "provider": "gemini",
             "mode": mode,
             "active_provider": ai_stat.get("active_provider", mode),
             "model": active_model,
-            "base_url": active_base_url,
-            "ollama_online": bool(ai_stat.get("ollama_online", online)),
+            "base_url": self.base_url,
             "gemini_online": bool(ai_stat.get("gemini_online", mode == "gemini" and online)),
             "gemini_configured": bool(ai_stat.get("gemini_configured", mode == "gemini")),
             "all_providers_offline": bool(ai_stat.get("all_providers_offline", not online)),

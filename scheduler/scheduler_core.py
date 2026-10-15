@@ -31,7 +31,7 @@ def enhance_message_with_ai(
     media_paths=None,
 ) -> str:
     """
-    Use the project's LocalBrain / Ollama path to polish the message.
+    Use the project's LocalBrain / Gemini Cloud path to polish the message.
     Falls back to the original message if AI is unavailable.
     """
     try:

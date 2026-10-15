@@ -1,5 +1,6 @@
 from copy import deepcopy
 import json
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -76,6 +77,25 @@ class AgentCoreTests(unittest.TestCase):
             parameters=parameters or no_arguments(),
             ai_enabled=True,
         )
+
+    def test_legacy_registry_schema_alias_keeps_custom_tools_available_to_gemini(self):
+        handler = Mock(return_value="12:00")
+        self.register("test_clock", handler)
+        legacy_registry = SimpleNamespace(
+            ollama_tools=self.registry.tools_schema,
+            get=self.registry.get,
+            dispatch=self.registry.dispatch,
+        )
+        chat = ScriptedChat([
+            assistant_response(tool_name="test_clock", arguments={}),
+            assistant_response("Il est 12:00."),
+        ])
+        agent = AgentCore(legacy_registry, self.security, chat_client=chat)
+        result = agent.run("Consulte l'horloge de test.", tool_names=("test_clock",))
+        self.assertEqual("final", result.status)
+        self.assertEqual("Il est 12:00.", result.response)
+        handler.assert_called_once()
+        self.assertEqual("test_clock", chat.calls[0]["kwargs"]["tools"][0]["function"]["name"])
 
     def test_prompt_is_compact_and_retains_operational_and_safety_rules(self):
         self.assertLess(len(AGENT_SYSTEM_PROMPT), 2000)
@@ -383,8 +403,8 @@ class AgentCoreTests(unittest.TestCase):
         self.assertEqual(3, len(chat.calls))
         self.assertEqual(2, handler.call_count)
 
-    def test_ollama_failure_uses_historical_fallback(self):
-        failure = RuntimeError("ollama offline")
+    def test_gemini_failure_uses_historical_fallback(self):
+        failure = RuntimeError("gemini offline")
         chat = ScriptedChat([failure])
         fallback = Mock(return_value="Reponse locale de secours.")
         agent = AgentCore(self.registry, self.security, chat_client=chat)

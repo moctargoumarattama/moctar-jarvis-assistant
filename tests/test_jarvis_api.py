@@ -6,12 +6,10 @@ import json
 import os
 from pathlib import Path
 import tempfile
-import threading
 import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
-from urllib.error import URLError
 
 from fastapi.testclient import TestClient
 
@@ -74,12 +72,12 @@ class TestJarvisAPI(unittest.TestCase):
             self.assertEqual(data["available"], True)
             self.assertGreaterEqual(data["tools_count"], 40)
 
-    def test_hybrid_status_routes_keep_cloud_online_with_ollama_offline(self) -> None:
+    def test_gemini_status_routes_never_probe_a_local_model(self) -> None:
         with patch("ai_brain.load_dotenv"), patch.dict(os.environ, {
-            "AI_PROVIDER": "hybrid", "GEMINI_API_KEY": "test-gemini-key",
+            "AI_PROVIDER": "gemini", "GEMINI_API_KEY": "test-gemini-key",
             "GEMINI_MODEL": "gemini-3.5-flash-lite",
         }), patch("ai_brain.genai") as genai, \
-                patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")):
+                patch("socket.create_connection", side_effect=AssertionError("Local probes forbidden")) as network:
             with self.client as client:
                 for path in ("/api/jarvis/status", "/api/status", "/api/system/ai-status"):
                     with self.subTest(path=path):
@@ -88,11 +86,11 @@ class TestJarvisAPI(unittest.TestCase):
                         data = response.json()
                         self.assertTrue(data["available"])
                         self.assertTrue(data["online"])
-                        self.assertEqual("hybrid", data["provider"])
+                        self.assertEqual("gemini", data["provider"])
                         self.assertEqual("gemini", data["active_provider"])
                         self.assertEqual("gemini-3.5-flash-lite", data["model"])
                         self.assertTrue(data["gemini_online"])
-                        self.assertFalse(data["ollama_online"])
+                        self.assertNotIn("ollama_online", data)
                         self.assertFalse(data["model_offline"])
                         self.assertFalse(data["all_providers_offline"])
                 health = client.get("/api/health")
@@ -102,41 +100,35 @@ class TestJarvisAPI(unittest.TestCase):
                 self.assertTrue(health.json()["ai_online"])
                 self.assertFalse(health.json()["ai"]["model_offline"])
             genai.Client.return_value.models.generate_content.assert_not_called()
+            network.assert_not_called()
 
-    def test_status_routes_expose_active_model_after_fallback_and_local_recovery(self) -> None:
+    def test_status_routes_follow_gemini_failure_and_recovery(self) -> None:
         sdk_response = SimpleNamespace(candidates=[SimpleNamespace(
             content=SimpleNamespace(parts=[SimpleNamespace(text="Reponse cloud.", thought=False, function_call=None)]),
             finish_reason="STOP",
         )])
-        local_response = {"content": "Reponse locale.", "tool_calls": [], "finish_reason": "stop"}
         with patch("ai_brain.load_dotenv"), patch.dict(os.environ, {
-            "AI_PROVIDER": "hybrid", "GEMINI_API_KEY": "test-gemini-key",
+            "AI_PROVIDER": "gemini", "GEMINI_API_KEY": "test-gemini-key",
             "GEMINI_MODEL": "gemini-test-model",
-        }), patch("ai_brain.genai") as genai, patch("ai_brain.get_ai_status", return_value={
-            "online": True, "ollama_online": True,
-        }):
-            genai.Client.return_value.models.generate_content.return_value = sdk_response
+        }), patch("ai_brain.genai") as genai:
+            genai.Client.return_value.models.generate_content.side_effect = [
+                sdk_response, RuntimeError("Gemini unavailable"), sdk_response,
+            ]
             with self.client as client:
                 brain = self.app.state.runtime.jarvis.brain
-                with patch.object(brain, "_chat_ollama", side_effect=[
-                    local_response, TimeoutError("Local inference stalled"), local_response,
-                ]):
-                    for active_provider, active_model in (
-                        ("ollama", brain.model), ("gemini", brain.gemini_model), ("ollama", brain.model),
-                    ):
-                        brain.chat("Explique le principe photovoltaïque.")
-                        for path in ("/api/jarvis/status", "/api/status", "/api/system/ai-status", "/api/health"):
-                            with self.subTest(active_provider=active_provider, path=path):
-                                response = client.get(path)
-                                self.assertEqual(200, response.status_code)
-                                data = response.json()["ai"] if path == "/api/health" else response.json()
-                                self.assertEqual("hybrid", data["provider"])
-                                self.assertEqual(active_provider, data["active_provider"])
-                                self.assertEqual(active_provider, data["mode"])
-                                self.assertEqual(active_model, data["model"])
-                                self.assertTrue(data["online"])
+                for online in (True, False, True):
+                    brain.chat("Explique le principe photovoltaïque.")
+                    for path in ("/api/jarvis/status", "/api/status", "/api/system/ai-status", "/api/health"):
+                        with self.subTest(online=online, path=path):
+                            response = client.get(path)
+                            self.assertEqual(200, response.status_code)
+                            data = response.json()["ai"] if path == "/api/health" else response.json()
+                            self.assertEqual("gemini", data["provider"])
+                            self.assertEqual("gemini" if online else "local", data["active_provider"])
+                            self.assertEqual("gemini-test-model", data["model"])
+                            self.assertEqual(online, data["online"])
 
-            genai.Client.return_value.models.generate_content.assert_called_once()
+            self.assertEqual(3, genai.Client.return_value.models.generate_content.call_count)
 
     def test_status_probe_runs_outside_the_async_event_loop(self) -> None:
         import asyncio
@@ -377,16 +369,16 @@ class TestJarvisAPI(unittest.TestCase):
         self.assertIn("Yo Moctar", content)
         self.assertIn("EN VEILLE ÉCOUTE", content)
 
-    def test_model_offline_modal_and_typing_elements_in_html(self) -> None:
+    def test_cloud_status_replaces_blocking_local_model_alert(self) -> None:
         index_path = Path("static/index.html")
         content = index_path.read_text(encoding="utf-8")
-        self.assertIn("model-offline-modal", content)
-        self.assertIn("Moteur IA Hors-Ligne", content)
-        self.assertIn("MODE AUTONOME ACTIF", content)
-        self.assertIn("model-offline-retry-btn", content)
-        self.assertIn("model-offline-close-btn", content)
+        self.assertNotIn("model-offline-modal", content)
+        self.assertNotIn("Moteur IA Hors-Ligne", content)
+        self.assertNotIn("Reconnexion Ollama", content)
+        self.assertIn("Gemini Cloud", content)
+        self.assertIn("home-ai-badge", content)
         self.assertIn("jarvis-typing-bubble", content)
-        self.assertIn("showModelOfflinePopup", content)
+        self.assertNotIn("showModelOfflinePopup", content)
 
     def test_autonomous_task_library_direct_execution(self) -> None:
         import autonomous_library
@@ -420,7 +412,7 @@ class TestJarvisAPI(unittest.TestCase):
     def test_jarvis_query_model_offline_flag(self) -> None:
         with self.client as client:
             bridge = self.app.state.runtime.jarvis
-            with patch.object(bridge.agent, "_call_llm", side_effect=TimeoutError("Both providers offline")), \
+            with patch.object(bridge.agent, "_call_llm", side_effect=TimeoutError("Gemini offline")), \
                     patch.object(bridge.brain, "get_health_status", return_value={
                         "online": False, "all_providers_offline": True, "model_offline": True,
                     }):
@@ -434,17 +426,17 @@ class TestJarvisAPI(unittest.TestCase):
                 self.assertTrue(data.get("model_offline"))
                 self.assertIn("Dimensionnement Solaire", data["reply"])
 
-    def test_jarvis_query_uses_gemini_when_ollama_is_offline(self) -> None:
+    def test_jarvis_query_uses_gemini_directly_without_local_transport(self) -> None:
         expected_reply = "Un panneau solaire transforme la lumiere en electricite."
         sdk_response = SimpleNamespace(candidates=[SimpleNamespace(
             content=SimpleNamespace(parts=[SimpleNamespace(text=expected_reply, thought=False, function_call=None)]),
             finish_reason="STOP",
         )])
         with patch("ai_brain.load_dotenv"), patch.dict(os.environ, {
-            "AI_PROVIDER": "hybrid", "GEMINI_API_KEY": "test-gemini-key",
+            "AI_PROVIDER": "gemini", "GEMINI_API_KEY": "test-gemini-key",
             "GEMINI_MODEL": "gemini-test-model",
         }), patch("ai_brain.genai") as genai, \
-                patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")) as ollama:
+                patch("socket.create_connection", side_effect=AssertionError("Local transport forbidden")) as local:
             gemini = genai.Client.return_value.models.generate_content
             gemini.return_value = sdk_response
             with self.client as client:
@@ -461,44 +453,36 @@ class TestJarvisAPI(unittest.TestCase):
         self.assertEqual("gemini", data["active_provider"])
         self.assertIsNone(data["model_offline_details"])
         self.assertNotIn("Ollama", data["reply"])
-        self.assertGreaterEqual(ollama.call_count, 1)
+        local.assert_not_called()
         gemini.assert_called_once()
         self.assertEqual("gemini-test-model", gemini.call_args.kwargs["model"])
 
-    def test_jarvis_query_uses_gemini_when_ollama_freezes_past_deadline(self) -> None:
+    def test_legacy_provider_settings_cannot_restore_a_local_inference_delay(self) -> None:
         expected_reply = "Un onduleur convertit le courant continu en courant alternatif."
         sdk_response = SimpleNamespace(candidates=[SimpleNamespace(
             content=SimpleNamespace(parts=[SimpleNamespace(text=expected_reply, thought=False, function_call=None)]),
             finish_reason="STOP",
         )])
-        release_local = threading.Event()
-
-        def frozen_ollama(*args, **kwargs):
-            release_local.wait(timeout=2)
-            raise TimeoutError("Ollama frozen")
-
         with patch("ai_brain.load_dotenv"), patch.dict(os.environ, {
             "AI_PROVIDER": "hybrid", "GEMINI_API_KEY": "test-gemini-key",
         }), patch("ai_brain.genai") as genai, \
-                patch("ai_brain.HYBRID_OLLAMA_TIMEOUT_SECONDS", 0.03), \
-                patch("ai_brain.urlopen", side_effect=frozen_ollama):
+                patch("socket.create_connection", side_effect=AssertionError("Local transport forbidden")) as local:
             genai.Client.return_value.models.generate_content.return_value = sdk_response
-            try:
-                with self.client as client:
-                    started = time.monotonic()
-                    response = client.post("/api/jarvis/query", json={"prompt": "Explique le principe d'un onduleur."})
-                    elapsed = time.monotonic() - started
-            finally:
-                release_local.set()
+            with self.client as client:
+                started = time.monotonic()
+                response = client.post("/api/jarvis/query", json={"prompt": "Explique le principe d'un onduleur."})
+                elapsed = time.monotonic() - started
 
         self.assertLess(elapsed, 1.5)
         self.assertEqual(200, response.status_code)
         self.assertEqual(expected_reply, response.json()["reply"])
         self.assertTrue(response.json()["online"])
         self.assertFalse(response.json()["model_offline"])
+        self.assertEqual("gemini", response.json()["provider"])
+        local.assert_not_called()
         genai.Client.return_value.models.generate_content.assert_called_once()
 
-    def test_telemetry_reply_and_health_stay_online_on_gemini_fallback(self) -> None:
+    def test_telemetry_reply_and_health_stay_online_on_gemini(self) -> None:
         telemetry_result = {
             "success": True, "action": "get_system_telemetry", "message": "Mesures relevees.",
             "data": {"cpu_percent": 12.5, "temperature_c": None,
@@ -511,9 +495,8 @@ class TestJarvisAPI(unittest.TestCase):
             finish_reason="STOP",
         )])
         with patch("ai_brain.load_dotenv"), patch.dict(os.environ, {
-            "AI_PROVIDER": "hybrid", "GEMINI_API_KEY": "test-gemini-key",
+            "AI_PROVIDER": "gemini", "GEMINI_API_KEY": "test-gemini-key",
         }), patch("ai_brain.genai") as genai, \
-                patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")), \
                 patch.dict("actions.TOOL_DISPATCHER", {"get_system_telemetry": Mock(return_value=telemetry_result)}):
             genai.Client.return_value.models.generate_content.return_value = sdk_response
             with self.client as client:
@@ -533,11 +516,10 @@ class TestJarvisAPI(unittest.TestCase):
         self.assertTrue(status.json()["online"])
         self.assertFalse(status.json()["model_offline"])
 
-    def test_double_provider_failure_keeps_autonomous_solar_task(self) -> None:
+    def test_cloud_failure_keeps_autonomous_solar_task(self) -> None:
         with patch("ai_brain.load_dotenv"), patch.dict(os.environ, {
-            "AI_PROVIDER": "hybrid", "GEMINI_API_KEY": "test-gemini-key",
-        }), patch("ai_brain.genai") as genai, \
-                patch("ai_brain.urlopen", side_effect=URLError("Ollama offline")):
+            "AI_PROVIDER": "gemini", "GEMINI_API_KEY": "test-gemini-key",
+        }), patch("ai_brain.genai") as genai:
             gemini = genai.Client.return_value.models.generate_content
             gemini.side_effect = RuntimeError("Gemini unavailable")
             with self.client as client:

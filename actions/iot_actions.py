@@ -1,6 +1,6 @@
 """Module d'actions IoT pour l'interaction domotique et capteurs locaux de JARVIS.
 
-Fournit des outils standardisés pour le Function Calling (OpenAI / Ollama) permettant
+Fournit des outils standardisés pour le Function Calling (JSON Schema / Google GenAI) permettant
 de consulter les capteurs domotiques (température, état global) et d'actionner les relais.
 """
 

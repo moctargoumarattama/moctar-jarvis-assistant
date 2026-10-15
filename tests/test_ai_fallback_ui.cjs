@@ -18,6 +18,9 @@ function frontend({query, status, queryError, statusError} = {}) {
   const nodes = new Map();
   const messages = [];
   const requests = [];
+  const intervals = [];
+  const timeouts = [];
+  const events = {};
   function element() {
     return {style: {}, dataset: {}, events: {}, open: false, opens: 0,
       append() {}, focus() {}, remove() {}, addEventListener(name, fn) {this.events[name] = fn;},
@@ -29,8 +32,10 @@ function frontend({query, status, queryError, statusError} = {}) {
   };
   const context = {
     $, set: (id, text) => {$(id).textContent = text;}, jarvisState: {},
-    document: {createElement: element}, window: {open() {}},
-    clockFormat: {format: () => '12:00'}, setInterval: () => 1, clearInterval() {},
+    document: {createElement: element, hidden: false, addEventListener(name, fn) {events[name] = fn;}}, window: {open() {}},
+    clockFormat: {format: () => '12:00'},
+    setInterval: (fn, delay) => {intervals.push({fn, delay}); return intervals.length;},
+    setTimeout: (fn, delay) => {timeouts.push({fn, delay}); return timeouts.length;}, clearInterval() {},
     console: {warn() {}}, appendChatMessage: (...args) => {messages.push(args);}, speakJarvisText() {},
     readResponse: response => response.json(),
     apiFetch: async (url, options, timeout) => {
@@ -43,73 +48,77 @@ function frontend({query, status, queryError, statusError} = {}) {
   vm.createContext(context);
   vm.runInContext(section('      function jarvisAiHealth(', '      async function openJarvisModal(') +
     section('      async function sendJarvisPrompt(', '      function speakJarvisText('), context);
-  return {context, $, requests, messages};
+  return {context, $, requests, messages, intervals, timeouts, events,
+    modalOpens: () => Array.from(nodes.values()).reduce((count, node) => count + node.opens, 0)};
 }
 
-test('Gemini query response suppresses stale Ollama offline flags and reports the active model', async () => {
+test('a direct Gemini answer displays its model on the home page and in chat', async () => {
   const ui = frontend({query: {status: 'success', reply: 'Réponse Cloud', online: true,
-    active_provider: 'gemini', model: 'gemini-3.5-flash-lite', gemini_online: true,
-    ollama_online: false, model_offline: true}});
-  ui.$('model-offline-modal').open = true;
+    active_provider: 'gemini', model: 'gemini-3.5-flash-lite', gemini_online: true}});
   await ui.context.sendJarvisPrompt('analyse');
-  assert.equal(ui.$('model-offline-modal').open, false);
-  assert.equal(ui.$('model-offline-modal').opens, 0);
   assert.equal(ui.$('jarvis-strip-badge').textContent, 'MOCTAR EN LIGNE');
-  assert.equal(ui.$('jarvis-model-badge').textContent, 'Gemini Cloud · gemini-3.5-flash-lite');
-  assert.equal(ui.$('home-ai-badge').textContent, 'Gemini Cloud · gemini-3.5-flash-lite');
+  assert.equal(ui.$('jarvis-model-badge').textContent, 'gemini-3.5-flash-lite @ Gemini Cloud');
+  assert.equal(ui.$('home-ai-badge').textContent, 'gemini-3.5-flash-lite @ Gemini Cloud');
   assert.equal(ui.messages.at(-1)[1], 'Réponse Cloud');
   assert.equal(ui.requests[0].timeout, 60000);
 });
 
-test('autonomous reply alerts only when the response confirms both providers are unavailable', async () => {
+test('an autonomous action remains available when Gemini is unavailable without a blocking modal', async () => {
   const ui = frontend({query: {status: 'success', reply: 'Tâche locale exécutée',
-    online: false, model_offline: true, all_providers_offline: true,
-    gemini_online: false, ollama_online: false}});
+    online: false, model_offline: true, gemini_online: false}});
   await ui.context.sendJarvisPrompt('état système');
-  assert.equal(ui.$('model-offline-modal').open, true);
-  assert.equal(ui.$('jarvis-strip-badge').textContent, 'MOCTAR HORS LIGNE');
+  assert.equal(ui.$('jarvis-strip-badge').textContent, 'MODE AUTONOME');
+  assert.equal(ui.$('home-ai-badge').textContent, 'Gemini Cloud indisponible · Mode autonome');
+  assert.equal(ui.messages.at(-1)[1], 'Tâche locale exécutée');
+  assert.equal(ui.$('jarvis-send-btn').disabled, false);
+  assert.equal(ui.modalOpens(), 0);
 });
 
-test('a legacy model_offline flag alone cannot open the alert', async () => {
-  const ui = frontend({query: {status: 'success', reply: 'Réponse', model_offline: true}});
-  await ui.context.sendJarvisPrompt('état système');
-  assert.equal(ui.$('model-offline-modal').opens, 0);
+test('a cloud API error displays its message without blocking subsequent requests', async () => {
+  const ui = frontend({query: {status: 'error', reply: 'Quota Gemini dépassé.',
+    online: false, gemini_online: false}});
+  await ui.context.sendJarvisPrompt('analyse');
+  assert.match(ui.messages.at(-1)[1], /Quota Gemini dépassé/);
+  assert.equal(ui.$('jarvis-input').disabled, false);
+  assert.equal(ui.context.jarvisState.busy, false);
+  assert.equal(ui.modalOpens(), 0);
 });
 
-test('an HTTP query timeout checks cloud health and keeps Gemini online without an alert', async () => {
+test('an HTTP query timeout checks Gemini health without declaring the cloud offline', async () => {
   const ui = frontend({queryError: Object.assign(new Error('timeout'), {name: 'AbortError'}),
-    status: {available: true, online: true, gemini_online: true, ollama_online: false,
+    status: {available: true, online: true, gemini_online: true,
       active_provider: 'gemini', model: 'gemini-3.5-flash-lite'}});
   await ui.context.sendJarvisPrompt('analyse');
   assert.deepEqual(ui.requests.map(request => request.url), ['/api/jarvis/query', '/api/jarvis/status']);
-  assert.equal(ui.$('model-offline-modal').opens, 0);
   assert.equal(ui.$('jarvis-strip-badge').textContent, 'MOCTAR EN LIGNE');
   assert.equal(ui.$('jarvis-send-btn').disabled, false);
+  assert.equal(ui.modalOpens(), 0);
 });
 
-test('a network failure cannot infer that both model providers are offline', async () => {
+test('a network failure reports standby without inferring Gemini is offline', async () => {
   const ui = frontend({queryError: new Error('network'), statusError: new Error('network')});
   await ui.context.sendJarvisPrompt('analyse');
-  assert.equal(ui.$('model-offline-modal').opens, 0);
   assert.equal(ui.$('jarvis-strip-badge').textContent, 'MOCTAR STANDBY');
+  assert.equal(ui.modalOpens(), 0);
 });
 
-test('bridge availability never overrides confirmed offline AI health', async () => {
+test('bridge availability cannot hide a confirmed cloud outage', async () => {
   const ui = frontend({status: {available: true, status: 'ready', online: false,
-    all_providers_offline: true, model_offline: true}});
-  await ui.context.fetchJarvisStatus(true);
-  assert.equal(ui.$('jarvis-strip-badge').textContent, 'MOCTAR HORS LIGNE');
-  assert.equal(ui.$('model-offline-modal').open, true);
+    gemini_online: false, model_offline: true}});
+  await ui.context.fetchJarvisStatus();
+  assert.equal(ui.$('jarvis-strip-badge').textContent, 'MODE AUTONOME');
+  assert.equal(ui.$('home-ai-badge').dataset.tone, 'warning');
+  assert.equal(ui.modalOpens(), 0);
 });
 
-test('retry accepts Gemini recovery while Ollama remains offline and closes the alert', async () => {
-  const ui = frontend({status: {online: true, active_provider: 'gemini',
-    gemini_online: true, ollama_online: false, model: 'gemini-3.5-flash-lite'}});
-  ui.$('model-offline-modal').open = true;
-  await ui.$('model-offline-retry-btn').events.click();
-  assert.equal(ui.$('model-offline-modal').open, false);
+test('Gemini recovery restores the green model badge after an outage', () => {
+  const ui = frontend();
+  ui.context.renderJarvisAiStatus({online: false, gemini_online: false});
+  ui.context.renderJarvisAiStatus({online: true, active_provider: 'gemini', model: 'recovered-cloud-model'});
+  assert.equal(ui.$('home-ai-badge').textContent, 'recovered-cloud-model @ Gemini Cloud');
+  assert.equal(ui.$('home-ai-badge').dataset.tone, 'success');
   assert.equal(ui.$('jarvis-strip-badge').textContent, 'MOCTAR EN LIGNE');
-  assert.equal(ui.$('model-offline-retry-btn').disabled, false);
+  assert.equal(ui.modalOpens(), 0);
 });
 
 test('all dashboard inline scripts remain valid JavaScript', () => {
@@ -118,51 +127,85 @@ test('all dashboard inline scripts remain valid JavaScript', () => {
   }
 });
 
-test('home and chat display the effective provider and model through fallback and recovery', () => {
+test('home and chat report the effective Gemini model with a steady green badge', () => {
   const ui = frontend();
-  for (const [provider, model, expected] of [
-    ['ollama', 'qwen2.5:1.5b', 'Hybride · Ollama local · qwen2.5:1.5b'],
-    ['gemini', 'gemini-3.5-flash-lite', 'Hybride · Gemini Cloud · gemini-3.5-flash-lite'],
-    ['ollama', 'custom-local:latest', 'Hybride · Ollama local · custom-local:latest'],
-  ]) {
-    ui.context.renderJarvisAiStatus({online: true, provider: 'hybrid', active_provider: provider, model});
+  for (const model of ['gemini-3.5-flash-lite', 'custom-cloud-model']) {
+    ui.context.renderJarvisAiStatus({online: true, provider: 'gemini', active_provider: 'gemini', model});
     for (const id of ['home-ai-badge', 'jarvis-model-badge']) {
-      assert.equal(ui.$(id).textContent, expected);
-      assert.equal(ui.$(id).title, expected);
+      assert.equal(ui.$(id).textContent, model + ' @ Gemini Cloud');
+      assert.equal(ui.$(id).title, model + ' @ Gemini Cloud');
       assert.equal(ui.$(id).dataset.tone, 'success');
     }
   }
+  const css = fs.readFileSync(path.join(__dirname, '../static/cosmos.css'), 'utf8');
+  assert.match(css, /\.ai-runtime-badge\s*\{[^}]*animation:\s*none/);
+  assert.match(css, /\.ai-runtime-badge\[data-tone="success"\]\s*\{[^}]*color:\s*var\(--green\)/);
 });
 
-test('autonomous mode clears the previous model when both AI providers are offline', () => {
+test('an unavailable Gemini model is not displayed as active', () => {
   const ui = frontend();
-  ui.context.renderJarvisAiStatus({online: true, active_provider: 'gemini', model: 'cloud-model'});
-  ui.context.renderJarvisAiStatus({online: false, all_providers_offline: true,
+  ui.context.renderJarvisAiStatus({online: true, model: 'cloud-model'});
+  ui.context.renderJarvisAiStatus({online: false, gemini_online: false,
     active_provider: 'local', model: 'configured-but-unavailable'});
-  assert.equal(ui.$('home-ai-badge').textContent, 'Mode autonome · sans modèle IA');
-  assert.equal(ui.$('jarvis-model-badge').textContent, 'Mode autonome · sans modèle IA');
+  assert.equal(ui.$('home-ai-badge').textContent, 'Gemini Cloud indisponible · Mode autonome');
+  assert.equal(ui.$('jarvis-model-badge').textContent, 'Gemini Cloud indisponible · Mode autonome');
   assert.equal(ui.$('home-ai-badge').dataset.tone, 'warning');
 });
 
-test('missing model metadata does not invent the default model', () => {
+test('missing cloud model metadata uses the configured architecture default', () => {
   const ui = frontend();
   ui.context.renderJarvisAiStatus({online: true, active_provider: 'gemini'});
-  assert.equal(ui.$('home-ai-badge').textContent, 'Gemini Cloud · modèle non communiqué');
+  assert.equal(ui.$('home-ai-badge').textContent, 'gemini-3.5-flash-lite @ Gemini Cloud');
 });
 
-test('status network failures clear stale model information without reporting offline', async () => {
+test('status network failures clear stale model information without reporting a cloud outage', async () => {
   const ui = frontend({statusError: new Error('network')});
   ui.context.renderJarvisAiStatus({online: true, active_provider: 'gemini', model: 'cloud-model'});
   await ui.context.fetchJarvisStatus();
   assert.equal(ui.$('home-ai-badge').textContent, 'IA · Statut indisponible');
   assert.equal(ui.$('jarvis-strip-badge').textContent, 'MOCTAR STANDBY');
-  assert.equal(ui.$('model-offline-modal').opens, 0);
+  assert.equal(ui.modalOpens(), 0);
 });
 
-test('a stale status request cannot overwrite the provider of a newer answer', async () => {
-  const ui = frontend({status: {online: true, active_provider: 'ollama', model: 'old-local-model'}});
+test('a stale status request cannot overwrite the Gemini model of a newer answer', async () => {
+  const ui = frontend({status: {online: true, active_provider: 'gemini', model: 'old-cloud-model'}});
   const pending = ui.context.fetchJarvisStatus();
   ui.context.renderJarvisAiStatus({online: true, active_provider: 'gemini', model: 'current-cloud-model'});
   await pending;
-  assert.equal(ui.$('home-ai-badge').textContent, 'Gemini Cloud · current-cloud-model');
+  assert.equal(ui.$('home-ai-badge').textContent, 'current-cloud-model @ Gemini Cloud');
+});
+
+test('the obsolete offline dialog and local model controls are removed from the dashboard', () => {
+  assert.doesNotMatch(html, /model-offline-modal|showModelOfflinePopup|ollama|hybrid/i);
+  const mobileCss = fs.readFileSync(path.join(__dirname, '../static/mobile.css'), 'utf8');
+  assert.doesNotMatch(mobileCss, /model-offline-/);
+  for (const id of ['home-ai-badge', 'jarvis-model-badge']) {
+    assert.match(html, new RegExp('id="' + id + '"[^>]*data-tone="success">gemini-3\\.5-flash-lite @ Gemini Cloud'));
+  }
+});
+
+test('cloud status refreshes every ten seconds and on visibility without interrupting a request', async () => {
+  const ui = frontend({status: {online: true, model: 'gemini-3.5-flash-lite'}});
+  vm.runInContext(section('      setTimeout(fetchJarvisStatus, 1500);',
+    '      // -----------------------------------------------------------------------'), ui.context);
+  assert.equal(ui.timeouts[0].delay, 1500);
+  assert.equal(ui.intervals[0].delay, 10000);
+  ui.intervals[0].fn();
+  await new Promise(setImmediate);
+  assert.equal(ui.requests.length, 1);
+  ui.context.document.hidden = true;
+  ui.intervals[0].fn();
+  ui.events.visibilitychange();
+  await new Promise(setImmediate);
+  assert.equal(ui.requests.length, 1);
+  ui.context.document.hidden = false;
+  ui.context.jarvisState.busy = true;
+  ui.intervals[0].fn();
+  ui.events.visibilitychange();
+  await new Promise(setImmediate);
+  assert.equal(ui.requests.length, 1);
+  ui.context.jarvisState.busy = false;
+  ui.events.visibilitychange();
+  await new Promise(setImmediate);
+  assert.equal(ui.requests.length, 2);
 });

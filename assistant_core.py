@@ -402,7 +402,7 @@ class AssistantCore:
                 agent_result = self.agent.resume(
                     intent_data["agent_pending"],
                     confirmed=True,
-                    fallback=lambda: "L'action a ete confirmee, mais Ollama est indisponible pour terminer la reponse.",
+                    fallback=lambda: "L'action a ete confirmee, mais Gemini Cloud est indisponible pour terminer la reponse.",
                 )
                 if agent_result.pending_action is not None:
                     self.pending_confirmation = self._agent_confirmation_payload(agent_result.pending_action)
@@ -896,7 +896,7 @@ class AssistantCore:
 
         def historical_fallback():
             if intent_data.get("intent") == "chat_fallback":
-                return self._handle_local_chat_fallback(intent_data, allow_ollama=False)
+                return self._handle_local_chat_fallback(intent_data, allow_ai=False)
             return self._execute_intent(intent_data)
 
         result = self.agent.run(
@@ -964,7 +964,7 @@ class AssistantCore:
     def _handle_capabilities(self, _intent_data):
         return self.local_brain.explain_capabilities()
 
-    def _handle_local_chat_fallback(self, intent_data, *, allow_ollama=True):
+    def _handle_local_chat_fallback(self, intent_data, *, allow_ai=True):
         target = (intent_data.get("target", "") or "").strip()
         if target.startswith("mets ") or target.startswith("joue "):
             return "Je peux lancer la musique localement. Dis par exemple: mets du ninho."
@@ -977,7 +977,7 @@ class AssistantCore:
             preferences=context["preferences"],
             insights=context["insights"],
             session_turn=context["session_turn"],
-            allow_ollama=allow_ollama,
+            allow_ai=allow_ai,
         )
 
     def _handle_open_scheduler(self, _intent_data):

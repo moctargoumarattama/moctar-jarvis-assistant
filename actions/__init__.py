@@ -1,7 +1,7 @@
 """Hub central d'actions et catalogue Function Calling pour JARVIS.
 
 Fournit l'enregistrement centralisé, le dispatching sécurisé et la génération
-automatique des schémas JSON d'outils (compatibles OpenAI et Ollama) pour l'ensemble
+automatique des schémas JSON d'outils (compatibles Google GenAI) pour l'ensemble
 des 7 modules opérationnels du système :
 1. energy_actions (consommation, solaire, audit, dimensionnement)
 2. iot_actions (relais, sondes, télémétrie locale)
@@ -181,7 +181,7 @@ TOOL_DISPATCHER: Dict[str, Callable[..., Any]] = {
 
 
 # ==============================================================================
-# GÉNÉRATION AUTOMATIQUE DES SCHÉMAS FUNCTION CALLING (OPENAI / OLLAMA)
+# GÉNÉRATION AUTOMATIQUE DES SCHÉMAS FUNCTION CALLING (GOOGLE GENAI)
 # ==============================================================================
 
 def _parse_docstring_sections(doc: Optional[str]) -> Tuple[str, Dict[str, str]]:
@@ -266,7 +266,7 @@ def _python_type_to_json_schema(type_hint: Any) -> Dict[str, Any]:
 def function_to_json_schema(
     func: Callable[..., Any], name: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Convertit une fonction Python en schéma Function Calling standard OpenAI/Ollama.
+    """Convertit une fonction Python en schéma Function Calling standard JSON Schema / Google GenAI.
 
     Args:
         func (Callable[..., Any]): La fonction Python inspectée.
@@ -348,7 +348,7 @@ def function_to_json_schema(
 
 
 def get_all_tools_schema() -> List[Dict[str, Any]]:
-    """Génère et exporte automatiquement la liste des définitions JSON Schema au standard OpenAI / Ollama.
+    """Génère et exporte automatiquement la liste des définitions JSON Schema au standard JSON Schema / Google GenAI.
 
     Returns:
         List[Dict[str, Any]]: Liste des schémas d'outils disponibles pour le modèle.

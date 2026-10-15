@@ -55,13 +55,13 @@
     overscroll-behavior: contain;
   }
   dialog:is(.orbit-modal, #jarvis-modal, #scheduler-modal, #cyberdefense-modal,
-            #events-dialog, #live-metrics-dialog, #model-offline-modal) {
+            #events-dialog, #live-metrics-dialog) {
     height: calc(var(--mobile-viewport-height, 100dvh) - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
     padding: 0;
     overflow: hidden;
   }
   dialog:is(.orbit-modal, #jarvis-modal, #scheduler-modal, #cyberdefense-modal,
-            #events-dialog, #live-metrics-dialog, #model-offline-modal)[open] {
+            #events-dialog, #live-metrics-dialog)[open] {
     display: flex;
     flex-direction: column;
   }
@@ -146,16 +146,6 @@
   .jarvis-footer-meta { flex-wrap: wrap; gap: 4px; font-size: 9px; overflow-wrap: anywhere; }
   .jarvis-footer-meta > span:first-child { display: none; }
 
-  #model-offline-modal .cyber-scroll { max-height: none !important; }
-  #model-offline-title { flex-wrap: wrap; font-size: 18px !important; }
-  #model-offline-title span { font-size: 11px !important; }
-  #model-offline-modal .cyber-scroll > div[style*="grid-template-columns"] {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
-  #model-offline-modal .cyber-footer { display: flex; flex-direction: column; align-items: stretch !important; }
-  #model-offline-modal .cyber-footer > span { flex: none; }
-  #model-offline-modal .cyber-footer > div { display: flex; flex-wrap: wrap; gap: 8px !important; }
-  #model-offline-modal .cyber-footer button { flex: 1 1 180px; min-height: 44px; }
   .live-metrics-toolbar { min-width: 0; padding: 10px 12px; gap: 8px; }
   .live-metrics-period { min-width: 0; }
   .live-metrics-period-buttons { flex-wrap: wrap; }
@@ -170,13 +160,10 @@
     padding: 8px 12px !important;
   }
   :root[data-mobile-compact] :is(.cyber-header, .live-metrics-header, .events-dialog-header) p,
-  :root[data-mobile-compact] #model-offline-modal .cyber-footer > span,
   :root[data-mobile-compact] .jarvis-header-left .eyebrow,
   :root[data-mobile-compact] :is(.jarvis-title-sub, .jarvis-tools-badge, .jarvis-footer-meta) {
     display: none;
   }
-  :root[data-mobile-compact] #model-offline-title { font-size: 16px !important; }
-  :root[data-mobile-compact] #model-offline-modal .cyber-footer { padding: 8px 12px !important; }
   :root[data-mobile-compact] .jarvis-header-left { padding-right: 96px; }
   :root[data-mobile-compact] .jarvis-header-badges { margin-top: 4px; }
   :root[data-mobile-compact] .jarvis-model-badge { padding: 3px 6px; line-height: 1.4; }
