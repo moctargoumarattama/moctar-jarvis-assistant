@@ -464,9 +464,28 @@ class AgentCore:
 
         try:
             forced_response = self._call_llm(messages, tools=None)
-            final_text = forced_response.get("content") or "Nombre maximal d'étapes atteint sans conclusion."
+            final_text = (forced_response.get("content") or "").strip()
         except Exception as exc:
-            final_text = f"Nombre maximal d'étapes atteint. Erreur lors de la synthèse : {exc}"
+            logger.warning("Erreur lors de la synthese forcee LLM : %s", exc)
+            final_text = ""
+
+        if not final_text:
+            # Synthèse déterministe des outils exécutés pour garantir zéro silence
+            tool_msgs = [m for m in messages if m.get("role") == "tool"]
+            if tool_msgs:
+                lines = ["📋 **Synthèse des actions exécutées par M.O.C.T.A.R :**"]
+                for tm in tool_msgs:
+                    t_name = tm.get("name") or "Action"
+                    raw_c = tm.get("content") or ""
+                    try:
+                        parsed_c = json.loads(raw_c) if isinstance(raw_c, str) else raw_c
+                        msg = parsed_c.get("message") or parsed_c.get("data") or "Exécuté avec succès."
+                    except Exception:
+                        msg = str(raw_c)[:120]
+                    lines.append(f"- **{t_name}** : {msg}")
+                final_text = "\n".join(lines)
+            else:
+                final_text = "Nombre maximal d'étapes de réflexion atteint sans conclusion."
 
         if self.memory:
             try:

@@ -830,6 +830,90 @@
     <div class="live-metrics-scroll"><div class="live-metrics-context"><div><h3 id="live-metrics-host-title">Hôte central · en attente</h3><p id="live-metrics-last-seen">En attente du premier relevé.</p></div><span class="live-metrics-count" id="live-metrics-count">0 relevé</span></div><div class="live-metrics-notice" id="live-metrics-notice">L’historique se construit pendant cette session, même lorsque cette fenêtre est fermée.</div><div class="live-metrics-grid" id="live-metrics-charts"></div><section class="live-metrics-services" id="live-metrics-services" aria-labelledby="live-metrics-services-title" hidden><h3 id="live-metrics-services-title">Services · dernier état connu</h3><div class="live-metrics-service-grid" id="live-metrics-service-list"></div></section></div>
     <footer class="live-metrics-footer"><span>Historique de session · 1 h maximum · Les coupures de mesure restent visibles. Aucun point simulé.</span><span>Échap pour fermer</span></footer>
   </dialog>
+  <dialog id="model-offline-modal" class="cyber-modal" aria-labelledby="model-offline-title" aria-describedby="model-offline-desc" style="max-width:760px;width:92vw;border:1px solid rgba(255, 115, 138, 0.45);box-shadow:0 0 35px rgba(255, 80, 100, 0.25), 0 20px 60px rgba(0,0,0,0.85);background:linear-gradient(170deg,#121927 0%,#090e17 100%);border-radius:18px;padding:0;color:#c5d9ec;">
+    <header class="cyber-header" style="border-bottom:1px solid rgba(255, 115, 138, 0.25);padding:18px 24px;display:flex;justify-content:space-between;align-items:flex-start;">
+      <div>
+        <div class="eyebrow" style="color:#ff738a;font-weight:700;letter-spacing:.14em;margin-bottom:4px">⚠️ DISRUPTEUR NEURONAL · ALERTE SYSTÈME</div>
+        <h2 id="model-offline-title" style="margin:0;font-size:1.35rem;color:#ffffff;display:flex;align-items:center;gap:8px">
+          Moteur IA Hors-Ligne <span style="font-size:0.8rem;background:rgba(255,115,138,0.2);color:#ff738a;border:1px solid rgba(255,115,138,0.5);padding:2px 8px;border-radius:999px;">MODE AUTONOME ACTIF</span>
+        </h2>
+        <p id="model-offline-desc" style="margin:4px 0 0;font-size:0.85rem;color:#8fa9c5">
+          Le modèle local Ollama (<code style="color:#5ed9ec">qwen2.5:1.5b</code>) ne répond pas ou est arrêté. <strong>Aucune panne :</strong> M.O.C.T.A.R prend le relais à 100% avec sa bibliothèque déterministe.
+        </p>
+      </div>
+      <button type="button" class="jarvis-btn-icon" id="model-offline-close-icon" aria-label="Fermer la modale" style="background:rgba(255,115,138,0.15);color:#ff738a;border:1px solid rgba(255,115,138,0.3);width:32px;height:32px;border-radius:8px;cursor:pointer;">✕</button>
+    </header>
+
+    <div class="cyber-scroll" style="padding:20px 24px;max-height:65vh;overflow-y:auto;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px">
+        <div style="background:rgba(255,80,100,0.1);border:1px solid rgba(255,115,138,0.35);padding:12px;border-radius:10px;">
+          <div style="font-size:10px;font-weight:700;color:#ff738a;letter-spacing:.1em;margin-bottom:4px">MOTEUR NEURONAL (OLLAMA)</div>
+          <div style="font-size:13px;font-weight:700;color:#ff9aa8;display:flex;align-items:center;gap:6px">
+            <span class="led-blink" style="background:#ff4757;box-shadow:0 0 8px #ff4757"></span> HORS SERVICE / SANS RÉPONSE
+          </div>
+          <small id="model-offline-details-text" style="color:#8fa9c5;display:block;margin-top:4px;font-size:10px">Erreur connexion socket ou délai dépassé (port 11434).</small>
+        </div>
+
+        <div style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.35);padding:12px;border-radius:10px;">
+          <div style="font-size:10px;font-weight:700;color:#4ade80;letter-spacing:.1em;margin-bottom:4px">MOTEUR AUTONOME M.O.C.T.A.R</div>
+          <div style="font-size:13px;font-weight:700;color:#86efac;display:flex;align-items:center;gap:6px">
+            <span class="led-blink" style="background:#22c55e;box-shadow:0 0 8px #22c55e"></span> 46 TÂCHES DISPONIBLES (100% LOCAL)
+          </div>
+          <small style="color:#8fa9c5;display:block;margin-top:4px;font-size:10px">Télémétrie M4800, services, tâches, calculs, web & domotique.</small>
+        </div>
+      </div>
+
+      <h3 style="font-size:12px;color:#5ed9ec;letter-spacing:.12em;text-transform:uppercase;margin:0 0 10px 0;display:flex;align-items:center;gap:6px">
+        <span>⚡ BIBLIOTHÈQUE D'ACTIONS OPÉRATIONNELLES (SANS IA)</span>
+      </h3>
+      
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(210px, 1fr));gap:10px;">
+        <div style="background:rgba(18,29,46,0.7);border:1px solid rgba(94,217,236,0.2);padding:10px;border-radius:8px;">
+          <strong style="color:#7ee5f4;font-size:11px;display:block;margin-bottom:4px">🖥️ Surveillance & Jauges</strong>
+          <span style="font-size:10px;color:#94a3b8;display:block;line-height:1.4">Télémétrie Dell M4800, RAM, CPU, disques, services Linux.</span>
+          <code style="font-size:9px;color:#38bdf8;background:rgba(56,189,248,0.1);padding:2px 4px;border-radius:4px;display:inline-block;margin-top:4px">« état du système »</code>
+        </div>
+
+        <div style="background:rgba(18,29,46,0.7);border:1px solid rgba(94,217,236,0.2);padding:10px;border-radius:8px;">
+          <strong style="color:#7ee5f4;font-size:11px;display:block;margin-bottom:4px">🌐 Navigation & Apps</strong>
+          <span style="font-size:10px;color:#94a3b8;display:block;line-height:1.4">Ouverture directe de sites et recherches dans le navigateur.</span>
+          <code style="font-size:9px;color:#38bdf8;background:rgba(56,189,248,0.1);padding:2px 4px;border-radius:4px;display:inline-block;margin-top:4px">« ouvre youtube »</code>
+        </div>
+
+        <div style="background:rgba(18,29,46,0.7);border:1px solid rgba(94,217,236,0.2);padding:10px;border-radius:8px;">
+          <strong style="color:#7ee5f4;font-size:11px;display:block;margin-bottom:4px">📝 Tâches & Notes SQLite</strong>
+          <span style="font-size:10px;color:#94a3b8;display:block;line-height:1.4">Ajout et consultation des todos, mémorisation, rappels.</span>
+          <code style="font-size:9px;color:#38bdf8;background:rgba(56,189,248,0.1);padding:2px 4px;border-radius:4px;display:inline-block;margin-top:4px">« liste mes tâches »</code>
+        </div>
+
+        <div style="background:rgba(18,29,46,0.7);border:1px solid rgba(94,217,236,0.2);padding:10px;border-radius:8px;">
+          <strong style="color:#7ee5f4;font-size:11px;display:block;margin-bottom:4px">⚡ Solaire & Énergie</strong>
+          <span style="font-size:10px;color:#94a3b8;display:block;line-height:1.4">Dimensionnement de panneaux, batteries 24V, onduleurs.</span>
+          <code style="font-size:9px;color:#38bdf8;background:rgba(56,189,248,0.1);padding:2px 4px;border-radius:4px;display:inline-block;margin-top:4px">« solaire 6 kwh »</code>
+        </div>
+
+        <div style="background:rgba(18,29,46,0.7);border:1px solid rgba(94,217,236,0.2);padding:10px;border-radius:8px;">
+          <strong style="color:#7ee5f4;font-size:11px;display:block;margin-bottom:4px">⚙️ Outils Système OS</strong>
+          <span style="font-size:10px;color:#94a3b8;display:block;line-height:1.4">Heure, date, niveau batterie, ajustement volume, capture.</span>
+          <code style="font-size:9px;color:#38bdf8;background:rgba(56,189,248,0.1);padding:2px 4px;border-radius:4px;display:inline-block;margin-top:4px">« heure », « batterie »</code>
+        </div>
+
+        <div style="background:rgba(18,29,46,0.7);border:1px solid rgba(94,217,236,0.2);padding:10px;border-radius:8px;">
+          <strong style="color:#7ee5f4;font-size:11px;display:block;margin-bottom:4px">🛠️ Git & Projets</strong>
+          <span style="font-size:10px;color:#94a3b8;display:block;line-height:1.4">Statut git, commits récents, checklist maintenance.</span>
+          <code style="font-size:9px;color:#38bdf8;background:rgba(56,189,248,0.1);padding:2px 4px;border-radius:4px;display:inline-block;margin-top:4px">« statut git »</code>
+        </div>
+      </div>
+    </div>
+
+    <footer class="cyber-footer" style="padding:14px 24px;border-top:1px solid rgba(255, 115, 138, 0.25);display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:11px;color:#8fa9c5">M.O.C.T.A.R reste réactif même sans réseau neuronal.</span>
+      <div style="display:flex;gap:10px">
+        <button type="button" class="button" id="model-offline-retry-btn" style="background:rgba(94,217,236,0.15);border:1px solid #5ed9ec;color:#5ed9ec;padding:7px 14px;border-radius:8px;font-size:11px;cursor:pointer;">🔄 Tester reconnexion Ollama</button>
+        <button type="button" class="button primary" id="model-offline-close-btn" style="padding:7px 16px;border-radius:8px;font-size:11px;cursor:pointer;">Continuer en mode autonome</button>
+      </div>
+    </footer>
+  </dialog>
   <div class="toast" id="toast" role="status" hidden></div>
   <script src="/static/cosmos.js?v=1"></script>
   <script src="/static/live_metrics.js?v=1"></script>
@@ -1728,6 +1812,39 @@
 
         appendChatMessage('user', text, null, null);
 
+        // 1. Accusé de réception immédiat : ajout de la bulle d'activité animée dans le chat
+        const stream = $('jarvis-chat-stream');
+        const typingBubble = document.createElement('div');
+        typingBubble.id = 'jarvis-typing-bubble';
+        typingBubble.className = 'jarvis-msg jarvis-msg-bot jarvis-msg-typing';
+        typingBubble.innerHTML = `
+          <div class="jarvis-msg-avatar">M</div>
+          <div class="jarvis-msg-content">
+            <div class="jarvis-msg-author">
+              <span>MOCTAR CORE</span>
+              <time class="mono">${clockFormat.format(new Date())}</time>
+            </div>
+            <div class="jarvis-typing-indicator">
+              <div class="typing-dots"><span></span><span></span><span></span></div>
+              <span class="typing-label" id="jarvis-typing-label">⚡ M.O.C.T.A.R analyse votre demande...</span>
+            </div>
+          </div>
+        `;
+        stream.append(typingBubble);
+        stream.scrollTop = stream.scrollHeight;
+
+        let elapsedSeconds = 0;
+        const typingInterval = setInterval(() => {
+          elapsedSeconds += 2;
+          const label = $('jarvis-typing-label');
+          if (!label) return;
+          if (elapsedSeconds >= 8) {
+            label.textContent = '🧠 Inférence locale CPU (Dell M4800)...';
+          } else if (elapsedSeconds >= 3) {
+            label.textContent = '⚙️ Consultation des jauges et outils système...';
+          }
+        }, 2000);
+
         const reactor = $('jarvis-reactor');
         if (reactor) reactor.dataset.reactorState = 'thinking';
         set('jarvis-reactor-status', 'RÉFLEXION RE-ACT...');
@@ -1771,15 +1888,26 @@
               set('jarvis-session-id', 'Session: ' + data.session_id.slice(-12));
             }
             speakJarvisText(data.reply || '');
+
+            // Si le modèle IA était hors-ligne et que le mode autonome a pris le relais, afficher la pop-up
+            if (data.model_offline) {
+              showModelOfflinePopup(data.model_offline_details);
+            }
           } else {
             const errReply = (typeof data.reply === 'string' && data.reply) ? data.reply : (typeof data.detail === 'string' ? data.detail : 'Erreur lors de l’exécution.');
             appendChatMessage('assistant', '⚠️ ' + errReply, data.thought_chain, data.tools_used);
             speakJarvisText(errReply);
+            if (data.model_offline) {
+              showModelOfflinePopup(data.model_offline_details);
+            }
           }
         } catch (err) {
           const errMsg = err.name === 'AbortError' ? 'Délai d’attente dépassé pour la réponse du modèle IA.' : (err.message || 'Erreur réseau vers le moteur Moctar.');
           appendChatMessage('assistant', '⚠️ ' + errMsg);
+          showModelOfflinePopup('Délai d’attente réseau dépassé ou serveur Ollama muet.');
         } finally {
+          clearInterval(typingInterval);
+          $('jarvis-typing-bubble')?.remove();
           jarvisState.busy = false;
           $('jarvis-send-btn').disabled = false;
           $('jarvis-input').disabled = false;
@@ -1788,6 +1916,59 @@
           set('jarvis-reactor-status', 'PRÊT');
         }
       }
+
+      function showModelOfflinePopup(details) {
+        const modal = $('model-offline-modal');
+        if (!modal) return;
+        if (details && $('model-offline-details-text')) {
+          set('model-offline-details-text', String(details).slice(0, 160));
+        }
+        if (!modal.open) {
+          try {
+            modal.showModal();
+          } catch (e) {
+            console.warn('Erreur ouverture modal offline:', e);
+          }
+        }
+      }
+
+      $('model-offline-close-btn')?.addEventListener('click', () => $('model-offline-modal')?.close());
+      $('model-offline-close-icon')?.addEventListener('click', () => $('model-offline-modal')?.close());
+      $('model-offline-retry-btn')?.addEventListener('click', async () => {
+        const btn = $('model-offline-retry-btn');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Connexion en cours...';
+        }
+        try {
+          const res = await apiFetch('/api/jarvis/status', {}, 5000);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.ollama_online) {
+              $('model-offline-modal')?.close();
+              const badge = $('jarvis-strip-badge');
+              if (badge) {
+                badge.textContent = 'MOCTAR EN LIGNE';
+                badge.style.color = 'var(--green)';
+              }
+              await fetchJarvisStatus();
+            } else {
+              if ($('model-offline-details-text')) {
+                set('model-offline-details-text', 'Ollama toujours inaccessible sur le port 11434.');
+              }
+            }
+          }
+        } catch (e) {
+          if ($('model-offline-details-text')) {
+            set('model-offline-details-text', 'Erreur réseau vers le serveur local.');
+          }
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = '🔄 Tester reconnexion Ollama';
+          }
+        }
+      });
 
       function speakJarvisText(text) {
         if (!('speechSynthesis' in window) || !$('jarvis-tts-toggle')?.checked) return;

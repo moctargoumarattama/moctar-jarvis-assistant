@@ -336,10 +336,37 @@ class JarvisHeadlessBridge:
             agent_core.execute_tool = hooked_execute_tool
             actions.execute_tool = hooked_execute_tool
 
+            model_offline = False
+            model_offline_details = None
+
             def local_fallback() -> str:
-                nonlocal status
+                nonlocal status, model_offline, model_offline_details
+                model_offline = True
+                model_offline_details = "Modèle Ollama local inaccessible ou expiré (port 11434)"
                 if telemetry_result is not None:
                     return _format_telemetry_report(telemetry_result)
+
+                # Priorité au moteur déterministe de 46 tâches autonomes
+                try:
+                    import autonomous_library
+                    auto_res = autonomous_library.execute_autonomous_task(user_input, session_id=current_session)
+                    if auto_res.get("handled"):
+                        status = "success"
+                        if auto_res.get("tools_used"):
+                            tools_used.extend(auto_res["tools_used"])
+                        if auto_res.get("action") == "open_browser":
+                            tools_used.append({
+                                "tool": "open_site",
+                                "data": {
+                                    "action": "open_browser",
+                                    "url": auto_res.get("url"),
+                                    "title": auto_res.get("title"),
+                                }
+                            })
+                        return auto_res["reply"]
+                except Exception as auto_exc:
+                    logger.warning("Erreur execution bibliotheque autonome: %s", auto_exc)
+
                 from intent_engine import detect_intent
                 detected = detect_intent(user_input)
                 intent = detected.get("intent")
@@ -369,6 +396,10 @@ class JarvisHeadlessBridge:
                     tool_names=targeted_tools,
                     fallback=local_fallback,
                 )
+                if getattr(agent_result, "used_fallback", False) or getattr(agent_result, "status", None) == "fallback":
+                    model_offline = True
+                    model_offline_details = "Modèle neuronal local déconnecté (mode autonome activé)"
+
                 if hasattr(agent_result, "response"):
                     reply = agent_result.response
                 elif isinstance(agent_result, dict):
@@ -394,8 +425,22 @@ class JarvisHeadlessBridge:
                         reply = measured_report
             except Exception as exc:
                 logger.exception("Erreur exécution agent headless : %s", exc)
-                reply = f"Erreur lors de l'exécution de la requête : {exc}"
-                status = "error"
+                model_offline = True
+                model_offline_details = str(exc)
+                try:
+                    import autonomous_library
+                    auto_fallback = autonomous_library.execute_autonomous_task(user_input, session_id=current_session)
+                    if auto_fallback.get("handled"):
+                        reply = f"⚠️ [Mode Autonome Activé]\n{auto_fallback['reply']}"
+                        status = "success"
+                        if auto_fallback.get("tools_used"):
+                            tools_used.extend(auto_fallback["tools_used"])
+                    else:
+                        reply = f"Erreur lors de l'exécution de la requête : {exc}"
+                        status = "error"
+                except Exception:
+                    reply = f"Erreur lors de l'exécution de la requête : {exc}"
+                    status = "error"
             finally:
                 self.agent._call_llm = orig_call_llm
                 self.brain.timeout = original_timeout
@@ -410,6 +455,9 @@ class JarvisHeadlessBridge:
                 "timestamp": timestamp,
                 "session_id": current_session,
                 "source": source,
+                "model_offline": model_offline,
+                "model_offline_details": model_offline_details,
+                "autonomous_available": True,
             }
 
             for tu in tools_used:
@@ -452,6 +500,9 @@ class JarvisHeadlessBridge:
             "model": self.model,
             "base_url": self.base_url,
             "ollama_online": bool(ai_stat.get("online")),
+            "model_offline": not bool(ai_stat.get("online")),
+            "autonomous_ready": True,
+            "autonomous_tasks_count": len(actions.TOOL_DISPATCHER),
             "tools_count": len(actions.TOOL_DISPATCHER),
             "tools": list(actions.TOOL_DISPATCHER.keys()),
             "memory": {

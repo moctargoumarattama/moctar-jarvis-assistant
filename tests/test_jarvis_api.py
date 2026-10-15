@@ -276,6 +276,60 @@ class TestJarvisAPI(unittest.TestCase):
         self.assertIn("Yo Moctar", content)
         self.assertIn("EN VEILLE ÉCOUTE", content)
 
+    def test_model_offline_modal_and_typing_elements_in_html(self) -> None:
+        index_path = Path("static/index.html")
+        content = index_path.read_text(encoding="utf-8")
+        self.assertIn("model-offline-modal", content)
+        self.assertIn("Moteur IA Hors-Ligne", content)
+        self.assertIn("MODE AUTONOME ACTIF", content)
+        self.assertIn("model-offline-retry-btn", content)
+        self.assertIn("model-offline-close-btn", content)
+        self.assertIn("jarvis-typing-bubble", content)
+        self.assertIn("showModelOfflinePopup", content)
+
+    def test_autonomous_task_library_direct_execution(self) -> None:
+        import autonomous_library
+        # 1. Aide et catalogue complet
+        res_help = autonomous_library.execute_autonomous_task("aide")
+        self.assertTrue(res_help["handled"])
+        self.assertIn("BIBLIOTHÈQUE DES 46 TÂCHES AUTONOMES", res_help["reply"])
+        self.assertIn("Surveillance Matérielle", res_help["reply"])
+
+        # 2. Salutation locale
+        res_greet = autonomous_library.execute_autonomous_task("bonjour")
+        self.assertTrue(res_greet["handled"])
+        self.assertIn("Bonjour monsieur", res_greet["reply"])
+
+        # 3. Calcul solaire autonome
+        res_solar = autonomous_library.execute_autonomous_task("dimensionne solaire 8 kwh")
+        self.assertTrue(res_solar["handled"])
+        self.assertIn("Dimensionnement Solaire", res_solar["reply"])
+        self.assertIn("Wc", res_solar["reply"])
+
+        # 4. Heure et date
+        res_time = autonomous_library.execute_autonomous_task("quelle heure est-il")
+        self.assertTrue(res_time["handled"])
+        self.assertIn("🕒", res_time["reply"])
+
+        # 5. Volume
+        res_vol = autonomous_library.execute_autonomous_task("coupe le son")
+        self.assertTrue(res_vol["handled"])
+        self.assertIn("0%", res_vol["reply"])
+
+    def test_jarvis_query_model_offline_flag(self) -> None:
+        with self.client as client:
+            bridge = self.app.state.runtime.jarvis
+            with patch.object(bridge.agent, "_call_llm", side_effect=TimeoutError("Ollama offline")):
+                response = client.post(
+                    "/api/jarvis/query",
+                    json={"prompt": "dimensionne solaire 10 kwh"},
+                )
+                self.assertEqual(response.status_code, 200)
+                data = response.json()
+                self.assertEqual(data["status"], "success")
+                self.assertTrue(data.get("model_offline"))
+                self.assertIn("Dimensionnement Solaire", data["reply"])
+
 
 if __name__ == "__main__":
     unittest.main()
