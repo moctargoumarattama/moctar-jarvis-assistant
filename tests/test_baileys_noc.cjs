@@ -70,6 +70,41 @@ test('other sender, groups, fromMe, historical messages and wrong session do not
   assert.equal(f.received.length, 0);
 });
 
+test('self-chat commands from the active administrator are forwarded with the exact session JID', async t => {
+  const f = await fixture(t, {adminPhone: '+212 770-010-264,212684056613'});
+  f.sock.user = { id: '212770010264:38@s.whatsapp.net', lid: '7654321@lid' };
+  f.sock.ev.emit('messages.upsert', event([
+    incoming('SELF_PHONE', {conversation: 'statut'}, {remoteJid: '212770010264@s.whatsapp.net', fromMe: true}),
+    incoming('SELF_LID', {conversation: 'redemarrage klasora'}, {remoteJid: '7654321@lid', remoteJidAlt: '212770010264@s.whatsapp.net', fromMe: true}),
+    incoming('OTHER_ADMIN', {conversation: 'statut'}, {remoteJid: '212684056613@s.whatsapp.net'}),
+    incoming('OUTGOING_TO_OTHER_ADMIN', {conversation: 'statut'}, {remoteJid: '212684056613@s.whatsapp.net', fromMe: true}),
+    incoming('OUTGOING_TO_THIRD_PARTY', {conversation: 'statut'}, {remoteJid: '212600000000@s.whatsapp.net', fromMe: true}),
+  ]));
+  await until(() => f.received.length === 3);
+  const forwarded = f.received.map(row => ({
+    from: JSON.parse(row.body).data.from,
+    header: row.headers['x-whatsapp-from'],
+  }));
+  assert.deepEqual(forwarded, [
+    {from: f.sock.user.id, header: f.sock.user.id},
+    {from: f.sock.user.id, header: f.sock.user.id},
+    {from: '212684056613@s.whatsapp.net', header: '212684056613@s.whatsapp.net'},
+  ]);
+});
+
+test('self-chat LID requires an active matching session identity and an administrator phone', async t => {
+  const f = await fixture(t, {adminPhone: '212770010264,212684056613'});
+  f.sock.user = {id: '87654321@lid', lid: '87654321@lid'};
+  f.sock.ev.emit('messages.upsert', event([
+    incoming('SELF_LID_ADMIN', {conversation: 'statut'}, {remoteJid: '87654321@lid', remoteJidAlt: '212684056613@s.whatsapp.net', fromMe: true}),
+    incoming('SELF_LID_NONADMIN', {conversation: 'statut'}, {remoteJid: '87654321@lid', remoteJidAlt: '212600000000@s.whatsapp.net', fromMe: true}),
+    incoming('OTHER_LID', {conversation: 'statut'}, {remoteJid: '87654322@lid', remoteJidAlt: '212684056613@s.whatsapp.net', fromMe: true}),
+  ]));
+  await until(() => f.received.length === 1);
+  assert.equal(JSON.parse(f.received[0].body).data.from, '212684056613@s.whatsapp.net');
+  assert.equal(f.received[0].headers['x-whatsapp-from'], '212684056613@s.whatsapp.net');
+});
+
 test('delivery retries preserve message ID and duplicate upserts are ignored', async t => {
   const f = await fixture(t, {}, (response, count) => { response.writeHead(count === 1 ? 503 : 202); response.end('{}'); });
   const message = incoming('RETRY_1', { conversation: 'statut' });

@@ -24,6 +24,31 @@ function isLid(jid) {
   return typeof jid === 'string' && /^\d{1,20}(?::\d{1,5})?@lid$/.test(jid);
 }
 
+function normalizedLid(jid) {
+  return isLid(jid) ? `${jid.split('@', 1)[0].split(':', 1)[0]}@lid` : null;
+}
+
+function selfChatIdentity(sock, key, adminPhones) {
+  const user = sock?.user || {};
+  const remoteLid = normalizedLid(key.remoteJid);
+  const alternatePhone = phoneOf(key.remoteJidAlt);
+  const activeLids = [normalizedLid(user.id), normalizedLid(user.lid)].filter(Boolean);
+  const sessionPhone = phoneOf(user.id) || phoneOf(user.lid) ||
+    (remoteLid && activeLids.includes(remoteLid) ? alternatePhone : null);
+  if (!sessionPhone || !adminPhones.has(sessionPhone)) return null;
+
+  const remotePhone = phoneOf(key.remoteJid);
+  if (alternatePhone && alternatePhone !== sessionPhone) return null;
+  if (remotePhone) {
+    if (remotePhone !== sessionPhone) return null;
+  } else if (remoteLid) {
+    if (!activeLids.includes(remoteLid) && alternatePhone !== sessionPhone) return null;
+  } else return null;
+
+  const sessionJid = phoneOf(user.id) === sessionPhone ? user.id : `${sessionPhone}@s.whatsapp.net`;
+  return { phone: sessionPhone, jid: sessionJid };
+}
+
 function unwrap(content) {
   for (let depth = 0; content && depth < 4; depth++) {
     const nested = content.ephemeralMessage || content.viewOnceMessage || content.viewOnceMessageV2 || content.viewOnceMessageV2Extension;
@@ -201,7 +226,8 @@ function attachNocWebhook(sock, options = {}) {
   }
 
   async function send(item, signal) {
-    const headers = { 'X-Gateway-Secret': token, 'X-WhatsApp-From': `${item.phone}@s.whatsapp.net`, 'X-Message-Id': item.id, 'X-Session-Id': sessionId };
+    const senderJid = item.senderJid || `${item.phone}@s.whatsapp.net`;
+    const headers = { 'X-Gateway-Secret': token, 'X-WhatsApp-From': senderJid, 'X-Message-Id': item.id, 'X-Session-Id': sessionId };
     if (item.audio) {
       const stream = await download(item, signal);
       if (!stream || typeof stream.pipe !== 'function') throw new BridgeError('download_stream');
@@ -209,7 +235,7 @@ function attachNocWebhook(sock, options = {}) {
       await post(new URL('/api/voice/process', base), headers, stream, signal, timeoutMs, maximum);
     } else {
       const body = Buffer.from(JSON.stringify({ event: 'messages.upsert', sessionId, data: {
-        from: `${item.phone}@s.whatsapp.net`, fromMe: false, id: item.id,
+        from: senderJid, fromMe: false, id: item.id,
         messageType: 'conversation', text: item.text, timestamp: item.timestamp
       } }));
       headers['Content-Type'] = 'application/json';
@@ -253,10 +279,16 @@ function attachNocWebhook(sock, options = {}) {
     if (suppliedSession !== undefined && String(suppliedSession) !== sessionId) return;
     for (const message of event.messages.slice(0, 64)) {
       const key = message?.key;
-      if (!key || key.fromMe === true || (key.fromMe !== undefined && typeof key.fromMe !== 'boolean') || typeof key.remoteJid !== 'string' || key.remoteJid.endsWith('@g.us') || key.participant) continue;
+      if (!key || (key.fromMe !== undefined && typeof key.fromMe !== 'boolean') || typeof key.remoteJid !== 'string' || key.remoteJid.endsWith('@g.us') || key.participant) continue;
       let lid = null;
       let phone = null;
-      if (isLid(key.remoteJid)) {
+      let senderJid = null;
+      if (key.fromMe === true) {
+        const identity = selfChatIdentity(sock, key, adminPhones);
+        if (!identity) continue;
+        phone = identity.phone;
+        senderJid = identity.jid;
+      } else if (isLid(key.remoteJid)) {
         if (key.remoteJidAlt === undefined || key.remoteJidAlt === null) lid = key.remoteJid;
         else {
           phone = phoneOf(key.remoteJidAlt);
@@ -279,7 +311,7 @@ function attachNocWebhook(sock, options = {}) {
       if (queue.length >= maxQueued) { notify('queue_full'); continue; }
       seen.set(dedup, true);
       while (seen.size > 256) seen.delete(seen.keys().next().value);
-      queue.push({ message, lid, phone, id: key.id, audio: Boolean(audio), mimetype, text, timestamp: Number(message.messageTimestamp) || Math.floor(Date.now() / 1000) });
+      queue.push({ message, lid, phone, senderJid, id: key.id, audio: Boolean(audio), mimetype, text, timestamp: Number(message.messageTimestamp) || Math.floor(Date.now() / 1000) });
       void pump();
     }
   }
