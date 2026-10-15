@@ -351,7 +351,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/static/icons/{name}", include_in_schema=False)
     async def pwa_icon(name: str):
-        if name not in {"moctar-192.png", "moctar-512.png"}:
+        if name not in {
+            "moctar-192.png", "moctar-512.png",
+            "moctar-logo-v2-180.png", "moctar-logo-v2-192.png", "moctar-logo-v2-512.png",
+        }:
             raise HTTPException(status_code=404)
         return FileResponse(BASE_DIR / "static" / "icons" / name, media_type="image/png")
 
