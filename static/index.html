@@ -609,6 +609,7 @@
   </dialog>
   <template id="service-template"><article class="card service-card"><div class="service-header"><div class="service-logo"></div><div class="service-identity"><h3 class="service-name"></h3><p class="service-port"></p></div><span class="badge service-badge"><span class="led"></span><span class="service-badge-text">EN ATTENTE</span></span></div><div class="service-measure"><div><div class="service-measure-label">Réponse HTTP</div><div class="latency"><span class="service-latency">—</span><small>ms</small></div></div><span class="http-status">HTTP —</span></div><div class="service-footer"><span class="service-systemd">systemd : —</span><button class="restart-button" type="button" disabled><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg>Restart</button></div><p class="service-error" hidden></p></article></template>
   <dialog id="jarvis-modal" aria-labelledby="jarvis-modal-title" aria-describedby="jarvis-modal-title">
+    <canvas id="jarvis-bg-canvas" class="jarvis-bg-canvas" aria-hidden="true"></canvas>
     <header class="jarvis-header">
       <div class="jarvis-header-left">
         <svg viewBox="0 0 36 36" class="jarvis-mini-reactor" aria-hidden="true">
@@ -645,16 +646,7 @@
       <aside class="jarvis-hud-col">
         <div class="jarvis-reactor-card">
           <div class="jarvis-reactor-container" id="jarvis-reactor" data-reactor-state="idle">
-            <svg class="jarvis-reactor-svg" viewBox="0 0 200 200" aria-hidden="true">
-              <circle cx="100" cy="100" r="92" class="arc-ring-outer"/>
-              <circle cx="100" cy="100" r="78" class="arc-ring-dashes"/>
-              <circle cx="100" cy="100" r="62" class="arc-ring-mid"/>
-              <circle cx="100" cy="100" r="48" class="arc-triangle-ring"/>
-              <polygon points="100,64 131,118 69,118" class="arc-inner-poly"/>
-              <polygon points="100,136 69,82 131,82" class="arc-inner-poly-2"/>
-              <circle cx="100" cy="100" r="28" class="arc-core-outer"/>
-              <circle cx="100" cy="100" r="16" class="arc-core-inner"/>
-            </svg>
+            <canvas id="jarvis-core-canvas" class="jarvis-core-canvas" width="300" height="300" aria-hidden="true"></canvas>
             <div class="jarvis-reactor-status" id="jarvis-reactor-status">STANDBY</div>
           </div>
           <div class="jarvis-voice-controls">

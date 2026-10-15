@@ -28,6 +28,8 @@ class RemoteEnvironmentTests(unittest.TestCase):
         with patch.dict(os.environ, {
             "NOC_VPS_TOKEN": token, "NOC_SENTINEL_GEOIP": "false",
             "NOC_SENTINEL_STATE_PATH": str(Path(directory) / "counter.json"),
+            "NOC_VPS_STATE_PATH": str(Path(directory) / "vps-registry.json"),
+            "NOC_CYBER_STATE_PATH": str(Path(directory) / "blocked_ips.json"),
             "NOC_VOICE_ENABLED": "false",
         }, clear=True):
             settings = Settings.from_env()

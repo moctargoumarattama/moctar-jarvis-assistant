@@ -462,3 +462,214 @@ body.cosmos-lite dialog::backdrop { -webkit-backdrop-filter: none; backdrop-filt
   .core-ring, .orbit-planet, .orb-event, .orbit-modal[open] .orbit-body > * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
 
+/* ==========================================================================
+   MOCTAR AI · EXTRAVAGANZA QUANTUM 3D NEXUS
+   Fond Cyber-Space 3D (matrice perspective + neurones) & Cœur Quantique 3D
+   ========================================================================== */
+#jarvis-modal {
+  position: relative;
+  width: min(1200px, calc(100vw - 28px));
+  height: min(820px, calc(100dvh - 32px));
+  max-height: calc(100dvh - 20px);
+  background:
+    radial-gradient(110% 80% at 85% 0%, rgba(14, 116, 144, 0.28) 0%, transparent 60%),
+    radial-gradient(90% 70% at 15% 100%, rgba(168, 85, 247, 0.18) 0%, transparent 55%),
+    #050914;
+  border: 1px solid rgba(94, 217, 236, 0.38);
+  border-radius: 24px;
+  box-shadow:
+    0 40px 140px rgba(0, 0, 0, 0.9),
+    0 0 80px rgba(94, 217, 236, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+/* Toile Cyber-Space 3D immersive en arrière-plan de l'IA */
+.jarvis-bg-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.92;
+}
+
+/* Superposition des couches au-dessus de la 3D */
+#jarvis-modal > .jarvis-header,
+#jarvis-modal > .jarvis-body,
+#jarvis-modal > .jarvis-footer {
+  position: relative;
+  z-index: 1;
+}
+
+.jarvis-header {
+  background: linear-gradient(180deg, rgba(16, 28, 47, 0.88) 0%, rgba(10, 18, 32, 0.75) 100%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+  border-bottom: 1px solid rgba(94, 217, 236, 0.2);
+  padding: 16px 24px;
+}
+
+.jarvis-title {
+  font-size: 21px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  background: linear-gradient(135deg, #ffffff 0%, #7ee5f4 45%, #c084fc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 18px rgba(94, 217, 236, 0.45));
+}
+
+.jarvis-title-sub {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: #a5f3fc;
+  -webkit-text-fill-color: #a5f3fc;
+  background: rgba(94, 217, 236, 0.14);
+  border: 1px solid rgba(94, 217, 236, 0.35);
+  box-shadow: 0 0 16px rgba(94, 217, 236, 0.25);
+}
+
+.jarvis-chat-col {
+  background: rgba(6, 12, 22, 0.62);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  backdrop-filter: blur(12px) saturate(130%);
+  border-right: 1px solid rgba(94, 217, 236, 0.15);
+}
+
+.jarvis-hud-col {
+  background: rgba(8, 15, 28, 0.72);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+}
+
+/* Cœur Quantique 3D Canvas */
+.jarvis-reactor-card {
+  position: relative;
+  background: linear-gradient(165deg, rgba(16, 29, 49, 0.82) 0%, rgba(9, 16, 29, 0.9) 100%);
+  border: 1px solid rgba(94, 217, 236, 0.32);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5), inset 0 0 30px rgba(94, 217, 236, 0.12);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.jarvis-reactor-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(94, 217, 236, 0.3), transparent 60%, rgba(168, 85, 247, 0.2));
+  pointer-events: none;
+  z-index: 0;
+}
+
+.jarvis-reactor-container {
+  position: relative;
+  width: 150px;
+  height: 150px;
+  display: grid;
+  place-items: center;
+  margin: 4px auto 0;
+}
+
+.jarvis-core-canvas {
+  width: 140px;
+  height: 140px;
+  display: block;
+  cursor: grab;
+  filter: drop-shadow(0 0 18px rgba(94, 217, 236, 0.55));
+  transition: filter 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.jarvis-core-canvas:active {
+  cursor: grabbing;
+}
+
+[data-reactor-state="thinking"] .jarvis-core-canvas {
+  filter: drop-shadow(0 0 32px rgba(255, 170, 51, 0.85)) drop-shadow(0 0 16px rgba(94, 217, 236, 0.7));
+}
+
+[data-reactor-state="listening"] .jarvis-core-canvas {
+  filter: drop-shadow(0 0 28px rgba(255, 115, 138, 0.85));
+}
+
+[data-reactor-state="speaking"] .jarvis-core-canvas {
+  filter: drop-shadow(0 0 28px rgba(168, 85, 247, 0.85)) drop-shadow(0 0 14px rgba(94, 217, 236, 0.6));
+}
+
+.jarvis-reactor-status {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .16em;
+  font-weight: 700;
+  text-shadow: 0 0 12px var(--cyan);
+}
+
+/* Bulles de conversation en verre cybernétique */
+.jarvis-msg-bot .jarvis-msg-text {
+  background: linear-gradient(145deg, rgba(16, 27, 44, 0.85) 0%, rgba(9, 16, 27, 0.92) 100%);
+  border: 1px solid rgba(94, 217, 236, 0.22);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border-left: 3px solid var(--cyan);
+}
+
+.jarvis-msg-user .jarvis-msg-text {
+  background: linear-gradient(145deg, rgba(16, 68, 92, 0.9) 0%, rgba(10, 46, 64, 0.95) 100%);
+  border: 1px solid rgba(94, 217, 236, 0.45);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 20px rgba(94, 217, 236, 0.18);
+  border-right: 3px solid #7ee5f4;
+}
+
+.jarvis-reasoning {
+  background: rgba(8, 16, 28, 0.8);
+  border: 1px solid rgba(94, 217, 236, 0.25);
+  box-shadow: inset 0 0 20px rgba(94, 217, 236, 0.06);
+}
+
+/* Commandes recommandées (chips) */
+.jarvis-chips-card {
+  background: linear-gradient(165deg, rgba(14, 24, 40, 0.8) 0%, rgba(9, 16, 27, 0.88) 100%);
+  border: 1px solid rgba(94, 217, 236, 0.18);
+  border-radius: 14px;
+}
+
+.jarvis-chip {
+  background: rgba(18, 32, 50, 0.65);
+  border: 1px solid rgba(94, 217, 236, 0.18);
+  border-radius: 8px;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.jarvis-chip:hover {
+  background: rgba(94, 217, 236, 0.14);
+  border-color: rgba(94, 217, 236, 0.6);
+  color: #ffffff;
+  transform: translateX(3px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), 0 0 16px rgba(94, 217, 236, 0.25);
+}
+
+/* Pied de page et barre de prompt */
+.jarvis-footer {
+  background: linear-gradient(180deg, rgba(10, 18, 32, 0.75) 0%, rgba(6, 12, 22, 0.95) 100%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+  border-top: 1px solid rgba(94, 217, 236, 0.2);
+}
+
+.jarvis-input-wrap {
+  background: rgba(6, 12, 22, 0.85);
+  border: 1px solid rgba(94, 217, 236, 0.35);
+  border-radius: 12px;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5);
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.jarvis-input-wrap:focus-within {
+  border-color: rgba(94, 217, 236, 0.8);
+  box-shadow: 0 0 0 3px rgba(94, 217, 236, 0.15), 0 0 28px rgba(94, 217, 236, 0.35);
+}
+
+

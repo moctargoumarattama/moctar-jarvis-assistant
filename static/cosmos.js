@@ -1099,24 +1099,607 @@
   };
 
   /* ==========================================================================
-     5. INITIALISATION AU CHARGEMENT DU DOM
+     5. QUANTUM NEXUS 3D : CŒUR QUANTIQUE & MATRICE CYBER-ESPACE (MOCTAR IA)
+     ========================================================================== */
+  const QuantumNexus = {
+    isRunning: false,
+    animFrame: null,
+    bgCanvas: null,
+    bgCtx: null,
+    coreCanvas: null,
+    coreCtx: null,
+    reactorEl: null,
+    modalEl: null,
+    bgWidth: 0,
+    bgHeight: 0,
+    dpr: 1,
+
+    // 3D Parallax & Camera
+    camParallaxX: 0,
+    camParallaxY: 0,
+    targetParallaxX: 0,
+    targetParallaxY: 0,
+    gridOffsetZ: 0,
+
+    // Cyber-Space Neural Nodes
+    nodes: [],
+    dataStreams: [],
+
+    // 3D Quantum Core
+    coreRotX: 0.25,
+    coreRotY: 0.35,
+    coreRotZ: 0.1,
+    dragVelX: 0,
+    dragVelY: 0,
+    isDragging: false,
+    dragLastX: 0,
+    dragLastY: 0,
+    energyParticles: [],
+    corePulse: 1.0,
+    corePulseDir: 1,
+    lastTime: performance.now(),
+
+    init() {
+      this.modalEl = document.getElementById('jarvis-modal');
+      this.bgCanvas = document.getElementById('jarvis-bg-canvas');
+      this.coreCanvas = document.getElementById('jarvis-core-canvas');
+      this.reactorEl = document.getElementById('jarvis-reactor');
+
+      if (this.bgCanvas) {
+        this.bgCtx = this.bgCanvas.getContext('2d');
+      }
+      if (this.coreCanvas) {
+        this.coreCtx = this.coreCanvas.getContext('2d');
+      }
+
+      this.initNodes();
+      this.initStreams();
+      this.initParticles();
+      this.bindEvents();
+
+      // MutationObserver pour surveiller l'ouverture de jarvis-modal
+      if (this.modalEl) {
+        const observer = new MutationObserver(() => {
+          if (this.modalEl.open && !this.modalEl.hasAttribute('data-closing')) {
+            this.start();
+          } else {
+            this.stop();
+          }
+        });
+        observer.observe(this.modalEl, { attributes: true, attributeFilter: ['open'] });
+        if (this.modalEl.open) this.start();
+      }
+    },
+
+    bindEvents() {
+      // Parallaxe souris sur la modal IA
+      if (this.modalEl) {
+        this.modalEl.addEventListener('mousemove', (e) => {
+          const rect = this.modalEl.getBoundingClientRect();
+          const mx = (e.clientX - rect.left) / rect.width - 0.5;
+          const my = (e.clientY - rect.top) / rect.height - 0.5;
+          this.targetParallaxX = mx * 35;
+          this.targetParallaxY = my * 22;
+        }, { passive: true });
+
+        this.modalEl.addEventListener('mouseleave', () => {
+          this.targetParallaxX = 0;
+          this.targetParallaxY = 0;
+        });
+      }
+
+      // Drag 3D interactif sur le Cœur Quantique
+      if (this.coreCanvas) {
+        this.coreCanvas.addEventListener('mousedown', (e) => {
+          this.isDragging = true;
+          this.dragLastX = e.clientX;
+          this.dragLastY = e.clientY;
+          this.dragVelX = 0;
+          this.dragVelY = 0;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+          if (!this.isDragging) return;
+          const dx = e.clientX - this.dragLastX;
+          const dy = e.clientY - this.dragLastY;
+          this.dragLastX = e.clientX;
+          this.dragLastY = e.clientY;
+          this.dragVelX = dx * 0.015;
+          this.dragVelY = dy * 0.015;
+          this.coreRotY += this.dragVelX;
+          this.coreRotX -= this.dragVelY;
+        }, { passive: true });
+
+        window.addEventListener('mouseup', () => {
+          this.isDragging = false;
+        });
+
+        // Touch support
+        this.coreCanvas.addEventListener('touchstart', (e) => {
+          if (e.touches.length === 1) {
+            this.isDragging = true;
+            this.dragLastX = e.touches[0].clientX;
+            this.dragLastY = e.touches[0].clientY;
+          }
+        }, { passive: true });
+
+        window.addEventListener('touchmove', (e) => {
+          if (!this.isDragging || e.touches.length !== 1) return;
+          const dx = e.touches[0].clientX - this.dragLastX;
+          const dy = e.touches[0].clientY - this.dragLastY;
+          this.dragLastX = e.touches[0].clientX;
+          this.dragLastY = e.touches[0].clientY;
+          this.coreRotY += dx * 0.015;
+          this.coreRotX -= dy * 0.015;
+        }, { passive: true });
+
+        window.addEventListener('touchend', () => {
+          this.isDragging = false;
+        });
+      }
+    },
+
+    initNodes() {
+      this.nodes = [];
+      for (let i = 0; i < 40; i++) {
+        this.nodes.push({
+          x: (Math.random() - 0.5) * 750,
+          y: (Math.random() - 0.5) * 480,
+          z: Math.random() * 550 + 80,
+          vx: (Math.random() - 0.5) * 0.35,
+          vy: (Math.random() - 0.5) * 0.35,
+          vz: (Math.random() - 0.5) * 0.25,
+          size: Math.random() * 2.2 + 1.2,
+          pulse: Math.random() * Math.PI * 2,
+          color: Math.random() < 0.6 ? '#5ed9ec' : '#c084fc'
+        });
+      }
+    },
+
+    initStreams() {
+      this.dataStreams = [];
+      for (let i = 0; i < 20; i++) {
+        this.dataStreams.push({
+          x: (Math.random() - 0.5) * 850,
+          y: -280 - Math.random() * 220,
+          z: Math.random() * 480 + 90,
+          len: Math.random() * 70 + 40,
+          speed: Math.random() * 3.8 + 2.2,
+          alpha: Math.random() * 0.6 + 0.3
+        });
+      }
+    },
+
+    initParticles() {
+      this.energyParticles = [];
+      for (let i = 0; i < 50; i++) {
+        this.energyParticles.push({
+          theta: Math.random() * Math.PI * 2,
+          phi: (Math.random() - 0.5) * Math.PI,
+          rad: Math.random() * 26 + 32,
+          speed: (Math.random() * 0.02 + 0.012) * (Math.random() < 0.5 ? 1 : -1),
+          size: Math.random() * 2.2 + 0.8,
+          alpha: Math.random() * 0.7 + 0.3,
+          color: Math.random() < 0.45 ? '#5ed9ec' : Math.random() < 0.75 ? '#c084fc' : '#ffd166'
+        });
+      }
+    },
+
+    resize() {
+      if (!this.modalEl || !this.bgCanvas) return;
+      const rect = this.modalEl.getBoundingClientRect();
+      this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+      this.bgWidth = rect.width;
+      this.bgHeight = rect.height;
+
+      this.bgCanvas.width = Math.round(this.bgWidth * this.dpr);
+      this.bgCanvas.height = Math.round(this.bgHeight * this.dpr);
+      this.bgCtx.setTransform(1, 0, 0, 1, 0, 0);
+      this.bgCtx.scale(this.dpr, this.dpr);
+
+      if (this.coreCanvas) {
+        this.coreCanvas.width = 300;
+        this.coreCanvas.height = 300;
+        this.coreCtx.setTransform(1, 0, 0, 1, 0, 0);
+        this.coreCtx.scale(2, 2); // 150x150 css -> 300x300 retina
+      }
+    },
+
+    start() {
+      if (this.isRunning) return;
+      this.isRunning = true;
+      this.resize();
+      this.lastTime = performance.now();
+      this.loop(this.lastTime);
+    },
+
+    stop() {
+      this.isRunning = false;
+      if (this.animFrame) {
+        cancelAnimationFrame(this.animFrame);
+        this.animFrame = null;
+      }
+    },
+
+    loop(time) {
+      if (!this.isRunning) return;
+      this.animFrame = requestAnimationFrame((t) => this.loop(t));
+
+      const dt = Math.min((time - this.lastTime) * 0.001, 0.1);
+      this.lastTime = time;
+
+      // Lecture de l'état actuel de l'IA (idle, thinking, listening, speaking)
+      const state = this.reactorEl?.dataset?.reactorState || 'idle';
+
+      // 1. Rendu Cyber-Space 3D (Arrière-plan de la modal)
+      this.renderCyberSpace(dt, state, time);
+
+      // 2. Rendu Cœur Quantique 3D (HUD Reactor)
+      this.renderQuantumCore(dt, state, time);
+    },
+
+    renderCyberSpace(dt, state, time) {
+      if (!this.bgCtx || !this.bgCanvas) return;
+      const ctx = this.bgCtx;
+      const w = this.bgWidth;
+      const h = this.bgHeight;
+
+      // Dégradé spatial profond
+      ctx.fillStyle = '#050a14';
+      ctx.fillRect(0, 0, w, h);
+
+      // Parallaxe douce
+      this.camParallaxX += (this.targetParallaxX - this.camParallaxX) * 0.06;
+      this.camParallaxY += (this.targetParallaxY - this.camParallaxY) * 0.06;
+
+      const fov = 340;
+      const vpx = w * 0.5 + this.camParallaxX;
+      const vpy = h * 0.52 + this.camParallaxY;
+
+      // Vitesse de défilement selon l'état de réflexion
+      const speedMult = state === 'thinking' ? 2.8 : 1.0;
+      this.gridOffsetZ = (this.gridOffsetZ + dt * 68 * speedMult) % 40;
+
+      // 1. Grille cybernétique en perspective (sol)
+      ctx.save();
+      const gridY = 170;
+      const maxZ = 680;
+      const minZ = 70;
+
+      ctx.strokeStyle = 'rgba(94, 217, 236, 0.12)';
+      ctx.lineWidth = 1;
+
+      // Lignes longitudinales
+      for (let x = -640; x <= 640; x += 60) {
+        const s1 = fov / (fov + minZ);
+        const s2 = fov / (fov + maxZ);
+        ctx.beginPath();
+        ctx.moveTo(vpx + x * s1, vpy + gridY * s1);
+        ctx.lineTo(vpx + x * s2, vpy + gridY * s2);
+        ctx.stroke();
+      }
+
+      // Lignes transversales défilantes
+      for (let z = minZ; z <= maxZ; z += 40) {
+        const effZ = z - this.gridOffsetZ;
+        if (effZ < minZ) continue;
+        const s = fov / (fov + effZ);
+        const alpha = Math.max(0, 1 - (effZ / maxZ)) * 0.22;
+        ctx.strokeStyle = `rgba(94, 217, 236, ${alpha})`;
+        ctx.beginPath();
+        ctx.moveTo(vpx - 640 * s, vpy + gridY * s);
+        ctx.lineTo(vpx + 640 * s, vpy + gridY * s);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // 2. Flux de données verticaux (Cyber Rain 3D)
+      for (const st of this.dataStreams) {
+        st.y += st.speed * 60 * dt * speedMult;
+        if (st.y > 320) {
+          st.y = -300 - Math.random() * 150;
+          st.x = (Math.random() - 0.5) * 850;
+          st.z = Math.random() * 480 + 90;
+        }
+
+        const s = fov / (fov + st.z);
+        const px = vpx + st.x * s;
+        const py = vpy + st.y * s;
+        const pLen = st.len * s;
+
+        const grad = ctx.createLinearGradient(px, py, px, py + pLen);
+        grad.addColorStop(0, 'rgba(94, 217, 236, 0)');
+        grad.addColorStop(0.7, `rgba(94, 217, 236, ${st.alpha * 0.4})`);
+        grad.addColorStop(1, `rgba(192, 132, 252, ${st.alpha * 0.85})`);
+
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.4 * s;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(px, py + pLen);
+        ctx.stroke();
+      }
+
+      // 3. Constellation neuronale 3D (Synaptic Links)
+      for (let i = 0; i < this.nodes.length; i++) {
+        const n = this.nodes[i];
+        n.x += n.vx * 60 * dt;
+        n.y += n.vy * 60 * dt;
+        n.z += n.vz * 60 * dt;
+
+        if (n.x < -380 || n.x > 380) n.vx *= -1;
+        if (n.y < -240 || n.y > 240) n.vy *= -1;
+        if (n.z < 60 || n.z > 600) n.vz *= -1;
+
+        // Connexions synaptiques entre nœuds proches
+        for (let j = i + 1; j < this.nodes.length; j++) {
+          const n2 = this.nodes[j];
+          const dx = n.x - n2.x;
+          const dy = n.y - n2.y;
+          const dz = n.z - n2.z;
+          const distSq = dx * dx + dy * dy + dz * dz;
+          if (distSq < 130 * 130) {
+            const dist = Math.sqrt(distSq);
+            const linkAlpha = (1 - dist / 130) * 0.28;
+            const s1 = fov / (fov + n.z);
+            const s2 = fov / (fov + n2.z);
+
+            ctx.strokeStyle = `rgba(94, 217, 236, ${linkAlpha})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(vpx + n.x * s1, vpy + n.y * s1);
+            ctx.lineTo(vpx + n2.x * s2, vpy + n2.y * s2);
+            ctx.stroke();
+          }
+        }
+
+        // Rendu du nœud sphérique
+        const s = fov / (fov + n.z);
+        const px = vpx + n.x * s;
+        const py = vpy + n.y * s;
+        const pr = n.size * s;
+
+        ctx.fillStyle = n.color;
+        ctx.shadowColor = n.color;
+        ctx.shadowBlur = 8 * s;
+        ctx.beginPath();
+        ctx.arc(px, py, pr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    },
+
+    renderQuantumCore(dt, state, time) {
+      if (!this.coreCtx || !this.coreCanvas) return;
+      const ctx = this.coreCtx;
+      const cx = 75; // Centre logique 150x150
+      const cy = 75;
+
+      ctx.clearRect(0, 0, 150, 150);
+
+      // Inertie de rotation manuelle et automatique
+      if (!this.isDragging) {
+        const baseSpeed = state === 'thinking' ? 3.6 : state === 'listening' ? 1.4 : 1.0;
+        this.coreRotY += 0.85 * dt * baseSpeed;
+        this.coreRotX += 0.5 * dt * baseSpeed;
+        this.coreRotZ += 0.32 * dt * baseSpeed;
+      }
+
+      // Pulsation cardiaque quantique
+      const pulseSpeed = state === 'thinking' ? 8.5 : 2.5;
+      this.corePulse = Math.sin(time * 0.001 * pulseSpeed) * 0.12 + 1.0;
+
+      // Projection 3D perspective
+      const project = (x, y, z, fov = 180) => {
+        // Rotation autour de X
+        const cosX = Math.cos(this.coreRotX);
+        const sinX = Math.sin(this.coreRotX);
+        const y1 = y * cosX - z * sinX;
+        const z1 = y * sinX + z * cosX;
+
+        // Rotation autour de Y
+        const cosY = Math.cos(this.coreRotY);
+        const sinY = Math.sin(this.coreRotY);
+        const x2 = x * cosY + z1 * sinY;
+        const z2 = -x * sinY + z1 * cosY;
+
+        // Rotation autour de Z
+        const cosZ = Math.cos(this.coreRotZ);
+        const sinZ = Math.sin(this.coreRotZ);
+        const x3 = x2 * cosZ - y1 * sinZ;
+        const y3 = x2 * sinZ + y1 * cosZ;
+
+        const s = fov / (fov + z2);
+        return {
+          px: cx + x3 * s,
+          py: cy + y3 * s,
+          scale: s,
+          z: z2
+        };
+      };
+
+      // 1. Anneaux gyroscopiques 3D en rotation indépendante
+      const drawGimbalRing = (radius, tiltX, tiltY, color, segments = 36, speedFactor = 1) => {
+        const points = [];
+        for (let i = 0; i <= segments; i++) {
+          const theta = (i / segments) * Math.PI * 2;
+          const rx = Math.cos(theta) * radius;
+          const ry = Math.sin(theta) * radius;
+
+          // Inclinaison de l'anneau
+          const lx = rx * Math.cos(tiltY) - ry * Math.sin(tiltY);
+          const ly = rx * Math.sin(tiltX) + ry * Math.cos(tiltX);
+          const lz = rx * Math.sin(tiltY);
+
+          points.push(project(lx, ly, lz));
+        }
+
+        // Tracé avec découpage avant / arrière selon z
+        for (let i = 0; i < points.length - 1; i++) {
+          const pt1 = points[i];
+          const pt2 = points[i + 1];
+          const avgZ = (pt1.z + pt2.z) / 2;
+          const alpha = avgZ > 0 ? 0.35 : 0.85;
+
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = alpha;
+          ctx.lineWidth = (avgZ > 0 ? 1.0 : 1.8) * pt1.scale;
+          ctx.beginPath();
+          ctx.moveTo(pt1.px, pt1.py);
+          ctx.lineTo(pt2.px, pt2.py);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1.0;
+
+        // Photon orbitant le long de l'anneau
+        const photonIdx = Math.floor(((time * 0.002 * speedFactor) % 1) * segments);
+        const photon = points[photonIdx];
+        if (photon) {
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 10;
+          ctx.beginPath();
+          ctx.arc(photon.px, photon.py, 2.5 * photon.scale, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+      };
+
+      const ringColor1 = state === 'thinking' ? '#ffd166' : state === 'listening' ? '#f43f5e' : '#5ed9ec';
+      const ringColor2 = state === 'thinking' ? '#f59e0b' : '#c084fc';
+      const ringColor3 = state === 'thinking' ? '#38bdf8' : '#2dd4bf';
+
+      drawGimbalRing(55, 0.4, 0.6, ringColor1, 36, 1.4);
+      drawGimbalRing(43, -0.6, 0.3, ringColor2, 32, -1.8);
+      drawGimbalRing(32, 0.2, -0.8, ringColor3, 28, 2.2);
+
+      // 2. Particules d'énergie quantique en vortex
+      for (const p of this.energyParticles) {
+        p.theta += p.speed * (state === 'thinking' ? 3.0 : 1.0);
+        const px = Math.cos(p.theta) * p.rad;
+        const py = Math.sin(p.theta) * (p.rad * 0.45);
+        const pz = Math.sin(p.phi + p.theta) * p.rad;
+
+        const prj = project(px, py, pz);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.alpha * prj.scale;
+        ctx.beginPath();
+        ctx.arc(prj.px, prj.py, p.size * prj.scale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1.0;
+
+      // 3. Polyèdre 3D / Cristal Octaédrique Stellaire Central
+      const s = 19 * this.corePulse;
+      const s2 = s * 0.55;
+
+      const rawVertices = [
+        { x: 0, y: -s, z: 0 }, // 0 Haut
+        { x: 0, y: s, z: 0 },  // 1 Bas
+        { x: -s, y: 0, z: 0 }, // 2 Gauche
+        { x: s, y: 0, z: 0 },  // 3 Droite
+        { x: 0, y: 0, z: -s }, // 4 Avant
+        { x: 0, y: 0, z: s },  // 5 Arrière
+        // Points stellés interstitiels
+        { x: s2, y: -s2, z: s2 },
+        { x: -s2, y: -s2, z: s2 },
+        { x: -s2, y: -s2, z: -s2 },
+        { x: s2, y: -s2, z: -s2 }
+      ];
+
+      const projectedVerts = rawVertices.map(v => project(v.x, v.y, v.z));
+
+      // Faces triangulaires de l'octaèdre
+      const faces = [
+        [0, 2, 4], [0, 4, 3], [0, 3, 5], [0, 5, 2],
+        [1, 4, 2], [1, 3, 4], [1, 5, 3], [1, 2, 5]
+      ];
+
+      // Tri des faces par profondeur pour transparence propre
+      const sortedFaces = faces.map(f => {
+        const zAvg = (projectedVerts[f[0]].z + projectedVerts[f[1]].z + projectedVerts[f[2]].z) / 3;
+        return { face: f, z: zAvg };
+      }).sort((a, b) => b.z - a.z);
+
+      for (const item of sortedFaces) {
+        const f = item.face;
+        const p0 = projectedVerts[f[0]];
+        const p1 = projectedVerts[f[1]];
+        const p2 = projectedVerts[f[2]];
+
+        ctx.beginPath();
+        ctx.moveTo(p0.px, p0.py);
+        ctx.lineTo(p1.px, p1.py);
+        ctx.lineTo(p2.px, p2.py);
+        ctx.closePath();
+
+        const faceGrad = ctx.createLinearGradient(p0.px, p0.py, p2.px, p2.py);
+        if (state === 'thinking') {
+          faceGrad.addColorStop(0, 'rgba(255, 170, 51, 0.45)');
+          faceGrad.addColorStop(1, 'rgba(94, 217, 236, 0.2)');
+        } else {
+          faceGrad.addColorStop(0, 'rgba(94, 217, 236, 0.4)');
+          faceGrad.addColorStop(1, 'rgba(168, 85, 247, 0.18)');
+        }
+
+        ctx.fillStyle = faceGrad;
+        ctx.fill();
+
+        ctx.strokeStyle = state === 'thinking' ? 'rgba(255, 209, 102, 0.7)' : 'rgba(94, 217, 236, 0.65)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+
+      // 4. Cœur de singularité centrale blanche / incandescente
+      const corePrj = project(0, 0, 0);
+      const coreR = 7 * this.corePulse;
+
+      const singGrad = ctx.createRadialGradient(
+        corePrj.px, corePrj.py, 1,
+        corePrj.px, corePrj.py, coreR * 2.8
+      );
+      if (state === 'thinking') {
+        singGrad.addColorStop(0, '#ffffff');
+        singGrad.addColorStop(0.3, '#ffd166');
+        singGrad.addColorStop(0.7, 'rgba(255, 170, 51, 0.4)');
+        singGrad.addColorStop(1, 'rgba(255, 170, 51, 0)');
+      } else {
+        singGrad.addColorStop(0, '#ffffff');
+        singGrad.addColorStop(0.35, '#5ed9ec');
+        singGrad.addColorStop(0.7, 'rgba(192, 132, 252, 0.35)');
+        singGrad.addColorStop(1, 'rgba(94, 217, 236, 0)');
+      }
+
+      ctx.fillStyle = singGrad;
+      ctx.beginPath();
+      ctx.arc(corePrj.px, corePrj.py, coreR * 2.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
+  /* ==========================================================================
+     6. INITIALISATION AU CHARGEMENT DU DOM
      ========================================================================== */
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       ModalManager.init();
       SolarEngine.init();
       HomeSync.init();
+      QuantumNexus.init();
     });
   } else {
     ModalManager.init();
     SolarEngine.init();
     HomeSync.init();
+    QuantumNexus.init();
   }
 
   // Exposition globale pour tests et compatibilité
   window.CosmosEngine = {
     ModalManager,
     SolarEngine,
-    HomeSync
+    HomeSync,
+    QuantumNexus
   };
 })();
+

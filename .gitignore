@@ -26,6 +26,7 @@ __pycache__/
 # TESTS & COUVERTURE
 # ==============================================================================
 .pytest_cache/
+tmp_pytest/
 .coverage
 .coverage.*
 htmlcov/
