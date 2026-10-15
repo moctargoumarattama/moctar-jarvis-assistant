@@ -324,6 +324,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def live_metrics_styles():
         return FileResponse(BASE_DIR / "static" / "live_metrics.css", media_type="text/css")
 
+    @application.get("/static/cosmos.js")
+    async def cosmos_script():
+        return FileResponse(BASE_DIR / "static" / "cosmos.js", media_type="application/javascript")
+
+    @application.get("/static/cosmos.css")
+    async def cosmos_styles():
+        return FileResponse(BASE_DIR / "static" / "cosmos.css", media_type="text/css")
+
     @application.get("/favicon.ico", include_in_schema=False)
     async def favicon():
         return Response(status_code=204)

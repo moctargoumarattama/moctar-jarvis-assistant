@@ -1,0 +1,464 @@
+/* ==========================================================================
+   M.O.C.T.A.R · COSMOS
+   Accueil plein écran sans défilement, fond 3D (canvas) et modules en modales.
+   Chargé après les styles historiques : ne fait que surcharger.
+   ========================================================================== */
+
+html, body { height: 100%; overflow: hidden; }
+body { margin: 0; background: #02050b; overscroll-behavior: none; }
+
+/* Couleurs planétaires partagées par les tuiles, les modales et le canvas */
+[data-planet="0"] { --pc: #c9b8a6; }
+[data-planet="1"] { --pc: #e8c27a; }
+[data-planet="2"] { --pc: #4f9de8; }
+[data-planet="3"] { --pc: #e0714f; }
+[data-planet="4"] { --pc: #d9a877; }
+[data-planet="5"] { --pc: #e6d08f; }
+[data-planet="6"] { --pc: #8fe3e8; }
+[data-planet="7"] { --pc: #6f8cff; }
+
+.cosmos-canvas {
+  position: fixed; inset: 0; z-index: 0; display: block;
+  width: 100vw; height: 100vh; height: 100dvh;
+  background: #02050b;
+}
+
+/* ------------------------------------------------------------------ Layout */
+main.cosmos-home {
+  position: relative; z-index: 1;
+  max-width: none; margin: 0;
+  height: 100vh; height: 100dvh;
+  padding: 14px 18px 12px;
+  display: grid;
+  grid-template-columns: minmax(232px, 300px) minmax(0, 1fr) minmax(232px, 300px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: "top top top" "left core right" "dock dock dock";
+  gap: 14px 18px;
+  overflow: hidden;
+  pointer-events: none;           /* les vides laissent passer le clic vers les planètes */
+}
+main.cosmos-home > .cosmos-top,
+main.cosmos-home > .cosmos-dock,
+main.cosmos-home > .connection-banner { pointer-events: auto; }
+
+.glass {
+  background: linear-gradient(160deg, rgba(16, 27, 47, .58), rgba(7, 12, 23, .46));
+  border: 1px solid rgba(140, 200, 255, .11);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
+}
+
+/* ------------------------------------------------------------------ Top bar */
+.cosmos-top {
+  grid-area: top;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  min-height: 54px; padding: 7px 10px 7px 10px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, rgba(16, 27, 47, .55), rgba(7, 12, 23, .4));
+  border: 1px solid rgba(140, 200, 255, .1);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
+  animation: cosmos-drop .8s cubic-bezier(.16, 1, .3, 1) both;
+}
+.cosmos-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cosmos-logo {
+  width: 38px; height: 38px; flex: none; border-radius: 12px;
+  display: grid; place-items: center; color: #ffd27a;
+  background: radial-gradient(circle at 35% 30%, rgba(255, 214, 120, .28), rgba(255, 140, 40, .08) 70%);
+  border: 1px solid rgba(255, 200, 110, .3);
+  box-shadow: 0 0 22px rgba(255, 170, 60, .18);
+}
+.cosmos-logo .icon { width: 20px; height: 20px; }
+.cosmos-name {
+  font-size: 15px; font-weight: 700; letter-spacing: .32em; color: #f3f7ff;
+  text-shadow: 0 0 18px rgba(94, 217, 236, .35);
+}
+.cosmos-host { display: flex; gap: 8px; align-items: baseline; font-size: 11px; color: #8fa3bf; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cosmos-host #hostname { color: #c7d5e8; overflow: hidden; text-overflow: ellipsis; }
+.cosmos-telemetry { display: flex; align-items: center; gap: 12px; font-size: 11px; color: #8fa3bf; white-space: nowrap; }
+.cosmos-telemetry .mono { color: #c7d5e8; }
+.cosmos-sep { width: 1px; height: 14px; background: rgba(140, 200, 255, .18); }
+.cosmos-top-right { display: flex; align-items: center; gap: 12px; }
+.cosmos-top-right .clock { text-align: right; line-height: 1.15; }
+.cosmos-top-right .clock time { font-size: 17px; color: #eef4ff; letter-spacing: .04em; }
+.cosmos-icon-btn {
+  width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center;
+  color: #9fb3cf; background: rgba(255, 255, 255, .03); border: 1px solid rgba(140, 200, 255, .14);
+  cursor: pointer; transition: color .2s, border-color .2s, transform .3s cubic-bezier(.16, 1, .3, 1), background .2s;
+}
+.cosmos-icon-btn:hover { color: var(--cyan); border-color: rgba(94, 217, 236, .45); background: rgba(94, 217, 236, .08); }
+.cosmos-icon-btn:active { transform: rotate(-120deg) scale(.94); }
+.cosmos-icon-btn:disabled { opacity: .5; cursor: progress; }
+.cosmos-icon-btn .icon { width: 17px; height: 17px; }
+
+main.cosmos-home > .connection-banner {
+  position: fixed; top: 78px; left: 50%; transform: translateX(-50%); z-index: 6;
+  max-width: min(680px, calc(100vw - 32px)); margin: 0;
+  border-radius: 999px; padding: 8px 16px;
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, .45);
+  animation: cosmos-drop .45s cubic-bezier(.16, 1, .3, 1) both;
+}
+
+/* ------------------------------------------------------------------ Columns & tiles */
+.cosmos-col { display: flex; flex-direction: column; gap: 12px; min-height: 0; pointer-events: none; }
+.cosmos-left { grid-area: left; }
+.cosmos-right { grid-area: right; }
+
+.orb-tile {
+  --pc: var(--cyan);
+  position: relative; isolation: isolate;
+  flex: 1 1 0; min-height: 0; width: 100%;
+  display: flex; flex-direction: column; justify-content: space-between; gap: 6px;
+  padding: 12px 14px 12px; margin: 0;
+  text-align: left; font: inherit; color: var(--text);
+  border-radius: 18px; overflow: hidden; cursor: pointer;
+  pointer-events: auto;
+  background: linear-gradient(158deg, rgba(17, 28, 49, .6), rgba(7, 12, 23, .48));
+  border: 1px solid rgba(140, 200, 255, .11);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .32), inset 0 1px 0 rgba(255, 255, 255, .04);
+  transition: transform .45s cubic-bezier(.16, 1, .3, 1), border-color .25s, box-shadow .45s, background .25s;
+  animation: tile-in .8s cubic-bezier(.16, 1, .3, 1) both;
+}
+.cosmos-left .orb-tile:nth-child(1), .cosmos-right .orb-tile:nth-child(1) { animation-delay: .08s; }
+.cosmos-left .orb-tile:nth-child(2), .cosmos-right .orb-tile:nth-child(2) { animation-delay: .16s; }
+.cosmos-left .orb-tile:nth-child(3), .cosmos-right .orb-tile:nth-child(3) { animation-delay: .24s; }
+.cosmos-left .orb-tile:nth-child(4), .cosmos-right .orb-tile:nth-child(4) { animation-delay: .32s; }
+.cosmos-right .orb-tile { --from-x: 26px; }
+
+.orb-tile::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(130% 90% at 0% 0%, color-mix(in srgb, var(--pc) 20%, transparent), transparent 62%);
+  opacity: .6; transition: opacity .3s;
+}
+.cosmos-right .orb-tile::before { background: radial-gradient(130% 90% at 100% 0%, color-mix(in srgb, var(--pc) 20%, transparent), transparent 62%); }
+.orb-tile::after { /* reflet qui glisse au survol */
+  content: ""; position: absolute; inset: -40% auto -40% -60%; width: 45%; z-index: -1; pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .07), transparent);
+  transform: translateX(-120%) skewX(-12deg); transition: transform .9s cubic-bezier(.16, 1, .3, 1);
+}
+.orb-tile:hover, .orb-tile:focus-visible, .orb-tile.is-linked {
+  transform: translateY(-2px) scale(1.012);
+  border-color: color-mix(in srgb, var(--pc) 55%, transparent);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .45), 0 0 34px color-mix(in srgb, var(--pc) 22%, transparent), inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+.orb-tile:hover::before, .orb-tile.is-linked::before { opacity: 1; }
+.orb-tile:hover::after { transform: translateX(420%) skewX(-12deg); }
+.orb-tile:active { transform: scale(.985); transition-duration: .12s; }
+.orb-tile:focus-visible { outline: 2px solid color-mix(in srgb, var(--pc) 70%, white); outline-offset: 2px; }
+.orb-tile[data-tone="warning"] { border-color: rgba(243, 189, 101, .42); }
+.orb-tile[data-tone="error"] { border-color: rgba(255, 115, 138, .55); animation: tile-in .8s cubic-bezier(.16, 1, .3, 1) both, tile-alert 2.4s ease-in-out 1s infinite; }
+
+.orb-tile-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.orb-ico {
+  width: 28px; height: 28px; flex: none; border-radius: 9px; display: grid; place-items: center;
+  color: var(--pc);
+  background: color-mix(in srgb, var(--pc) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pc) 30%, transparent);
+}
+.orb-ico .icon { width: 15px; height: 15px; }
+.orb-title { flex: 1; min-width: 0; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: #c3d1e4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.orb-tile kbd {
+  font: 600 10px var(--mono); color: #7f93b0; padding: 2px 6px; border-radius: 6px;
+  border: 1px solid rgba(140, 200, 255, .16); background: rgba(255, 255, 255, .03);
+}
+.orb-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.orb-main strong {
+  font: 600 clamp(20px, 3.6vh, 30px) / 1 var(--mono); color: #f3f7ff; letter-spacing: -.02em;
+  text-shadow: 0 0 22px color-mix(in srgb, var(--pc) 35%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.orb-main small { font-size: 11px; color: #8fa3bf; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.orb-sub { font-size: 11px; color: #91a5c1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.orb-bars { display: grid; gap: 5px; }
+.orb-bar { display: grid; grid-template-columns: 46px 1fr 52px; align-items: center; gap: 8px; font-size: 10px; }
+.orb-bar i { font-style: normal; color: #8094b1; letter-spacing: .08em; }
+.orb-bar b { height: 4px; border-radius: 4px; background: rgba(255, 255, 255, .07); overflow: hidden; }
+.orb-bar em {
+  display: block; height: 100%; width: 0; border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--pc) 60%, #5ed9ec), #5ed9ec);
+  transition: width .9s cubic-bezier(.16, 1, .3, 1), background .3s;
+}
+.orb-bar em[data-tone="warning"] { background: linear-gradient(90deg, #c9913d, var(--amber)); }
+.orb-bar em[data-tone="error"] { background: linear-gradient(90deg, #c2465c, var(--red)); }
+.orb-bar > span { font: 500 10px var(--mono); color: #c7d5e8; text-align: right; font-variant-numeric: tabular-nums; }
+
+.orb-dots { display: flex; gap: 6px; }
+.orb-dot {
+  flex: 1; min-width: 0; text-align: center; font: 600 10px var(--mono); padding: 5px 0; border-radius: 8px;
+  color: #8fa3bf; background: rgba(255, 255, 255, .04); border: 1px solid rgba(140, 200, 255, .12);
+  transition: color .3s, border-color .3s, background .3s, box-shadow .3s;
+}
+.orb-dot[data-tone="success"] { color: var(--green); border-color: rgba(81, 220, 170, .35); background: rgba(81, 220, 170, .08); box-shadow: 0 0 14px rgba(81, 220, 170, .12); }
+.orb-dot[data-tone="error"] { color: var(--red); border-color: rgba(255, 115, 138, .45); background: rgba(255, 115, 138, .1); }
+
+.orb-lines { display: grid; gap: 7px; }
+.orb-line { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 9px; font-size: 12px; color: #c3d1e4; }
+.orb-line-val { font: 600 10px var(--mono); letter-spacing: .06em; color: #8fa3bf; text-transform: uppercase; }
+.orb-led { width: 8px; height: 8px; border-radius: 50%; background: #5d6c82; box-shadow: 0 0 0 3px rgba(93, 108, 130, .15); }
+.orb-led[data-tone="success"] { background: var(--green); box-shadow: 0 0 0 3px rgba(81, 220, 170, .14), 0 0 10px rgba(81, 220, 170, .6); }
+.orb-led[data-tone="error"] { background: var(--red); box-shadow: 0 0 0 3px rgba(255, 115, 138, .16), 0 0 10px rgba(255, 115, 138, .6); }
+.orb-led[data-tone="warning"] { background: var(--amber); box-shadow: 0 0 0 3px rgba(243, 189, 101, .14); }
+
+.orb-spark { display: block; width: 100%; height: 38px; min-height: 0; flex: 1 1 auto; max-height: 64px; }
+
+.orb-events { display: grid; gap: 4px; min-height: 0; overflow: hidden; }
+.orb-event {
+  display: block; font: 10.5px/1.45 var(--mono); color: #a9bad1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  animation: event-in .5s cubic-bezier(.16, 1, .3, 1) both;
+}
+.orb-event time { color: #6f84a3; margin-right: 7px; }
+.orb-event[data-level="warning"] { color: var(--amber); }
+.orb-event[data-level="error"] { color: var(--red); }
+
+/* ------------------------------------------------------------------ Core (soleil = MOCTAR) */
+.cosmos-core {
+  grid-area: core; position: relative; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  min-height: 0;
+}
+.core-btn {
+  pointer-events: auto; position: relative;
+  width: clamp(112px, 19vmin, 196px); aspect-ratio: 1; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.core-ring {
+  position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  border: 1px solid rgba(255, 200, 110, .16);
+  transition: border-color .4s, inset .6s cubic-bezier(.16, 1, .3, 1), opacity .4s;
+}
+.core-ring.r1 { inset: -8%; border-style: dashed; border-color: rgba(255, 200, 110, .22); animation: core-spin 38s linear infinite; }
+.core-ring.r2 { inset: -20%; border-color: rgba(94, 217, 236, .12); border-top-color: rgba(94, 217, 236, .55); animation: core-spin 9s linear infinite reverse; }
+.core-ring.r3 { inset: -32%; border-color: transparent; border-left-color: rgba(255, 200, 110, .35); border-right-color: rgba(255, 200, 110, .12); animation: core-spin 16s linear infinite; }
+.core-btn:hover .core-ring.r1, .core-btn:focus-visible .core-ring.r1 { inset: -12%; border-color: rgba(255, 210, 120, .5); }
+.core-btn:hover .core-ring.r2, .core-btn:focus-visible .core-ring.r2 { inset: -26%; border-top-color: rgba(94, 217, 236, .9); }
+.core-btn:hover .core-ring.r3, .core-btn:focus-visible .core-ring.r3 { inset: -40%; }
+.core-btn:focus-visible { outline: none; }
+.core-btn:focus-visible .core-ring.r1 { box-shadow: 0 0 0 2px rgba(94, 217, 236, .6); }
+.core-btn:active { transform: scale(.97); }
+
+.core-label { display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; text-align: center; }
+.core-name {
+  font-size: clamp(16px, 2.6vh, 22px); font-weight: 700; letter-spacing: .55em; padding-left: .55em;
+  color: #fff6e3; text-shadow: 0 0 18px rgba(255, 190, 90, .55), 0 0 42px rgba(255, 150, 50, .25);
+}
+.core-label .jarvis-badge-status {
+  font: 600 9.5px var(--mono); letter-spacing: .14em; padding: 3px 10px; border-radius: 999px;
+  color: #9fb3cf; border: 1px solid rgba(140, 200, 255, .2); background: rgba(6, 12, 22, .55);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.core-hint { font-size: 10.5px; color: #7f93b0; letter-spacing: .04em; }
+
+/* ------------------------------------------------------------------ Dock / commande */
+.cosmos-dock {
+  grid-area: dock;
+  display: grid; grid-template-columns: 1fr minmax(0, 780px) 1fr; align-items: center; gap: 16px;
+  animation: cosmos-rise .8s .2s cubic-bezier(.16, 1, .3, 1) both;
+}
+.cosmos-ask {
+  grid-column: 2;
+  display: flex; align-items: center; gap: 10px; height: 50px; padding: 0 6px 0 18px;
+  border-radius: 999px;
+  background: linear-gradient(160deg, rgba(14, 25, 44, .7), rgba(7, 12, 23, .6));
+  border: 1px solid rgba(94, 217, 236, .24);
+  -webkit-backdrop-filter: blur(14px) saturate(140%); backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .4);
+  transition: border-color .25s, box-shadow .35s;
+}
+.cosmos-ask:focus-within { border-color: rgba(94, 217, 236, .6); box-shadow: 0 14px 40px rgba(0, 0, 0, .45), 0 0 0 4px rgba(94, 217, 236, .1), 0 0 40px rgba(94, 217, 236, .15); }
+.ask-prompt { color: var(--cyan); font: 600 18px var(--mono); }
+.cosmos-ask input {
+  flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent;
+  color: #eef4ff; font-size: 13.5px;
+}
+.cosmos-ask input::placeholder { color: #6f84a3; }
+.ask-send {
+  width: 40px; height: 40px; flex: none; border-radius: 50%; border: 0; cursor: pointer;
+  display: grid; place-items: center; color: #04121a;
+  background: linear-gradient(135deg, #7ee8f5, #3fc3db);
+  box-shadow: 0 0 22px rgba(94, 217, 236, .35);
+  transition: transform .3s cubic-bezier(.16, 1, .3, 1), box-shadow .3s;
+}
+.ask-send:hover { transform: scale(1.07) rotate(-8deg); box-shadow: 0 0 30px rgba(94, 217, 236, .55); }
+.ask-send .icon { width: 17px; height: 17px; }
+.cosmos-foot {
+  grid-column: 3; justify-self: end;
+  display: flex; align-items: center; gap: 14px; font-size: 10.5px; color: #7f93b0; white-space: nowrap;
+}
+.cosmos-foot .mono { color: #b5c4d8; }
+
+/* ------------------------------------------------------------------ Modales orbitales */
+dialog.orbit-modal {
+  --pc: var(--cyan);
+  width: min(1180px, calc(100vw - 32px));
+  max-width: none; max-height: calc(100dvh - 40px);
+  padding: 0; overflow: hidden;
+  flex-direction: column;
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--pc) 30%, rgba(140, 200, 255, .14));
+  background:
+    radial-gradient(110% 70% at 0% 0%, color-mix(in srgb, var(--pc) 13%, transparent), transparent 55%),
+    linear-gradient(180deg, rgba(13, 21, 37, .96), rgba(7, 12, 22, .97));
+  box-shadow: 0 40px 120px rgba(0, 0, 0, .72), 0 0 70px color-mix(in srgb, var(--pc) 13%, transparent), inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+dialog.orbit-modal[open] { display: flex; }
+#services-modal { width: min(1120px, calc(100vw - 32px)); }
+#network-modal { width: min(780px, calc(100vw - 32px)); }
+#sentinel-modal { width: min(860px, calc(100vw - 32px)); }
+#journal-modal { width: min(1000px, calc(100vw - 32px)); }
+
+.orbit-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 16px 18px 14px 22px; flex: none;
+  border-bottom: 1px solid rgba(140, 200, 255, .08);
+}
+.orbit-head-id { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.orbit-head h2 { margin: 2px 0 0; font-size: 19px; font-weight: 650; color: #f3f7ff; letter-spacing: -.01em; }
+.orbit-head .eyebrow { color: var(--pc); letter-spacing: .16em; font-size: 10px; }
+.orbit-planet {
+  width: 36px; height: 36px; flex: none; border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, .75), var(--pc) 32%, color-mix(in srgb, var(--pc) 35%, #000) 78%);
+  box-shadow: 0 0 26px color-mix(in srgb, var(--pc) 45%, transparent), inset -6px -6px 12px rgba(0, 0, 0, .45);
+  animation: planet-bob 6s ease-in-out infinite;
+}
+.orbit-head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.orbit-close {
+  width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; cursor: pointer;
+  color: #9fb3cf; background: rgba(255, 255, 255, .03); border: 1px solid rgba(140, 200, 255, .14);
+  transition: color .2s, border-color .2s, background .2s, transform .35s cubic-bezier(.16, 1, .3, 1);
+}
+.orbit-close:hover { color: #fff; border-color: rgba(255, 115, 138, .5); background: rgba(255, 115, 138, .1); transform: rotate(90deg); }
+.orbit-close .icon { width: 16px; height: 16px; }
+.orbit-body { padding: 18px 22px 22px; overflow: auto; min-height: 0; flex: 1; overscroll-behavior: contain; }
+
+/* Contenus historiques remis en forme dans les modales */
+.orbit-modal .hardware-grid { display: grid; grid-template-columns: 1.6fr 1.15fr .9fr 1.2fr; gap: 14px; margin: 0; }
+.orbit-modal .metric-card { min-height: 220px; padding: 16px 18px; }
+.orbit-modal .core-grid { max-height: none; }
+.orbit-modal .services-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin: 0; }
+.orbit-modal .network-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 0; }
+.orbit-modal .network-card { min-height: 190px; padding: 18px; }
+.orbit-modal .remote-panel { height: auto; min-height: 360px; display: flex; flex-direction: column; }
+.orbit-modal .remote-panel .remote-content { max-height: min(56vh, 520px); overflow-y: auto; flex: 1; }
+.orbit-modal .terminal-card { height: min(64vh, 600px); display: flex; flex-direction: column; }
+.orbit-modal .events-list { flex: 1; min-height: 0; overflow-y: auto; }
+.orbit-modal .card {
+  background: linear-gradient(165deg, rgba(20, 31, 51, .78), rgba(12, 19, 33, .82));
+  border-color: rgba(140, 200, 255, .1);
+  transition: border-color .25s, transform .35s cubic-bezier(.16, 1, .3, 1);
+}
+.orbit-modal .card:hover { border-color: color-mix(in srgb, var(--pc) 35%, rgba(140, 200, 255, .14)); }
+.orbit-modal[open] .orbit-body > * { animation: content-in .55s .08s cubic-bezier(.16, 1, .3, 1) backwards; }
+
+/* ------------------------------------------------------------------ Moteur d'animation des modales
+   S'applique à TOUTES les modales (assistant, cyberdéfense, planificateur, courbes…).
+   Ouverture : la fenêtre « sort » du point touché ; fermeture : courte et douce. */
+dialog { transition: none; }
+dialog[open] {
+  transform-origin: var(--ox, 50%) var(--oy, 50%);
+  animation: orbit-in .52s cubic-bezier(.16, 1, .3, 1) backwards !important;
+}
+dialog[open][data-closing] { animation: orbit-out .2s cubic-bezier(.4, 0, 1, 1) forwards !important; pointer-events: none; }
+dialog::backdrop {
+  background: radial-gradient(circle at var(--bx, 50%) var(--by, 50%), rgba(12, 32, 62, .3), rgba(2, 5, 12, .8) 72%);
+  -webkit-backdrop-filter: blur(9px) saturate(125%);
+  backdrop-filter: blur(9px) saturate(125%);
+  animation: backdrop-in .42s ease backwards;
+}
+dialog[data-closing]::backdrop { animation: backdrop-out .2s ease forwards; }
+#jarvis-modal::backdrop { background: radial-gradient(circle at var(--bx, 50%) var(--by, 50%), rgba(70, 40, 6, .28), rgba(2, 5, 12, .82) 70%); }
+
+@keyframes orbit-in {
+  0% { opacity: 0; transform: perspective(1400px) translateY(26px) rotateX(9deg) scale(.86); }
+  55% { opacity: 1; }
+  100% { opacity: 1; transform: perspective(1400px) translateY(0) rotateX(0) scale(1); }
+}
+@keyframes orbit-out { to { opacity: 0; transform: perspective(1400px) translateY(14px) rotateX(4deg) scale(.95); } }
+@keyframes backdrop-in { from { opacity: 0; } }
+@keyframes backdrop-out { to { opacity: 0; } }
+@keyframes content-in { from { opacity: 0; transform: translateY(10px); } }
+@keyframes tile-in { from { opacity: 0; transform: translateX(var(--from-x, -26px)) scale(.97); } }
+@keyframes tile-alert { 0%, 100% { box-shadow: 0 10px 30px rgba(0, 0, 0, .32); } 50% { box-shadow: 0 10px 30px rgba(0, 0, 0, .32), 0 0 26px rgba(255, 115, 138, .3); } }
+@keyframes event-in { from { opacity: 0; transform: translateX(-6px); } }
+@keyframes cosmos-drop { from { opacity: 0; transform: translateY(-14px); } }
+@keyframes cosmos-rise { from { opacity: 0; transform: translateY(16px); } }
+@keyframes core-spin { to { transform: rotate(360deg); } }
+@keyframes planet-bob { 50% { transform: translateY(-2px) rotate(8deg); } }
+
+/* Mode allégé (activé automatiquement si la machine peine à tenir 40 i/s) */
+body.cosmos-lite .orb-tile,
+body.cosmos-lite .cosmos-top,
+body.cosmos-lite .cosmos-ask { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(9, 15, 28, .86); }
+body.cosmos-lite dialog::backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(2, 5, 12, .84); }
+
+/* ------------------------------------------------------------------ Responsive (toujours sans défilement) */
+@media (max-width: 1180px) {
+  .orbit-modal .hardware-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cosmos-telemetry .cosmos-sep:last-of-type, #uptime { display: none; }
+}
+@media (max-height: 700px) and (min-width: 901px) {
+  main.cosmos-home { padding: 10px 14px 8px; gap: 10px 14px; }
+  .cosmos-col { gap: 9px; }
+  .orb-tile { padding: 9px 12px; gap: 4px; }
+  .orb-bar:nth-child(3), .orb-event:nth-child(n+3) { display: none; }
+  .core-hint { display: none; }
+  .cosmos-ask { height: 44px; }
+}
+@media (max-width: 900px) {
+  main.cosmos-home {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-areas: "top top" "core core" "left right" "dock dock";
+    padding: 10px 10px 10px; gap: 10px;
+  }
+  .cosmos-telemetry, .clock-date, .cosmos-foot, .orb-tile kbd, .core-hint { display: none; }
+  .cosmos-top { min-height: 48px; padding: 6px 8px; }
+  .cosmos-name { font-size: 13px; letter-spacing: .24em; }
+  .cosmos-logo { width: 32px; height: 32px; }
+  .status-chip { font-size: 9px; }
+  .cosmos-top-right .clock time { font-size: 14px; }
+  .cosmos-core { gap: 8px; padding: 4px 0; }
+  .core-btn { width: clamp(92px, 24vmin, 132px); }
+  .core-name { font-size: 15px; }
+  .cosmos-col { gap: 8px; }
+  .orb-tile { padding: 9px 11px; gap: 4px; border-radius: 15px; }
+  .orb-ico { width: 24px; height: 24px; }
+  .orb-title { font-size: 9.5px; letter-spacing: .08em; }
+  .orb-main strong { font-size: clamp(17px, 2.8vh, 24px); }
+  .orb-bars, .orb-sub, .orb-dots { display: none; }
+  .orb-line { font-size: 10.5px; gap: 6px; }
+  .orb-line-val { display: none; }
+  .orb-spark { height: 24px; }
+  .orb-event:nth-child(n+2) { display: none; }
+  .cosmos-dock { grid-template-columns: 1fr; }
+  .cosmos-ask { grid-column: 1; height: 46px; }
+  main.cosmos-home > .connection-banner { top: 66px; }
+}
+@media (max-width: 640px) {
+  /* Les modales deviennent des feuilles qui montent du bas de l'écran */
+  dialog, dialog.orbit-modal, #services-modal, #network-modal, #sentinel-modal, #journal-modal {
+    width: 100vw !important; max-width: 100vw !important;
+    max-height: 92dvh !important;
+    margin: auto 0 0 !important;
+    border-radius: 22px 22px 0 0 !important;
+  }
+  dialog[open] { animation: sheet-in .48s cubic-bezier(.16, 1, .3, 1) backwards !important; }
+  dialog[open][data-closing] { animation: sheet-out .22s cubic-bezier(.4, 0, 1, 1) forwards !important; }
+  .orbit-modal .hardware-grid { grid-template-columns: 1fr; }
+  .orbit-head { padding: 14px 14px 12px 16px; }
+  .orbit-head h2 { font-size: 16px; }
+  .orbit-body { padding: 14px; }
+}
+@keyframes sheet-in { from { transform: translateY(100%); } }
+@keyframes sheet-out { to { transform: translateY(100%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  dialog[open], dialog[open][data-closing], dialog::backdrop, .orb-tile, .cosmos-top, .cosmos-dock,
+  .core-ring, .orbit-planet, .orb-event, .orbit-modal[open] .orbit-body > * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}
+

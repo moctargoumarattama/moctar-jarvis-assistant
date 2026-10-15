@@ -181,8 +181,13 @@ class APITests(unittest.TestCase):
     def test_live_metrics_assets_are_served_with_fixed_paths_and_mime_types(self) -> None:
         directory = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         (directory / "static").mkdir()
-        for filename, mime in (("live_metrics.js", "application/javascript"), ("live_metrics.css", "text/css")):
-            (directory / "static" / filename).write_text("/* chart asset */")
+        for filename, mime in (
+            ("live_metrics.js", "application/javascript"),
+            ("live_metrics.css", "text/css"),
+            ("cosmos.js", "application/javascript"),
+            ("cosmos.css", "text/css"),
+        ):
+            (directory / "static" / filename).write_text("/* asset */")
             with patch("main.BASE_DIR", directory):
                 response = self.client.get("/static/" + filename)
             self.assertEqual(response.status_code, 200)
