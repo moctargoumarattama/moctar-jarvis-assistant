@@ -1,0 +1,189 @@
+/* Mobile overrides only: desktop and laptop rules remain in their original files. */
+@media (max-width: 767px) {
+  html, body { width: 100%; overflow-x: hidden; }
+
+  main.cosmos-home {
+    width: 100%;
+    top: var(--mobile-viewport-top, 0px);
+    height: var(--mobile-viewport-height, 100dvh);
+    padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto auto minmax(min-content, 1fr) auto;
+    align-content: start;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .cosmos-top, .cosmos-brand, .cosmos-brand > div, .cosmos-host,
+  .cosmos-top-right, .cosmos-col, .cosmos-dock, .cosmos-ask { min-width: 0; }
+  .cosmos-top { gap: 8px; }
+  .cosmos-brand { gap: 8px; }
+  .cosmos-name { font-size: 12px; letter-spacing: .18em; }
+  .cosmos-host { font-size: 10px; }
+  .cosmos-top-right { gap: 6px; flex-shrink: 0; }
+  .cosmos-top-right .clock time { font-size: 12px; }
+  .cosmos-core { min-height: 140px; padding: 8px 0; }
+  .core-btn { width: 92px; }
+  .cosmos-col { gap: 8px; }
+  .orb-tile { min-height: 100px; flex: 1 0 auto; }
+  .orb-title { overflow-wrap: anywhere; }
+  .orb-main { flex-wrap: wrap; gap: 4px; }
+  .orb-line { grid-template-columns: 10px minmax(0, 1fr); }
+  .cosmos-dock {
+    position: sticky; bottom: 0; z-index: 5;
+    margin-top: 2px; padding: 6px 0;
+    background: #070e19ee;
+    border-radius: 24px;
+  }
+  .cosmos-ask { width: 100%; padding-left: 12px; gap: 8px; height: 54px; }
+  .cosmos-ask input { width: 0; min-width: 0; font-size: 16px; }
+
+  /* Anchor every sheet to the visible viewport, including when a keyboard opens. */
+  dialog, dialog.orbit-modal, dialog#services-modal, dialog#network-modal,
+  dialog#sentinel-modal, dialog#journal-modal {
+    position: fixed !important;
+    inset: auto !important;
+    top: calc(var(--mobile-viewport-top, 0px) + 8px + env(safe-area-inset-top)) !important;
+    left: 8px !important;
+    width: calc(100% - 16px) !important;
+    max-width: calc(100% - 16px) !important;
+    max-height: calc(var(--mobile-viewport-height, 100dvh) - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    margin: 0 !important;
+    border-radius: 16px !important;
+    box-sizing: border-box;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  dialog:is(.orbit-modal, #jarvis-modal, #scheduler-modal, #cyberdefense-modal,
+            #events-dialog, #live-metrics-dialog, #model-offline-modal) {
+    height: calc(var(--mobile-viewport-height, 100dvh) - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    padding: 0;
+    overflow: hidden;
+  }
+  dialog:is(.orbit-modal, #jarvis-modal, #scheduler-modal, #cyberdefense-modal,
+            #events-dialog, #live-metrics-dialog, #model-offline-modal)[open] {
+    display: flex;
+    flex-direction: column;
+  }
+  dialog[open] { animation: mobile-dialog-in .18s ease-out both !important; }
+  dialog[open][data-closing] { animation: mobile-dialog-out .15s ease-in both !important; }
+  dialog > header, .events-dialog-header { flex-shrink: 0; }
+  dialog > header > div, .events-dialog-heading { min-width: 0; }
+  dialog :is(input, select, textarea) { min-width: 0; max-width: 100%; font-size: 16px !important; }
+  dialog :is(input[type="checkbox"], input[type="radio"]) {
+    width: 20px; height: 20px; min-width: 20px; padding: 0; flex: none;
+  }
+  dialog :is(pre, code) { overflow-wrap: anywhere; }
+  dialog pre { white-space: pre-wrap; }
+  dialog :is(.button, .console-button, .cyber-unban, .cyber-route-button,
+             .restart-button, .jarvis-chip, .live-metrics-period-buttons button) {
+    min-height: 44px; white-space: normal; overflow-wrap: anywhere;
+  }
+  .cosmos-icon-btn, .pwa-install, .ask-send, .orbit-close, .jarvis-btn-icon,
+  .jarvis-send-btn, .live-metrics-close, #voice-close-icon {
+    min-width: 44px; min-height: 44px; flex-shrink: 0;
+  }
+  .orbit-head { padding: 12px; gap: 8px; align-items: flex-start; }
+  .orbit-head-id { gap: 8px; }
+  .orbit-head h2 { font-size: 16px; overflow-wrap: anywhere; }
+  .orbit-head .eyebrow { font-size: 9px; letter-spacing: .08em; }
+  .orbit-planet { width: 28px; height: 28px; }
+  .orbit-head-actions { gap: 6px; flex-shrink: 0; }
+  .orbit-head-actions > .meta { display: none; }
+  .orbit-head-actions .live-metrics-launch { max-width: 104px; white-space: normal; }
+  .orbit-body, .cyber-scroll, .live-metrics-scroll {
+    flex: 1 1 0; min-width: 0; min-height: 0;
+    overflow: auto; padding: 12px !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .orbit-modal :is(.hardware-grid, .services-grid, .network-grid),
+  .cyber-layout { grid-template-columns: minmax(0, 1fr); }
+  .orbit-modal .metric-card, .orbit-modal .network-card { min-width: 0; min-height: 0; }
+  .orbit-modal .disk-card { grid-template-columns: minmax(0, 1fr); }
+  .orbit-modal .remote-panel { min-height: 240px; }
+  .orbit-modal .remote-panel .remote-content { max-height: none; }
+  .service-footer, .vps-row, .vps-stats, .cyber-ban-head, .cyber-ban-footer {
+    flex-wrap: wrap;
+  }
+  .cyber-header, .live-metrics-header, .events-dialog-header { padding: 12px !important; gap: 10px; align-items: flex-start; }
+  .cyber-header h2, .live-metrics-header h2, .events-dialog-header h2 { font-size: 18px; }
+  .cyber-header :is(h2, .eyebrow), .cyber-panel-heading { overflow-wrap: anywhere; }
+  .cyber-panel-heading { flex-wrap: wrap; gap: 8px; }
+  .cyber-footer, .live-metrics-footer, #events-dialog .terminal-footer {
+    flex-shrink: 0; padding: 10px 12px !important; gap: 8px;
+    flex-wrap: wrap; overflow-wrap: anywhere;
+  }
+  .cyber-footer > span { flex: 1 1 140px; }
+  #scheduler-new-form > div[style*="grid-template-columns"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  #scheduler-new-form > div, #scheduler-new-form > div > div { min-width: 0; }
+  #scheduler-new-form > label { align-items: flex-start !important; line-height: 1.5; }
+  #scheduler-new-form > label span { min-width: 0; }
+
+  /* Keep the assistant controls visible while only the conversation scrolls. */
+  #jarvis-modal .jarvis-header { display: block; position: relative; padding: 12px; }
+  .jarvis-header-left { min-width: 0; padding-right: 44px; gap: 8px; }
+  .jarvis-header-left > div { min-width: 0; }
+  .jarvis-header-left .eyebrow { font-size: 9px; letter-spacing: .06em !important; line-height: 1.5; }
+  .jarvis-brand-logo { width: 30px; height: 30px; flex-shrink: 0; }
+  .jarvis-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 18px; }
+  .jarvis-title-sub { font-size: 9px; }
+  .jarvis-header-badges { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .jarvis-model-badge, .jarvis-tools-badge { min-width: 0; max-width: 100%; font-size: 10px; white-space: normal; }
+  #jarvis-close-btn { position: absolute; top: 10px; right: 10px; }
+  .jarvis-body, .jarvis-chat-col { min-height: 0; min-width: 0; }
+  .jarvis-chat-stream { min-height: 0; padding: 14px 12px; gap: 14px; }
+  .jarvis-msg { max-width: 100%; min-width: 0; gap: 8px; }
+  .jarvis-msg-content { max-width: calc(100% - 38px); }
+  .jarvis-msg-text { padding: 10px 12px; font-size: 14px; overflow-wrap: anywhere; }
+  .jarvis-msg-author { flex-wrap: wrap; font-size: 9px; }
+  #jarvis-modal .jarvis-footer { padding: 10px 12px; gap: 6px; }
+  .jarvis-form, .jarvis-input-wrap { min-width: 0; width: 100%; }
+  .jarvis-input-wrap { padding: 4px 6px; }
+  #jarvis-input { width: 0; min-width: 0; flex: 1 1 0; padding: 8px 0; }
+  .jarvis-footer-meta { flex-wrap: wrap; gap: 4px; font-size: 9px; overflow-wrap: anywhere; }
+  .jarvis-footer-meta > span:first-child { display: none; }
+
+  #model-offline-modal .cyber-scroll { max-height: none !important; }
+  #model-offline-title { flex-wrap: wrap; font-size: 18px !important; }
+  #model-offline-title span { font-size: 11px !important; }
+  #model-offline-modal .cyber-scroll > div[style*="grid-template-columns"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  #model-offline-modal .cyber-footer { display: flex; flex-direction: column; align-items: stretch !important; }
+  #model-offline-modal .cyber-footer > span { flex: none; }
+  #model-offline-modal .cyber-footer > div { display: flex; flex-wrap: wrap; gap: 8px !important; }
+  #model-offline-modal .cyber-footer button { flex: 1 1 180px; min-height: 44px; }
+  .live-metrics-toolbar { min-width: 0; padding: 10px 12px; gap: 8px; }
+  .live-metrics-period { min-width: 0; }
+  .live-metrics-period-buttons { flex-wrap: wrap; }
+  .events-dialog-toolbar { flex-wrap: wrap; gap: 8px; }
+  .dialog-actions { flex-wrap: wrap; }
+  .dialog-actions .button { flex: 1 1 120px; }
+  .pwa-help { padding: 18px; }
+  .pwa-help button { min-height: 44px; }
+
+  /* VisualViewport can shrink while CSS media queries still see the full page. */
+  :root[data-mobile-compact] :is(.cyber-header, .live-metrics-header, .events-dialog-header) {
+    padding: 8px 12px !important;
+  }
+  :root[data-mobile-compact] :is(.cyber-header, .live-metrics-header, .events-dialog-header) p,
+  :root[data-mobile-compact] #model-offline-modal .cyber-footer > span,
+  :root[data-mobile-compact] .jarvis-header-left .eyebrow,
+  :root[data-mobile-compact] :is(.jarvis-title-sub, .jarvis-model-badge, .jarvis-tools-badge, .jarvis-footer-meta) {
+    display: none;
+  }
+  :root[data-mobile-compact] #model-offline-title { font-size: 16px !important; }
+  :root[data-mobile-compact] #model-offline-modal .cyber-footer { padding: 8px 12px !important; }
+  :root[data-mobile-compact] .jarvis-header-left { padding-right: 96px; }
+  :root[data-mobile-compact] .jarvis-header-badges { margin-top: 0; }
+  :root[data-mobile-compact] #jarvis-clear-btn { position: absolute; top: 10px; right: 60px; }
+
+  @keyframes mobile-dialog-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes mobile-dialog-out { to { opacity: 0; } }
+}
+
+@media (max-width: 767px) and (prefers-reduced-motion: reduce) {
+  dialog[open], dialog[open][data-closing] { animation-duration: .01ms !important; }
+}

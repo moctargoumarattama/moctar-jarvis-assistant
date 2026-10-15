@@ -27,8 +27,8 @@ from actions import execute_tool, get_all_tools_schema
 logger = logging.getLogger("jarvis.agent")
 
 AGENT_SYSTEM_PROMPT = (
-    "Tu es M.O.C.T.A.R, assistant opérationnel. Réponds en français, avec précision et concision.\n"
-    "RÈGLE ABSOLUE : Ne fais JAMAIS de promesse d'action ni de phrase d'attente "
+    ai_brain.MOCTAR_SYSTEM_PROMPT
+    + "\nRÈGLE ABSOLUE : Ne fais JAMAIS de promesse d'action ni de phrase d'attente "
     "(interdit : 'Je vais vérifier', 'Je commence par', 'Patientez'). "
     "Si une information demande un outil, APPELLE DIRECTEMENT L'OUTIL au premier tour sans texte d'introduction.\n"
     "EXEMPLE D'APPEL D'OUTIL ATTENDU :\n"
@@ -39,10 +39,7 @@ AGENT_SYSTEM_PROMPT = (
     "system_telemetry décrit uniquement l'hôte mesuré, pas les services ni les machines distantes sans observation dédiée.\n"
     "Pour plusieurs actions, appelle les outils successivement et analyse chaque résultat. "
     "En cas d'échec, corrige les arguments ou explique la cause ; ne prétends jamais avoir réussi.\n"
-    "Après les observations, deux sections obligatoires :\n"
-    "[État Opérationnel] : valeurs réelles avec unités et statut vert/orange/rouge justifié.\n"
-    "[Recommandations M.O.C.T.A.R] : 1 à 3 conseils concrets fondés sur les observations ; "
-    "une recommandation n'est pas une action exécutée.\n"
+    "Fonde les recommandations sur les observations ; une recommandation n'est pas une action exécutée.\n"
     "Respecte les validations de sécurité et demande les confirmations requises pour toute action sensible."
 )
 

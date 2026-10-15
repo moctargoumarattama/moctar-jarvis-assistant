@@ -20,6 +20,9 @@ class AiBrainConfigTests(unittest.TestCase):
         self.assertEqual(ai_brain.config.OLLAMA_MODEL, ai_brain.DEFAULT_MODEL)
         self.assertEqual("qwen2.5:1.5b", brain.model)
         self.assertEqual(ai_brain.config.OLLAMA_BASE_URL, ai_brain.DEFAULT_BASE_URL)
+        self.assertEqual({"temperature": 0.2, "max_tokens": 350, "top_p": 0.8}, ai_brain.GENERATION_CONFIG)
+        self.assertEqual(ai_brain.GENERATION_CONFIG["max_tokens"], ai_brain.OLLAMA_MAX_PREDICT)
+        self.assertEqual(ai_brain.GENERATION_CONFIG["temperature"], ai_brain.OLLAMA_TEMPERATURE)
 
     def test_ollama_settings_are_loaded_from_environment(self):
         with patch.dict(
@@ -215,11 +218,12 @@ class AiBrainConfigTests(unittest.TestCase):
         request_payload = json.loads(open_mock.call_args.args[0].data.decode("utf-8"))
         self.assertEqual(tools, request_payload["tools"])
         self.assertFalse(request_payload["think"])
-        self.assertEqual(512, request_payload["options"]["num_predict"])
-        self.assertEqual(0.15, request_payload["options"]["temperature"])
+        self.assertEqual(350, request_payload["options"]["num_predict"])
+        self.assertEqual(0.2, request_payload["options"]["temperature"])
+        self.assertEqual(0.8, request_payload["options"]["top_p"])
         self.assertEqual(["Observation:", "<|im_end|>", "\n\nUser:"], request_payload["options"]["stop"])
 
-    def test_universal_ollama_chat_keeps_enough_tokens_for_tool_arguments(self):
+    def test_universal_ollama_chat_uses_the_generation_limits(self):
         response = Mock()
         response.read.return_value = b'{"message":{"content":"bonjour"}}'
         response.__enter__ = Mock(return_value=response)
@@ -230,8 +234,9 @@ class AiBrainConfigTests(unittest.TestCase):
             brain.chat([{"role": "user", "content": "bonjour"}])
 
         payload = json.loads(open_mock.call_args.args[0].data.decode("utf-8"))
-        self.assertEqual(512, payload["options"]["num_predict"])
-        self.assertEqual(0.15, payload["options"]["temperature"])
+        self.assertEqual(350, payload["options"]["num_predict"])
+        self.assertEqual(0.2, payload["options"]["temperature"])
+        self.assertEqual(0.8, payload["options"]["top_p"])
         self.assertEqual(["Observation:", "<|im_end|>", "\n\nUser:"], payload["options"]["stop"])
 
     def test_compact_ollama_options_bound_tokens_and_temperature(self):
@@ -241,9 +246,10 @@ class AiBrainConfigTests(unittest.TestCase):
         response.__exit__ = Mock(return_value=None)
 
         for requested_tokens, temperature, expected_tokens, expected_temperature in (
-            (4096, 0.9, 512, 0.2),
-            (96, 0.0, 384, 0.1),
-            (384, 0.15, 384, 0.15),
+            (4096, 0.9, 350, 0.2),
+            (96, 0.0, 96, 0.1),
+            (180, 0.15, 180, 0.15),
+            (350, 0.2, 350, 0.2),
         ):
             with self.subTest(tokens=requested_tokens), patch("ai_brain.urlopen", return_value=response) as open_mock:
                 ai_brain.chat_ollama(
@@ -253,6 +259,7 @@ class AiBrainConfigTests(unittest.TestCase):
                 payload = json.loads(open_mock.call_args.args[0].data.decode("utf-8"))
                 self.assertEqual(expected_tokens, payload["options"]["num_predict"])
                 self.assertEqual(expected_temperature, payload["options"]["temperature"])
+                self.assertEqual(0.8, payload["options"]["top_p"])
 
     def test_qwen_ignores_unsupported_thinking_mode(self):
         response = Mock()
@@ -269,13 +276,16 @@ class AiBrainConfigTests(unittest.TestCase):
         response.read.return_value = b'{"choices":[{"message":{"content":"bonjour"},"finish_reason":"stop"}]}'
         response.__enter__ = Mock(return_value=response)
         response.__exit__ = Mock(return_value=None)
-        with patch("ai_brain._ollama_settings", return_value=("qwen2.5:1.5b", "http://localhost:11434/v1")), \
-                patch("ai_brain.urlopen", return_value=response) as open_mock:
-            ai_brain.chat_ollama([{"role": "user", "content": "bonjour"}], max_predict=4096, temperature=0.8)
-        payload = json.loads(open_mock.call_args.args[0].data.decode("utf-8"))
-        self.assertEqual(512, payload["max_tokens"])
-        self.assertEqual(0.2, payload["temperature"])
-        self.assertEqual(["Observation:", "<|im_end|>", "\n\nUser:"], payload["stop"])
+        for requested_tokens, expected_tokens in ((4096, 350), (96, 96), (180, 180)):
+            with self.subTest(tokens=requested_tokens), \
+                    patch("ai_brain._ollama_settings", return_value=("qwen2.5:1.5b", "http://localhost:11434/v1")), \
+                    patch("ai_brain.urlopen", return_value=response) as open_mock:
+                ai_brain.chat_ollama([{"role": "user", "content": "bonjour"}], max_predict=requested_tokens, temperature=0.8)
+            payload = json.loads(open_mock.call_args.args[0].data.decode("utf-8"))
+            self.assertEqual(expected_tokens, payload["max_tokens"])
+            self.assertEqual(0.2, payload["temperature"])
+            self.assertEqual(0.8, payload["top_p"])
+            self.assertEqual(["Observation:", "<|im_end|>", "\n\nUser:"], payload["stop"])
 
     def test_cloud_chat_preserves_openai_model_and_parameters(self):
         response = Mock()
@@ -292,7 +302,8 @@ class AiBrainConfigTests(unittest.TestCase):
         payload = json.loads(open_mock.call_args.args[0].data.decode("utf-8"))
         self.assertEqual("gpt-4o-mini", payload["model"])
         self.assertEqual(0.2, payload["temperature"])
-        self.assertEqual(512, payload["max_tokens"])
+        self.assertEqual(350, payload["max_tokens"])
+        self.assertEqual(0.8, payload["top_p"])
         self.assertNotIn("options", payload)
         self.assertEqual("bonjour", result["content"])
 
@@ -378,6 +389,7 @@ class AiBrainConfigTests(unittest.TestCase):
         self.assertEqual("message ameliore", answer)
         ask_mock.assert_called_once()
         self.assertIn("Contexte additionnel: scheduler", ask_mock.call_args.args[0])
+        self.assertEqual(0.2, ask_mock.call_args.kwargs["temperature"])
 
 class GeminiBrainTests(unittest.TestCase):
     def setUp(self):
@@ -556,6 +568,9 @@ class GeminiBrainTests(unittest.TestCase):
         request = self.client.models.generate_content.call_args.kwargs
         self.assertEqual("gemini-test-model", request["model"])
         self.assertEqual("Tu es Jarvis.", request["config"]["system_instruction"])
+        self.assertEqual(0.2, request["config"]["temperature"])
+        self.assertEqual(350, request["config"]["max_output_tokens"])
+        self.assertEqual(0.8, request["config"]["top_p"])
         declaration = request["config"]["tools"][0]["function_declarations"][0]
         self.assertEqual("create_note", declaration["name"])
         self.assertEqual(tools[0]["function"]["parameters"], declaration["parameters_json_schema"])
@@ -567,9 +582,10 @@ class GeminiBrainTests(unittest.TestCase):
             {"role": "assistant", "content": "", "tool_calls": [{"id": "gemini-call-1", "type": "function", "function": {"name": "create_note", "arguments": '{"target": "rapport solaire"}'}}]},
             {"role": "tool", "name": "create_note", "tool_call_id": "gemini-call-1", "content": json.dumps(observation)},
         ])
-        second = brain.chat(messages, tools=tools)
+        second = brain.chat(messages, tools=tools, temperature=0.15)
 
         self.assertEqual("Note creee.", second["content"])
+        self.assertEqual(0.15, self.client.models.generate_content.call_args.kwargs["config"]["temperature"])
         contents = self.client.models.generate_content.call_args.kwargs["contents"]
         self.assertEqual("model", contents[1]["role"])
         self.assertEqual("create_note", contents[1]["parts"][0]["function_call"]["name"])
@@ -755,6 +771,8 @@ class LocalBrainTests(unittest.TestCase):
 
         self.assertEqual("Niamey est la capitale du Niger.", response)
         self.assertIn("une ou deux phrases maximum", ask_mock.call_args.kwargs["system_prompt"])
+        self.assertEqual(96, ask_mock.call_args.kwargs["max_predict"])
+        self.assertEqual(0.2, ask_mock.call_args.kwargs["temperature"])
 
     def test_activity_request_uses_ollama_with_personal_context(self):
         with patch("ai_brain.can_answer_general_questions", return_value=True):
@@ -774,6 +792,7 @@ class LocalBrainTests(unittest.TestCase):
         self.assertIn("Projet actif: baba_market", ask_mock.call_args.args[0])
         self.assertIn("Todos ouverts:", ask_mock.call_args.args[0])
         self.assertIn("activites quotidiennes", ask_mock.call_args.kwargs["system_prompt"])
+        self.assertEqual(0.2, ask_mock.call_args.kwargs["temperature"])
 
     def test_enhance_social_post_uses_local_fallback_when_ai_is_disabled(self):
         with patch("ai_brain.can_answer_general_questions", return_value=False):

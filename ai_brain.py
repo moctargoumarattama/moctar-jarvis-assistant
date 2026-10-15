@@ -35,8 +35,26 @@ except Exception:
 DEFAULT_MODEL = config.OLLAMA_MODEL
 DEFAULT_BASE_URL = config.OLLAMA_BASE_URL
 OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", str(config.OLLAMA_TIMEOUT_SECONDS)))
-OLLAMA_MAX_PREDICT = 512
-OLLAMA_TEMPERATURE = 0.15
+GENERATION_CONFIG = {
+    "temperature": 0.2,
+    "max_tokens": 350,
+    "top_p": 0.8,
+}
+OLLAMA_MAX_PREDICT = GENERATION_CONFIG["max_tokens"]
+OLLAMA_TEMPERATURE = GENERATION_CONFIG["temperature"]
+MOCTAR_SYSTEM_PROMPT = (
+    "Tu es M.O.C.T.A.R, l'OS personnel et copilote d'ingénierie de Moctar. "
+    "Tu opères sur un Dell Precision M4800 et gères son infrastructure : "
+    "DevOps, Linux, Solaire/Énergie, IoT, Projets. "
+    "Tu aides Moctar dans ses activites quotidiennes. "
+    "Réponds en français directement dès le premier mot : aucune politesse, phrase de transition ou conclusion inutile. "
+    "Sois précis et factuel ; privilégie les commandes Bash/Python directes, "
+    "les métriques chiffrées et les listes courtes. "
+    "Limite la réponse à 2 à 4 phrases ou au bloc de code exact requis, sauf demande explicite de Moctar. "
+    "Pour une action système ou un calcul déterministe, exécute l'outil disponible "
+    "ou renvoie le résultat brut sans paraphrase. "
+    "Utilise les observations réelles et le contexte pertinent ; n'invente aucun fait ni résultat d'action."
+)
 OLLAMA_STOP = ("Observation:", "<|im_end|>", "\n\nUser:")
 HYBRID_OLLAMA_TIMEOUT_SECONDS = 15.0
 logger = logging.getLogger("jarvis.ai")
@@ -165,11 +183,11 @@ def _ollama_chat_url(base_url):
 
 
 def _ollama_inference_options(max_predict=OLLAMA_MAX_PREDICT, temperature=OLLAMA_TEMPERATURE):
-    """Keep compact-model replies deterministic with enough room for tool JSON."""
+    """Keep local inference concise while respecting smaller caller budgets."""
     return {
-        "num_predict": max(384, min(int(max_predict), OLLAMA_MAX_PREDICT)),
-        "temperature": max(0.1, min(float(temperature), 0.2)),
-        "top_p": 0.9,
+        "num_predict": max(1, min(int(max_predict), GENERATION_CONFIG["max_tokens"])),
+        "temperature": max(0.1, min(float(temperature), GENERATION_CONFIG["temperature"])),
+        "top_p": GENERATION_CONFIG["top_p"],
         "stop": list(OLLAMA_STOP),
     }
 
@@ -727,15 +745,7 @@ class LocalBrain:
 
     @staticmethod
     def _assistant_system_prompt(mode):
-        base = (
-            "Tu es M.O.C.T.A.R, assistant personnel francophone. "
-            "Tu aides Moctar dans ses activites quotidiennes, son organisation, ses projets, ses decisions pratiques, "
-            "sa communication et son travail. "
-            "Tu utilises le contexte local fourni seulement s'il est pertinent. "
-            "Tu reponds directement, clairement, sans flatterie ni preambule inutile. "
-            "Tu n'inventes pas de faits locaux absents du contexte. "
-            "Quand une reponse pratique est possible, tu privilegies des actions concretes et coherentes."
-        )
+        base = MOCTAR_SYSTEM_PROMPT
         specifics = {
             "question": (
                 " Reponds en une ou deux phrases maximum. "
@@ -765,12 +775,12 @@ class LocalBrain:
     @staticmethod
     def _assistant_runtime_settings(mode):
         if mode == "question":
-            return {"max_predict": 96, "temperature": 0.15}
+            return {"max_predict": 96, "temperature": GENERATION_CONFIG["temperature"]}
         if mode in {"productivity", "project"}:
-            return {"max_predict": 180, "temperature": 0.22}
+            return {"max_predict": 180, "temperature": GENERATION_CONFIG["temperature"]}
         if mode in {"strategy", "writing"}:
-            return {"max_predict": 220, "temperature": 0.32}
-        return {"max_predict": 160, "temperature": 0.25}
+            return {"max_predict": 220, "temperature": GENERATION_CONFIG["temperature"]}
+        return {"max_predict": 160, "temperature": GENERATION_CONFIG["temperature"]}
 
     def _ask_personal_assistant(
         self,
@@ -1275,8 +1285,7 @@ def ask_ollama(
         {
             "role": "system",
             "content": system_prompt or (
-                "Tu es M.O.C.T.A.R, un assistant personnel francophone, utile au quotidien. "
-                "Reponds clairement, naturellement et de facon concise. N'invente rien. "
+                MOCTAR_SYSTEM_PROMPT + " "
                 "Pour les sujets medicaux, juridiques ou financiers, signale les limites et conseille une verification professionnelle."
             ),
         },
@@ -1538,7 +1547,7 @@ class AIBrain:
         Args:
             messages: Historique des messages au format [{"role": "...", "content": "..."}].
             tools: Schémas JSON des outils disponibles au format OpenAI/Ollama.
-            temperature: Température d'échantillonnage (0.15 pour Ollama, 0.2 pour OpenAI).
+            temperature: Température d'échantillonnage (0.2 par defaut).
 
         Returns:
             Dict[str, Any] normalisé :
@@ -1625,7 +1634,9 @@ class AIBrain:
                     contents.append({"role": gemini_role, "parts": parts})
 
             generation_config = {
-                "temperature": temperature, "max_output_tokens": OLLAMA_MAX_PREDICT,
+                "temperature": temperature,
+                "max_output_tokens": GENERATION_CONFIG["max_tokens"],
+                "top_p": GENERATION_CONFIG["top_p"],
                 "automatic_function_calling": {"disable": True},
                 "http_options": {"timeout": max(1, int(self.timeout * 1000))},
             }
@@ -1746,7 +1757,8 @@ class AIBrain:
             "model": self.model,
             "messages": list(messages),
             "temperature": temperature,
-            "max_tokens": 512,
+            "max_tokens": GENERATION_CONFIG["max_tokens"],
+            "top_p": GENERATION_CONFIG["top_p"],
         }
         if tools:
             payload["tools"] = list(tools)

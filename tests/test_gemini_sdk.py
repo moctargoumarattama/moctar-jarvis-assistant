@@ -37,6 +37,9 @@ def test_real_sdk_serializes_the_tool_catalog_and_observations():
             assert first["finish_reason"] == "tool_calls"
             assert first["tool_calls"][0]["name"] == "get_time_response"
             assert len(requests[0]["tools"][0]["functionDeclarations"]) == len(tools)
+            assert requests[0]["generationConfig"] == {
+                "temperature": 0.2, "maxOutputTokens": 350, "topP": 0.8,
+            }
 
             messages.extend([
                 {"role": "assistant", "content": "", "tool_calls": [{
@@ -48,6 +51,7 @@ def test_real_sdk_serializes_the_tool_catalog_and_observations():
             second = brain.chat(messages, tools=tools)
 
     assert second["content"] == "Observation recue."
+    assert requests[1]["generationConfig"] == requests[0]["generationConfig"]
     observation = requests[1]["contents"][-1]["parts"][0]["functionResponse"]
     assert observation["name"] == "get_time_response"
     assert observation["response"] == {"success": True, "message": "12:00"}

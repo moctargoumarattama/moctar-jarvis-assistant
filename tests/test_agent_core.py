@@ -80,12 +80,18 @@ class AgentCoreTests(unittest.TestCase):
     def test_prompt_is_compact_and_retains_operational_and_safety_rules(self):
         self.assertLess(len(AGENT_SYSTEM_PROMPT), 2000)
         for rule in (
+            "l'OS personnel et copilote d'ingénierie de Moctar", "Dell Precision M4800",
+            "DevOps, Linux, Solaire/Énergie, IoT, Projets", "directement dès le premier mot",
+            "aucune politesse, phrase de transition ou conclusion inutile", "commandes Bash/Python",
+            "2 à 4 phrases", "demande explicite de Moctar", "calcul déterministe",
+            "résultat brut sans paraphrase",
             "Ne fais JAMAIS de promesse", "APPELLE DIRECTEMENT L'OUTIL au premier tour",
             "observations réelles déjà obtenues", "uniquement l'hôte mesuré",
-            "[État Opérationnel]", "[Recommandations M.O.C.T.A.R]", "1 à 3",
             "confirmations requises",
         ):
             self.assertIn(rule, AGENT_SYSTEM_PROMPT)
+        self.assertNotIn("[État Opérationnel]", AGENT_SYSTEM_PROMPT)
+        self.assertNotIn("[Recommandations M.O.C.T.A.R]", AGENT_SYSTEM_PROMPT)
 
     def test_native_brain_receives_deterministic_agent_temperature(self):
         brain = Mock()
@@ -95,7 +101,7 @@ class AgentCoreTests(unittest.TestCase):
         result = agent.run("Explique le fonctionnement du solaire")
 
         self.assertEqual("Réponse disponible.", result.response)
-        self.assertEqual(0.15, brain.chat.call_args.kwargs["temperature"])
+        self.assertEqual(0.2, brain.chat.call_args.kwargs["temperature"])
 
     def test_direct_response_without_tool(self):
         chat = ScriptedChat([assistant_response("Le ciel est bleu a cause de la diffusion de la lumiere.")])
@@ -112,10 +118,7 @@ class AgentCoreTests(unittest.TestCase):
             "system_telemetry": {"cpu_percent": 17.5, "memory_percent": 42.0, "disk_percent": 63.0},
             "collected_at": "2026-10-14T18:00:00+01:00",
         }
-        expected = (
-            "[État Opérationnel]\nCPU 17.5 %, RAM 42.0 %, disque 63.0 % : vert.\n"
-            "[Recommandations M.O.C.T.A.R]\nSurveiller l'espace disque."
-        )
+        expected = "CPU 17.5 %, RAM 42.0 %, disque 63.0 %."
         handler = Mock()
         self.register("get_system_telemetry", handler)
         chat = ScriptedChat([assistant_response(expected)])
@@ -130,8 +133,7 @@ class AgentCoreTests(unittest.TestCase):
         self.assertIn("observations réelles déjà obtenues", system_content)
         self.assertIn("uniquement l'hôte mesuré", system_content)
         self.assertIn("APPELLE DIRECTEMENT L'OUTIL au premier tour", system_content)
-        self.assertIn("[État Opérationnel]", system_content)
-        self.assertIn("[Recommandations M.O.C.T.A.R]", system_content)
+        self.assertIn("résultat brut sans paraphrase", system_content)
         handler.assert_not_called()
 
     def test_action_promise_is_retried_before_returning_a_result(self):
@@ -221,7 +223,7 @@ class AgentCoreTests(unittest.TestCase):
         tool_messages = [message for message in second_request_messages if message["role"] == "tool"]
         self.assertEqual(1, len(tool_messages))
         self.assertIn("Il est 14:30.", tool_messages[0]["content"])
-        self.assertTrue(all(call["kwargs"]["temperature"] == 0.15 for call in chat.calls))
+        self.assertTrue(all(call["kwargs"]["temperature"] == 0.2 for call in chat.calls))
 
     def test_two_successive_tool_calls(self):
         time_handler = Mock(return_value="Il est 15:00.")
