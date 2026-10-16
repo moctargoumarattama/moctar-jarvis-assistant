@@ -520,6 +520,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertEqual(call_kwargs["data"]["language"], "fr")
             self.assertEqual(call_kwargs["data"]["temperature"], "0.0")
             self.assertIn("prompt", call_kwargs["data"])
+            self.assertIn("Transcription stricte en français", call_kwargs["data"]["prompt"])
 
 
 if __name__ == "__main__":

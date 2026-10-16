@@ -315,6 +315,8 @@ def transcribe_groq_api(audio_path: str | os.PathLike[str], api_key: str | None 
     url = "https://api.groq.com/openai/v1/audio/transcriptions"
     model = os.environ.get("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
 
+    prompt_fr = "Transcription stricte en français. Moctar, Yo Moctar, Jarvis, assistant vocal personnel."
+
     # Essai 1 : SDK groq si présent
     try:
         from groq import Groq  # type: ignore[import-not-found]
@@ -326,7 +328,7 @@ def transcribe_groq_api(audio_path: str | os.PathLike[str], api_key: str | None 
                 model=model,
                 language="fr",
                 temperature=0.0,
-                prompt="Moctar, Yo Moctar, Jarvis, assistant vocal personnel.",
+                prompt=prompt_fr,
                 response_format="json",
             )
         text = str(getattr(resp, "text", "") or "").strip()
@@ -346,7 +348,7 @@ def transcribe_groq_api(audio_path: str | os.PathLike[str], api_key: str | None 
         "model": model,
         "language": "fr",
         "temperature": "0.0",
-        "prompt": "Moctar, Yo Moctar, Jarvis, assistant vocal personnel.",
+        "prompt": prompt_fr,
         "response_format": "json",
     }
 
