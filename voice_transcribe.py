@@ -198,13 +198,81 @@ def read_wav_pcm(path: str | os.PathLike[str]) -> np.ndarray | None:
         return None
 
 
+HALLUCINATION_SUBSTRINGS = (
+    "sous-titres",
+    "sous titres",
+    "amara.org",
+    "merci d'avoir regardé",
+    "merci d avoir regarde",
+    "merci d'avoir écouté",
+    "au revoir youtube",
+    "abonnez-vous",
+    "abonnez vous",
+    "likez et partagez",
+    "n'oubliez pas de vous abonner",
+    "traduit par",
+    "transcription par",
+    "subtitles by",
+    "thank you for watching",
+    "thanks for watching",
+)
+
+HALLUCINATION_EXACT_PHRASES = {
+    "youtube",
+    "merci",
+    "merci.",
+    "merci !",
+    "au revoir",
+    "au revoir.",
+    "bye",
+    "...",
+    ".",
+}
+
+
+def filter_whisper_hallucinations(text: str) -> str:
+    """Élimine les hallucinations récurrentes de Whisper sur du silence ou du bruit de fond."""
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not cleaned:
+        return ""
+    lowered = cleaned.lower().strip(" .,!?:;\"'()-[]{}")
+    if not lowered or lowered in HALLUCINATION_EXACT_PHRASES:
+        return ""
+    for pattern in HALLUCINATION_SUBSTRINGS:
+        if pattern in lowered:
+            return ""
+    # Rejeter les répétitions dégénérées d'un même mot ou symbole bruité
+    tokens = [tok for tok in re.split(r"\W+", lowered) if tok]
+    if not tokens:
+        return ""
+    if len(tokens) >= 4 and len(set(tokens)) == 1:
+        return ""
+    return cleaned
+
+
+def is_silent_pcm(samples: Any, rms_threshold: float = 0.002) -> bool:
+    """Détecte un tableau PCM mono silencieux avant d'appeler Whisper."""
+    try:
+        import numpy as np
+
+        if not isinstance(samples, np.ndarray):
+            return False
+        if samples.size == 0:
+            return True
+        rms = float(np.sqrt(np.mean(np.square(samples.astype(np.float32)))))
+        peak = float(np.max(np.abs(samples)))
+        return rms < rms_threshold and peak < 0.01
+    except Exception:
+        return False
+
+
 def load_audio(path: str | os.PathLike[str]) -> np.ndarray | str:
     """Prefer direct PCM decoding; leave other supported formats to faster-whisper."""
     samples = read_wav_pcm(path)
     return samples if samples is not None else str(path)
 
 
-def transcribe_audio(audio_path: str | os.PathLike[str]) -> str:
+def transcribe_audio(audio_path: str | os.PathLike[str], *, allow_empty: bool = False) -> str:
     """Transcrire l'audio fourni avec le modèle local résolu, CPU/int8, deux threads."""
     audio = Path(audio_path)
     if not _readable_asset(audio):
@@ -212,14 +280,29 @@ def transcribe_audio(audio_path: str | os.PathLike[str]) -> str:
     readiness = is_voice_ready()
     if not readiness["ready"]:
         raise RuntimeError(readiness["reason"])
+    loaded_audio = load_audio(audio)
+    if is_silent_pcm(loaded_audio):
+        return ""
     factory, _ = _dependency()
     model = factory(readiness["model_path"], device="cpu", compute_type="int8",
                     cpu_threads=2, num_workers=1, local_files_only=True)
-    segments, _ = model.transcribe(load_audio(audio), language="fr", beam_size=1, best_of=1,
-                                   vad_filter=True, condition_on_previous_text=False)
+    segments, _ = model.transcribe(
+        loaded_audio,
+        language="fr",
+        beam_size=1,
+        best_of=1,
+        vad_filter=True,
+        condition_on_previous_text=False,
+        no_speech_threshold=0.6,
+    )
     pieces: list[str] = []
     size = 0
+    filtered_noise_or_hallucination = False
     for segment in segments:
+        no_speech_prob = getattr(segment, "no_speech_prob", None)
+        if isinstance(no_speech_prob, (int, float)) and float(no_speech_prob) >= 0.6:
+            filtered_noise_or_hallucination = True
+            continue
         piece = segment.text.strip()
         if not piece:
             continue
@@ -227,8 +310,13 @@ def transcribe_audio(audio_path: str | os.PathLike[str]) -> str:
         if size > 1000:
             raise ValueError("Transcription trop longue.")
         pieces.append(piece)
-    text = " ".join(pieces).strip()
+    raw_text = " ".join(pieces).strip()
+    text = filter_whisper_hallucinations(raw_text)
+    if raw_text and not text:
+        filtered_noise_or_hallucination = True
     if not text:
+        if allow_empty or filtered_noise_or_hallucination:
+            return ""
         raise ValueError("Aucune parole reconnue.")
     return text
 

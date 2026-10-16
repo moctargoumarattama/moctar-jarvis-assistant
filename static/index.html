@@ -2066,6 +2066,35 @@
         })();
       }
 
+      window.handleVoiceInteractResult = function(data) {
+        if (!data || data.ignored) return;
+        if (data.user_text) {
+          appendChatMessage('user', data.user_text, null, null);
+        }
+        let targetUrl = data.url;
+        let targetTitle = data.title || '';
+        if (!targetUrl && Array.isArray(data.tools_used)) {
+          for (const tu of data.tools_used) {
+            if (tu.data && tu.data.action === 'open_browser' && tu.data.url) {
+              targetUrl = tu.data.url;
+              targetTitle = tu.data.title || targetTitle;
+              break;
+            }
+          }
+        }
+        let replyText = data.reply_text || '';
+        if (targetUrl) {
+          try { window.open(targetUrl, '_blank', 'noopener,noreferrer'); } catch {}
+          const openNotice = `🌐 Ouverture de ${targetTitle ? targetTitle + ' (' + targetUrl + ')' : targetUrl} dans un nouvel onglet.`;
+          if (!replyText.includes('🌐')) {
+            replyText = (replyText ? replyText + '\n\n' : '') + openNotice;
+          }
+        }
+        if (replyText) {
+          appendChatMessage('assistant', replyText, data.thought_chain, data.tools_used);
+        }
+      };
+
       function renderBrowserVoice(phase, detail = {}) {
         const active = (window.jarvisVoice?.listeningDesired ?? window.jarvisVoice?.enabled) === true;
         const messages = {
@@ -2156,7 +2185,12 @@
           Recognition: window.SpeechRecognition || window.webkitSpeechRecognition,
           mediaDevices: window.navigator?.mediaDevices,
           MediaRecorder: window.MediaRecorder,
+          AudioContext: window.AudioContext || window.webkitAudioContext,
+          Audio: window.Audio,
+          preferWebAudio: Boolean(window.navigator?.brave || (window.navigator?.mediaDevices && window.MediaRecorder)),
+          interactUrl: '/api/voice/interact',
           transcribeUrl: '/api/voice/transcribe',
+          onInteractResult: window.handleVoiceInteractResult,
           onState: renderBrowserVoice,
           onPrompt: text => sendJarvisPrompt(text, 'web_voice'),
           speak: speakJarvisText,

@@ -570,3 +570,108 @@ test('Brave network block or >3s starting stall switches automatically to MediaR
   assert.deepEqual(f.prompts, ['quel est le statut CPU']);
 });
 
+test('WebAudio VAD starts MediaRecorder on speech, stops after 800ms silence, calls /api/voice/interact and plays Audio', async t => {
+  let currentRms = 0;
+  let recorderState = 'inactive';
+  let interactCalls = 0;
+  let audioPlayedUrl = null;
+  let finishAudioPlayback = null;
+  const interactResults = [];
+
+  class FakeAnalyser {
+    constructor() { this.fftSize = 512; }
+    get currentRms() { return currentRms; }
+  }
+  class FakeAudioContext {
+    constructor() { this.state = 'running'; }
+    createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+    createAnalyser() { return new FakeAnalyser(); }
+    close() {}
+  }
+  class FakeMediaRecorder {
+    static isTypeSupported() { return true; }
+    constructor(stream, opts = {}) {
+      this.stream = stream;
+      this.mimeType = opts.mimeType || 'audio/webm';
+      this.state = 'inactive';
+    }
+    start() {
+      this.state = 'recording';
+      recorderState = 'recording';
+    }
+    stop() {
+      if (this.state === 'inactive') return;
+      this.state = 'inactive';
+      recorderState = 'inactive';
+      this.ondataavailable?.({ data: { size: 2048, type: this.mimeType } });
+      this.onstop?.();
+    }
+  }
+  class FakeAudio {
+    constructor(url) {
+      this.url = url;
+      audioPlayedUrl = url;
+      finishAudioPlayback = () => this.onended?.();
+    }
+    play() { return Promise.resolve(); }
+    pause() {}
+  }
+
+  const f = fixture(t, {
+    preferWebAudio: true,
+    mediaDevices: {
+      getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }),
+    },
+    MediaRecorder: FakeMediaRecorder,
+    AudioContext: FakeAudioContext,
+    Audio: FakeAudio,
+    vadPollMs: 50,
+    vadSilenceMs: 800,
+    vadThreshold: 0.02,
+    onInteractResult: (payload) => interactResults.push(payload),
+    fetch: async (url) => {
+      assert.equal(url, '/api/voice/interact');
+      interactCalls += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          ignored: false,
+          user_text: 'quel est le statut CPU',
+          reply_text: 'Tous les cœurs CPU sont nominaux, Moctar.',
+          audio_url: '/api/voice/tts/cache/abcdef0123456789abcdef.mp3',
+          session_active: true,
+        }),
+      };
+    },
+  });
+
+  await f.engine.enable();
+  await f.settle();
+  assert.equal(f.engine.usingFallback, true);
+  assert.equal(f.engine.state, 'wake');
+
+  // 1. L'utilisateur commence à parler (RMS > 0.02) -> Soleil passe en 'listening' et MediaRecorder démarre
+  currentRms = 0.15;
+  f.time.advance(50);
+  await f.settle();
+  assert.equal(recorderState, 'recording');
+  assert.equal(f.engine.state, 'listening');
+
+  // 2. Silence de 800 ms après la parole -> arrêt de MediaRecorder et envoi à /api/voice/interact
+  currentRms = 0.001;
+  f.time.advance(800);
+  await f.settle();
+  assert.equal(recorderState, 'inactive');
+  assert.equal(interactCalls, 1);
+  assert.equal(interactResults.length, 1);
+  assert.equal(audioPlayedUrl, '/api/voice/tts/cache/abcdef0123456789abcdef.mp3');
+  assert.equal(f.engine.state, 'speaking');
+
+  // 3. Fin de la lecture Audio -> retour automatique en attente de la prochaine phrase
+  finishAudioPlayback();
+  await f.settle();
+  assert.equal(f.engine.state, 'listening');
+});
+
+

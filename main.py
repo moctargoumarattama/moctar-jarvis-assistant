@@ -97,8 +97,8 @@ async def synthesize_edge_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> byte
     return bytes(audio_buffer)
 
 
-async def generate_cached_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> tuple[bytes, bool]:
-    """Retourne (mp3_bytes, cache_hit) avec mise en cache mémoire et disque."""
+async def generate_cached_tts_with_key(text: str, voice: str = DEFAULT_TTS_VOICE) -> tuple[bytes, bool, str]:
+    """Retourne (mp3_bytes, cache_hit, cache_key) avec mise en cache mémoire et disque."""
     cleaned = clean_tts_text(text)
     if not cleaned:
         raise ValueError("Le texte à synthétiser est vide.")
@@ -106,7 +106,7 @@ async def generate_cached_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> tupl
     cache_key = hashlib.sha256(f"{selected_voice}:{cleaned}".encode("utf-8")).hexdigest()
 
     if cache_key in _TTS_MEMORY_CACHE:
-        return _TTS_MEMORY_CACHE[cache_key], True
+        return _TTS_MEMORY_CACHE[cache_key], True, cache_key
 
     cache_file = get_tts_cache_dir() / f"{cache_key}.mp3"
     try:
@@ -116,7 +116,7 @@ async def generate_cached_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> tupl
                 if len(_TTS_MEMORY_CACHE) >= _TTS_CACHE_MAX_ITEMS:
                     _TTS_MEMORY_CACHE.pop(next(iter(_TTS_MEMORY_CACHE)), None)
                 _TTS_MEMORY_CACHE[cache_key] = data
-                return data, True
+                return data, True, cache_key
     except OSError:
         pass
 
@@ -128,7 +128,50 @@ async def generate_cached_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> tupl
         await asyncio.to_thread(cache_file.write_bytes, audio_bytes)
     except OSError:
         pass
-    return audio_bytes, False
+    return audio_bytes, False, cache_key
+
+
+async def generate_cached_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> tuple[bytes, bool]:
+    """Retourne (mp3_bytes, cache_hit) avec mise en cache mémoire et disque."""
+    audio_bytes, cache_hit, _ = await generate_cached_tts_with_key(text, voice)
+    return audio_bytes, cache_hit
+
+
+_VOICE_WAKE_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:yo|hey|ok|bonjour|salut|dis|écoute|ecoute)\s+)?(?:moctar|moktar|mokhtar|elmo)\b[\s,.:;!?-]*",
+    re.IGNORECASE,
+)
+_VOICE_WAKE_ANYWHERE_RE = re.compile(
+    r"\b(?:yo\s+moctar|moctar|moktar|mokhtar|yo\s+elmo|elmo)\b[\s,.:;!?-]*",
+    re.IGNORECASE,
+)
+
+
+def extract_voice_interact_command(transcript: str, session_active: bool = False) -> tuple[bool, str, bool]:
+    """Vérifie le mot-clé ('Moctar', 'Yo Moctar', 'ELMo') ou une session vocale ouverte.
+
+    Retourne (accepted, command_text, wake_word_detected).
+    """
+    filtered = voice_transcribe.filter_whisper_hallucinations(transcript)
+    if not filtered:
+        return False, "", False
+
+    prefix_match = _VOICE_WAKE_PREFIX_RE.match(filtered)
+    if prefix_match:
+        remainder = filtered[prefix_match.end():].strip(" ,.:;!?-")
+        command = remainder if remainder else "Dis-moi que tu es à l'écoute en une phrase courte."
+        return True, command, True
+
+    anywhere_match = _VOICE_WAKE_ANYWHERE_RE.search(filtered)
+    if anywhere_match:
+        remainder = filtered[anywhere_match.end():].strip(" ,.:;!?-")
+        command = remainder if remainder else filtered
+        return True, command, True
+
+    if session_active:
+        return True, filtered, False
+
+    return False, "", False
 
 
 def _extract_multipart_audio(raw_body: bytes, content_type_header: str) -> tuple[bytes, str]:
@@ -241,7 +284,13 @@ async def transcribe_direct_audio(audio_bytes: bytes, content_type: str = "audio
             await asyncio.to_thread(handle.write, audio_bytes)
         converted_path = await asyncio.to_thread(_convert_audio_for_whisper, tmp_path, content_type)
         target_path = converted_path if converted_path is not None else tmp_path
-        return await asyncio.to_thread(voice_transcribe.transcribe_audio, target_path)
+        try:
+            raw_text = await asyncio.to_thread(voice_transcribe.transcribe_audio, target_path)
+        except ValueError as exc:
+            if "aucune parole" in str(exc).lower():
+                return ""
+            raise
+        return voice_transcribe.filter_whisper_hallucinations(raw_text)
     finally:
         tmp_path.unlink(missing_ok=True)
         if converted_path is not None:
@@ -845,6 +894,174 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "text": transcript,
                 "language": "fr",
                 "engine": "faster-whisper",
+            }
+        )
+
+    @application.get("/api/voice/tts/cache/{filename}")
+    async def voice_tts_cache_file(
+        filename: Annotated[str, APIPath(pattern=r"^[a-fA-F0-9]{16,64}\.mp3$")],
+    ):
+        cache_key = filename[:-4].lower()
+        if cache_key in _TTS_MEMORY_CACHE:
+            return Response(
+                content=_TTS_MEMORY_CACHE[cache_key],
+                media_type="audio/mpeg",
+                headers={"X-TTS-Cache": "HIT", "X-TTS-Voice": DEFAULT_TTS_VOICE},
+            )
+        cache_file = get_tts_cache_dir() / f"{cache_key}.mp3"
+        if cache_file.is_file():
+            try:
+                data = await asyncio.to_thread(cache_file.read_bytes)
+                if data:
+                    return Response(
+                        content=data,
+                        media_type="audio/mpeg",
+                        headers={"X-TTS-Cache": "HIT", "X-TTS-Voice": DEFAULT_TTS_VOICE},
+                    )
+            except OSError:
+                pass
+        raise HTTPException(404, "Fichier audio TTS introuvable en cache")
+
+    @application.post("/api/voice/interact")
+    async def voice_interact_endpoint(request: Request):
+        raw_content_type = request.headers.get("content-type", "")
+        content_type = raw_content_type.split(";", 1)[0].strip().lower()
+        max_bytes = 12 * 1024 * 1024
+        length = request.headers.get("content-length")
+        if length:
+            try:
+                if int(length) > max_bytes or int(length) < 0:
+                    raise HTTPException(413, "Audio trop volumineux (12 Mio maximum)")
+            except ValueError:
+                raise HTTPException(400, "Content-Length invalide") from None
+
+        body = bytearray()
+        async with asyncio.timeout(30):
+            async for chunk in request.stream():
+                if len(body) + len(chunk) > max_bytes:
+                    raise HTTPException(413, "Audio trop volumineux (12 Mio maximum)")
+                body.extend(chunk)
+
+        if not body:
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "ignored": True,
+                    "reason": "empty_audio",
+                    "user_text": "",
+                    "reply_text": "",
+                    "audio_url": None,
+                    "session_active": False,
+                }
+            )
+
+        audio_bytes = bytes(body)
+        detected_mime = content_type or "audio/webm"
+        if content_type == "multipart/form-data":
+            try:
+                audio_bytes, detected_mime = _extract_multipart_audio(audio_bytes, raw_content_type)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from None
+        elif content_type and content_type not in DIRECT_AUDIO_MIME_TYPES:
+            raise HTTPException(415, "Format audio non supporté (attendu: WAV, WebM, OGG, MP3 ou multipart/form-data)")
+
+        try:
+            transcript = await transcribe_direct_audio(audio_bytes, detected_mime)
+        except ValueError:
+            transcript = ""
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from None
+        except Exception as exc:
+            LOGGER.warning("Erreur de transcription faster-whisper sur /api/voice/interact : %s", exc)
+            raise HTTPException(500, f"Échec de transcription : {exc}") from None
+
+        if not transcript:
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "ignored": True,
+                    "reason": "silence_or_hallucination",
+                    "user_text": "",
+                    "reply_text": "",
+                    "audio_url": None,
+                    "session_active": False,
+                }
+            )
+
+        runtime: Runtime = application.state.runtime
+        header_session = request.headers.get("x-voice-session-active", "").strip().lower() in {"1", "true", "yes"}
+        query_session = request.query_params.get("session_active", "").strip().lower() in {"1", "true", "yes"}
+        runtime_session = getattr(runtime, "voice_session_until", 0.0) > time.monotonic()
+        session_active = header_session or query_session or runtime_session
+
+        accepted, command_text, wake_detected = extract_voice_interact_command(
+            transcript,
+            session_active=session_active,
+        )
+        if not accepted or not command_text:
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "ignored": True,
+                    "reason": "wake_word_missing",
+                    "user_text": transcript,
+                    "reply_text": "",
+                    "audio_url": None,
+                    "session_active": False,
+                }
+            )
+
+        runtime.voice_session_until = time.monotonic() + 60.0
+
+        agent_result: dict[str, Any] = {}
+        if runtime.jarvis:
+            try:
+                agent_result = await runtime.jarvis.execute_prompt_async(
+                    user_input=command_text,
+                    source="web_voice",
+                )
+            except Exception as exc:
+                LOGGER.warning("Erreur AgentCore lors de /api/voice/interact : %s", exc)
+                agent_result = {
+                    "status": "error",
+                    "reply": "Je suis à l'écoute Moctar, mais une erreur interne est survenue.",
+                }
+        else:
+            agent_result = {
+                "status": "offline",
+                "reply": "Je suis en ligne Moctar, mais le module AgentCore n'est pas initialisé.",
+            }
+
+        reply_text = str(
+            agent_result.get("reply")
+            or agent_result.get("response")
+            or "Bien reçu, Moctar."
+        ).strip()
+
+        audio_url: str | None = None
+        try:
+            _, _, cache_key = await generate_cached_tts_with_key(reply_text, DEFAULT_TTS_VOICE)
+            audio_url = f"/api/voice/tts/cache/{cache_key}.mp3"
+        except Exception as exc:
+            LOGGER.warning("Synthèse edge-tts indisponible sur /api/voice/interact : %s", exc)
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "ignored": False,
+                "user_text": command_text,
+                "raw_transcript": transcript,
+                "reply_text": reply_text,
+                "audio_url": audio_url,
+                "session_active": True,
+                "wake_word_detected": wake_detected,
+                "action": agent_result.get("action"),
+                "url": agent_result.get("url"),
+                "title": agent_result.get("title"),
+                "tools_used": agent_result.get("tools_used", []),
+                "thought_chain": agent_result.get("thought_chain", []),
+                "fallback_mode": bool(agent_result.get("fallback_mode")),
+                "model_offline": bool(agent_result.get("model_offline")),
             }
         )
 

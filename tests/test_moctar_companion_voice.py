@@ -1,25 +1,41 @@
-"""Tests unitaires pour les endpoints vocaux M.O.C.T.A.R (/api/voice/tts, /api/voice/transcribe)
-et l'agent compagnon natif Windows HP (clients/hp_companion/moctar_hp_agent.py).
+"""Tests unitaires pour l'interaction vocale native Web M.O.C.T.A.R :
+- /api/voice/interact (cycle complet : transcription faster-whisper -> wake-word / session -> AgentCore -> edge-tts + cache audio_url)
+- Anti-hallucination Whisper et rejet propre des fichiers audio silencieux
+- /api/voice/tts, /api/voice/tts/cache/{filename} et /api/voice/transcribe
 """
 from __future__ import annotations
 
 import copy
+import io
 import os
 import struct
 import tempfile
 import unittest
+import wave
 from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi.testclient import TestClient
 
 import main
-from clients.hp_companion import moctar_hp_agent as hp_agent
+import voice_transcribe
 from config import Settings
 from main import create_app
 from test_api import local_snapshot
+from test_voice_transcribe import local_model
+
+
+def encode_pcm16_wav(pcm_bytes: bytes, sample_rate: int = 16000) -> bytes:
+    """Construit un conteneur WAV mono 16-bit PCM valide en mémoire."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm_bytes)
+    return buf.getvalue()
 
 
 class MoctarVoiceEndpointsTests(unittest.TestCase):
@@ -57,7 +73,6 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertEqual(first.content, fake_mp3)
             synth_mock.assert_awaited_once_with("Bonjour Moctar , système opérationnel.", "fr-FR-HenriNeural")
 
-            # Deuxième appel identique -> servi depuis le cache local sans rappeler edge-tts
             second = self.client.post(
                 "/api/voice/tts",
                 json={"text": "Bonjour **Moctar**, système opérationnel.", "voice": "fr-FR-HenriNeural"},
@@ -82,7 +97,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
         self.assertEqual(empty.status_code, 422)
 
     def test_voice_transcribe_accepts_direct_wav_and_webm_blobs(self) -> None:
-        wav_bytes = hp_agent.encode_pcm16_wav(struct.pack("<hhhh", 0, 1200, -1200, 0))
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 0, 1200, -1200, 0))
         with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Moctar ouvre YouTube") as whisper_mock:
             res_wav = self.client.post(
                 "/api/voice/transcribe",
@@ -105,7 +120,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertEqual(res_webm.json()["text"], "Yo Moctar ouvre YouTube")
 
     def test_voice_transcribe_accepts_multipart_form_upload(self) -> None:
-        wav_bytes = hp_agent.encode_pcm16_wav(struct.pack("<hhhh", 500, -500, 500, -500))
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 500, -500, 500, -500))
         boundary = "----MoctarBoundary987654"
         multipart_body = (
             f"--{boundary}\r\n"
@@ -135,57 +150,107 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             415,
         )
 
+    def test_silent_audio_upload_and_whisper_hallucinations_are_ignored(self) -> None:
+        """Simule l'envoi d'un fichier audio silencieux et d'hallucinations Whisper ('Au revoir YouTube', etc.)."""
+        silent_wav = encode_pcm16_wav(struct.pack("<" + "h" * 1600, *([0] * 1600)))
+        silent_path = self.temp_dir / "silence.wav"
+        silent_path.write_bytes(silent_wav)
 
-class MoctarHPCompanionAgentTests(unittest.TestCase):
-    def test_wake_word_extraction_supports_moctar_yo_moctar_and_elmo(self) -> None:
-        self.assertEqual(hp_agent.extract_wake_command("Yo Moctar quel est le statut CPU"), (True, "quel est le statut CPU"))
-        self.assertEqual(hp_agent.extract_wake_command("Moctar, ouvre GitHub"), (True, "ouvre GitHub"))
-        self.assertEqual(hp_agent.extract_wake_command("ELMo vérifie la RAM"), (True, "vérifie la RAM"))
-        self.assertEqual(hp_agent.extract_wake_command("Yo Moctar"), (True, ""))
-        self.assertEqual(hp_agent.extract_wake_command("Bonjour tout le monde"), (False, ""))
+        model_dir = local_model(self.temp_dir / "models" / "whisper")
+        engine = Mock()
+        factory = Mock(return_value=engine)
 
-    def test_rms_and_wav_encoding(self) -> None:
-        silence = struct.pack("<hhhh", 0, 0, 0, 0)
-        loud = struct.pack("<hhhh", 16384, -16384, 16384, -16384)
-        self.assertAlmostEqual(hp_agent.compute_rms(silence), 0.0, places=5)
-        self.assertAlmostEqual(hp_agent.compute_rms(loud), 0.5, places=2)
-        wav_data = hp_agent.encode_pcm16_wav(loud)
-        self.assertTrue(wav_data.startswith(b"RIFF"))
+        with patch.object(voice_transcribe, "APP_DIR", self.temp_dir), patch.object(
+            voice_transcribe, "_dependency", return_value=(factory, False)
+        ):
+            # 1. Un WAV PCM silencieux est ignoré immédiatement sans déclencher Whisper
+            self.assertEqual(voice_transcribe.transcribe_audio(silent_path), "")
+            factory.assert_not_called()
 
-    def test_companion_agent_pipeline_transcribes_queries_and_plays_tts(self) -> None:
-        session = MagicMock()
-        played_Buffers: list[bytes] = []
+            # 2. Une hallucination Whisper sur un flux bruité est filtrée avec no_speech_threshold=0.6
+            loud_wav = encode_pcm16_wav(struct.pack("<hhhh", 0, 12000, -12000, 0))
+            loud_path = self.temp_dir / "noisy.wav"
+            loud_path.write_bytes(loud_wav)
+            for hallucination in (
+                "Au revoir YouTube",
+                "Sous-titres réalisés par la communauté d'Amara.org",
+                "Merci d'avoir regardé cette vidéo !",
+                "Abonnez-vous à la chaîne",
+            ):
+                engine.transcribe.return_value = (iter([SimpleNamespace(text=hallucination, no_speech_prob=0.1)]), None)
+                self.assertEqual(voice_transcribe.transcribe_audio(loud_path), "")
+                kwargs = engine.transcribe.call_args.kwargs
+                self.assertFalse(kwargs["condition_on_previous_text"])
+                self.assertEqual(kwargs["no_speech_threshold"], 0.6)
 
-        def fake_post(url, **kwargs):
-            if url.endswith("/api/voice/transcribe"):
-                return SimpleNamespace(
-                    raise_for_status=lambda: None,
-                    json=lambda: {"ok": True, "text": "Yo Moctar donne l'état du serveur"},
-                )
-            if url.endswith("/api/jarvis/query"):
-                return SimpleNamespace(
-                    raise_for_status=lambda: None,
-                    json=lambda: {"status": "ok", "reply": "Tous les systèmes sont nominaux, Moctar."},
-                )
-            if url.endswith("/api/voice/tts"):
-                return SimpleNamespace(
-                    raise_for_status=lambda: None,
-                    content=b"ID3-FAKE-MP3-AUDIO",
-                )
-            raise AssertionError(f"Unexpected URL: {url}")
+            # 3. Envoi du fichier silencieux sur /api/voice/interact -> ignoré sans appeler AgentCore ni TTS
+            jarvis_mock = AsyncMock()
+            self.app.state.runtime.jarvis = SimpleNamespace(execute_prompt_async=jarvis_mock)
+            resp = self.client.post(
+                "/api/voice/interact",
+                content=silent_wav,
+                headers={"Content-Type": "audio/wav"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertTrue(body["ok"])
+            self.assertTrue(body["ignored"])
+            self.assertEqual(body["user_text"], "")
+            self.assertEqual(body["reply_text"], "")
+            self.assertIsNone(body["audio_url"])
+            jarvis_mock.assert_not_awaited()
 
-        session.post.side_effect = fake_post
-        agent = hp_agent.MoctarHPCompanionAgent(
-            server_url="https://moctar.klasora.com",
-            session=session,
-            audio_player=lambda data: (played_Buffers.append(data) or True),
+    def test_voice_interact_full_cycle_from_audio_to_agent_and_cached_tts(self) -> None:
+        """Valide le cycle complet de /api/voice/interact : audio -> Whisper -> AgentCore -> edge-tts -> audio_url."""
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 2000, -2000, 2000, -2000))
+        fake_mp3 = b"ID3\x04\x00\x00\x00\x00\x00\x1fMOCTAR-INTERACT-TTS-MP3"
+        jarvis_mock = AsyncMock(
+            return_value={
+                "status": "success",
+                "reply": "Tous les services du Dell Precision sont actifs, Moctar.",
+                "tools_used": ["get_system_metrics"],
+                "thought_chain": ["Vérification des services"],
+            }
         )
-        wav_bytes = hp_agent.encode_pcm16_wav(struct.pack("<hhhh", 4000, -4000, 4000, -4000))
-        reply = agent.handle_phrase_audio(wav_bytes)
-        self.assertEqual(reply, "Tous les systèmes sont nominaux, Moctar.")
-        self.assertEqual(played_Buffers, [b"ID3-FAKE-MP3-AUDIO"])
+        self.app.state.runtime.jarvis = SimpleNamespace(execute_prompt_async=jarvis_mock)
+
+        with patch(
+            "main.voice_transcribe.transcribe_audio",
+            return_value="Yo Moctar donne-moi l'état des services",
+        ) as whisper_mock, patch(
+            "main.synthesize_edge_tts",
+            new=AsyncMock(return_value=fake_mp3),
+        ) as tts_mock:
+            resp = self.client.post(
+                "/api/voice/interact",
+                content=wav_bytes,
+                headers={"Content-Type": "audio/wav"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertTrue(data["ok"])
+            self.assertFalse(data["ignored"])
+            self.assertEqual(data["user_text"], "donne-moi l'état des services")
+            self.assertEqual(data["reply_text"], "Tous les services du Dell Precision sont actifs, Moctar.")
+            self.assertTrue(data["audio_url"].startswith("/api/voice/tts/cache/"))
+            self.assertTrue(data["audio_url"].endswith(".mp3"))
+            self.assertTrue(data["session_active"])
+            whisper_mock.assert_called_once()
+            jarvis_mock.assert_awaited_once_with(
+                user_input="donne-moi l'état des services",
+                source="web_voice",
+            )
+            tts_mock.assert_awaited_once_with(
+                "Tous les services du Dell Precision sont actifs, Moctar.",
+                "fr-FR-HenriNeural",
+            )
+
+            # Le dashboard peut télécharger directement l'audio généré via data["audio_url"]
+            audio_resp = self.client.get(data["audio_url"])
+            self.assertEqual(audio_resp.status_code, 200)
+            self.assertEqual(audio_resp.headers["content-type"], "audio/mpeg")
+            self.assertEqual(audio_resp.content, fake_mp3)
 
 
 if __name__ == "__main__":
     unittest.main()
-

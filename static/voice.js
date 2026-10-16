@@ -32,12 +32,23 @@
       .filter((item) => item.length).sort((a, b) => b.length - a.length);
     const mediaDevices = opts.mediaDevices || (typeof window === 'object' && window && window.navigator ? window.navigator.mediaDevices : null);
     const MediaRecorderClass = opts.MediaRecorder || (typeof window === 'object' && window ? window.MediaRecorder : null);
+    const AudioContextClass = opts.AudioContext || (typeof window === 'object' && window ? (window.AudioContext || window.webkitAudioContext) : null);
+    const AudioPlayerClass = opts.Audio || (typeof window === 'object' && window && typeof window.Audio === 'function' ? window.Audio : (typeof Audio === 'function' ? Audio : null));
     const fetchImpl = opts.fetch || (typeof window === 'object' && window && typeof window.fetch === 'function' ? window.fetch.bind(window) : null);
     const transcribeUrl = opts.transcribeUrl || '/api/voice/transcribe';
+    const interactUrl = opts.interactUrl || '/api/voice/interact';
+    const onInteractResult = typeof opts.onInteractResult === 'function' ? opts.onInteractResult : null;
     const braveWatchdogMs = typeof opts.braveWatchdogMs === 'number' ? opts.braveWatchdogMs : 3000;
+    const vadSilenceMs = typeof opts.vadSilenceMs === 'number' ? opts.vadSilenceMs : 800;
+    const vadPollMs = typeof opts.vadPollMs === 'number' ? opts.vadPollMs : 50;
+    const vadThreshold = typeof opts.vadThreshold === 'number' ? opts.vadThreshold : 0.02;
+    const isBraveBrowser = Boolean(
+      opts.isBrave || (typeof window === 'object' && window && window.navigator && window.navigator.brave)
+    );
     const hasRecorderFallback = Boolean(
       mediaDevices && typeof mediaDevices.getUserMedia === 'function' && MediaRecorderClass
     );
+    const preferWebAudio = Boolean((opts.preferWebAudio || isBraveBrowser) && hasRecorderFallback);
     let recognition = null;
     let usingFallback = false;
     let enabled = false;
@@ -58,6 +69,7 @@
     let stopTimer = null;
     let braveTimer = null;
     let stuck = false;
+    let activeAudioPlayer = null;
     const finalResults = new Set();
     const stoppedWaiters = [];
 
@@ -110,19 +122,52 @@
       requestStop();
     }
 
+    function playAudioUrl(audioUrl) {
+      if (!audioUrl || !AudioPlayerClass) return Promise.resolve(false);
+      return new Promise((resolve) => {
+        let settled = false;
+        const player = new AudioPlayerClass(audioUrl);
+        activeAudioPlayer = player;
+        const finish = (ok) => {
+          if (settled) return;
+          settled = true;
+          if (activeAudioPlayer === player) activeAudioPlayer = null;
+          try { player.pause?.(); } catch {}
+          resolve(ok);
+        };
+        player.onended = () => finish(true);
+        player.onerror = () => finish(false);
+        try {
+          const playPromise = player.play();
+          if (playPromise && typeof playPromise.then === 'function') {
+            playPromise.catch(() => finish(false));
+          }
+        } catch {
+          finish(false);
+        }
+      });
+    }
+
     async function transcribeRecordedBlob(blob) {
       if (typeof opts.transcribe === 'function') {
         return opts.transcribe(blob);
       }
       if (!fetchImpl) return '';
       const mime = (blob && blob.type) ? blob.type : 'audio/webm';
-      const response = await fetchImpl(transcribeUrl, {
+      const targetUrl = (AudioContextClass || opts.interactUrl) ? interactUrl : transcribeUrl;
+      const response = await fetchImpl(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': mime },
+        headers: {
+          'Content-Type': mime,
+          'X-Voice-Session-Active': (phase === 'listening' || manual) ? 'true' : 'false',
+        },
         body: blob,
       });
       if (!response || !response.ok) return '';
       const payload = await response.json();
+      if (payload && typeof payload === 'object' && ('ignored' in payload || 'reply_text' in payload)) {
+        return payload;
+      }
       return String(payload && payload.text || '').trim();
     }
 
@@ -131,20 +176,57 @@
       let stream = null;
       let recorder = null;
       let chunkTimer = null;
+      let vadTimer = null;
+      let audioCtx = null;
+      let analyser = null;
+      let sourceNode = null;
+      let timeDomainData = null;
+      let isSpeechActive = false;
+      let silenceAccumMs = 0;
+      let processingBlob = false;
       let resultIndex = 0;
       let chunks = [];
       const sliceMs = typeof opts.recorderSliceMs === 'number' ? opts.recorderSliceMs : 2600;
+
+      function pickMimeType() {
+        let mimeType = 'audio/webm';
+        if (MediaRecorderClass && typeof MediaRecorderClass.isTypeSupported === 'function') {
+          for (const candidate of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/wav']) {
+            if (MediaRecorderClass.isTypeSupported(candidate)) {
+              mimeType = candidate;
+              break;
+            }
+          }
+        }
+        return mimeType;
+      }
 
       function cleanupStream() {
         if (chunkTimer !== null) {
           cancel(chunkTimer);
           chunkTimer = null;
         }
+        if (vadTimer !== null) {
+          cancel(vadTimer);
+          vadTimer = null;
+        }
+        isSpeechActive = false;
+        silenceAccumMs = 0;
         if (recorder) {
           try {
             if (recorder.state && recorder.state !== 'inactive') recorder.stop();
           } catch {}
           recorder = null;
+        }
+        if (sourceNode) {
+          try { sourceNode.disconnect?.(); } catch {}
+          sourceNode = null;
+        }
+        analyser = null;
+        timeDomainData = null;
+        if (audioCtx) {
+          try { audioCtx.close?.(); } catch {}
+          audioCtx = null;
         }
         if (stream && typeof stream.getTracks === 'function') {
           try {
@@ -154,15 +236,65 @@
         stream = null;
       }
 
+      async function handleInteractPayload(payload) {
+        if (!active || destroyed || !payload) return;
+        if (payload.ignored || !payload.reply_text) {
+          if (active && !destroyed) {
+            emit(phase, {
+              fallback: 'mediarecorder',
+              message: phase === 'wake' ? 'Dites « Yo Moctar » ou « ELMo ».' : 'Je vous écoute…',
+            });
+          }
+          return;
+        }
+        const current = { generation };
+        job = current;
+        clearTimer('followup');
+        try {
+          onInteractResult?.(payload);
+          emit('speaking', {
+            fallback: 'mediarecorder',
+            transcript: payload.user_text || '',
+            reply: payload.reply_text || '',
+            audioUrl: payload.audio_url || null,
+            message: 'M.O.C.T.A.R vous parle…',
+          });
+          let played = false;
+          if (payload.audio_url) {
+            played = await playAudioUrl(payload.audio_url);
+          }
+          if (!played && payload.reply_text) {
+            await speak(payload.reply_text);
+          }
+          if (generation !== current.generation || destroyed || suspended) return;
+          openFollowup();
+        } finally {
+          if (job === current) job = null;
+          if (active && !destroyed && !suspended) {
+            emit(phase, {
+              fallback: 'mediarecorder',
+              message: phase === 'wake' ? 'Dites « Yo Moctar » ou « ELMo ».' : 'Je vous écoute…',
+            });
+          }
+        }
+      }
+
       async function flushPhrase(blobParts, mimeType) {
         if (!active || destroyed || !blobParts.length) return;
         const blob = (blobParts.length === 1 && blobParts[0] && typeof blobParts[0].size === 'number')
           ? blobParts[0]
           : (typeof Blob === 'function' ? new Blob(blobParts, { type: mimeType || 'audio/webm' }) : blobParts[0]);
-        if (!blob || (typeof blob.size === 'number' && blob.size < 256)) return;
+        if (!blob || (typeof blob.size === 'number' && blob.size < 128)) return;
+        processingBlob = true;
         try {
-          const transcript = await transcribeRecordedBlob(blob);
-          if (!active || destroyed || !transcript) return;
+          const outcome = await transcribeRecordedBlob(blob);
+          if (!active || destroyed || !outcome) return;
+          if (typeof outcome === 'object') {
+            await handleInteractPayload(outcome);
+            return;
+          }
+          const transcript = String(outcome).trim();
+          if (!transcript) return;
           const idx = resultIndex++;
           const item = [{ transcript, confidence: 0.98 }];
           item.isFinal = true;
@@ -170,21 +302,103 @@
           results[idx] = item;
           results.length = idx + 1;
           adapter.onresult?.({ resultIndex: idx, results });
-        } catch {}
+        } catch {} finally {
+          processingBlob = false;
+        }
+      }
+
+      function computeAnalyserRms() {
+        if (!analyser) return 0;
+        if (typeof analyser.currentRms === 'number') return analyser.currentRms;
+        if (typeof analyser.getByteTimeDomainData === 'function' && timeDomainData) {
+          analyser.getByteTimeDomainData(timeDomainData);
+          let sumSq = 0;
+          for (let i = 0; i < timeDomainData.length; i += 1) {
+            const v = (timeDomainData[i] - 128) / 128;
+            sumSq += v * v;
+          }
+          return Math.sqrt(sumSq / timeDomainData.length);
+        }
+        return 0;
+      }
+
+      function startPhraseRecorder() {
+        if (!active || destroyed || !stream) return false;
+        if (recorder && recorder.state === 'recording') return true;
+        chunks = [];
+        const mimeType = pickMimeType();
+        try {
+          recorder = new MediaRecorderClass(stream, { mimeType });
+        } catch {
+          recorder = new MediaRecorderClass(stream);
+        }
+        recorder.ondataavailable = (ev) => {
+          if (ev && ev.data && (typeof ev.data.size !== 'number' || ev.data.size > 0)) {
+            chunks.push(ev.data);
+          }
+        };
+        recorder.onstop = () => {
+          const captured = chunks.splice(0);
+          const type = (recorder && recorder.mimeType) || mimeType;
+          recorder = null;
+          void flushPhrase(captured, type);
+        };
+        try {
+          recorder.start();
+          return true;
+        } catch (err) {
+          adapter.onerror?.({ error: err && err.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture' });
+          adapter.abort();
+          return false;
+        }
+      }
+
+      function scheduleVadPoll() {
+        if (!active || destroyed || !stream || !analyser) return;
+        vadTimer = delay(() => {
+          vadTimer = null;
+          if (!active || destroyed || !stream || !analyser) return;
+          if (!processingBlob && !job && !busy) {
+            const rms = computeAnalyserRms();
+            if (rms > vadThreshold) {
+              silenceAccumMs = 0;
+              if (!isSpeechActive) {
+                if (startPhraseRecorder()) {
+                  isSpeechActive = true;
+                  emit('listening', {
+                    fallback: 'mediarecorder',
+                    vad: true,
+                    rms,
+                    message: 'Je vous écoute…',
+                  });
+                  adapter.onspeechstart?.();
+                }
+              }
+            } else if (isSpeechActive) {
+              silenceAccumMs += vadPollMs;
+              if (silenceAccumMs >= vadSilenceMs) {
+                isSpeechActive = false;
+                silenceAccumMs = 0;
+                emit('processing', {
+                  fallback: 'mediarecorder',
+                  message: 'M.O.C.T.A.R prépare la réponse…',
+                });
+                if (recorder && recorder.state === 'recording') {
+                  try { recorder.stop(); } catch {}
+                }
+              }
+            }
+          }
+          if (active && !destroyed && stream) {
+            scheduleVadPoll();
+          }
+        }, vadPollMs);
       }
 
       function scheduleCycle() {
         if (!active || destroyed || !stream) return;
         chunks = [];
-        let mimeType = 'audio/webm';
-        if (typeof MediaRecorderClass.isTypeSupported === 'function') {
-          for (const candidate of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']) {
-            if (MediaRecorderClass.isTypeSupported(candidate)) {
-              mimeType = candidate;
-              break;
-            }
-          }
-        }
+        const mimeType = pickMimeType();
         try {
           recorder = new MediaRecorderClass(stream, { mimeType });
         } catch {
@@ -240,6 +454,24 @@
               }
               stream = mediaStream;
               adapter.onstart?.({});
+              if (AudioContextClass) {
+                try {
+                  audioCtx = new AudioContextClass();
+                  if (audioCtx.state === 'suspended' && typeof audioCtx.resume === 'function') {
+                    Promise.resolve(audioCtx.resume()).catch(() => {});
+                  }
+                  sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+                  analyser = audioCtx.createAnalyser();
+                  analyser.fftSize = 512;
+                  analyser.smoothingTimeConstant = 0.2;
+                  sourceNode.connect(analyser);
+                  timeDomainData = new Uint8Array(analyser.fftSize || 512);
+                  scheduleVadPoll();
+                  return;
+                } catch {
+                  analyser = null;
+                }
+              }
               scheduleCycle();
             })
             .catch((err) => {
@@ -523,7 +755,11 @@
       }
     }
 
-    if (opts.Recognition) {
+    if (preferWebAudio) {
+      usingFallback = true;
+      recognition = createRecorderRecognition();
+      wireRecognition(recognition);
+    } else if (opts.Recognition) {
       try {
         recognition = new opts.Recognition();
         recognition.lang = opts.language || 'fr-FR';
@@ -582,6 +818,10 @@
         manual = false;
         phase = 'wake';
         fault = null;
+        if (activeAudioPlayer) {
+          try { activeAudioPlayer.pause?.(); } catch {}
+          activeAudioPlayer = null;
+        }
         clearTimers();
         requestStop();
         emit('off');
