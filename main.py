@@ -144,15 +144,26 @@ VOICE_BUTLER_GREETINGS = (
 )
 _WAKE_ONLY_SENTINEL = "__MOCTAR_WAKE_ONLY__"
 
+_VOICE_WAKE_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|et\s+vous|you)\s+)?"
+    r"(?:yo\s+moctar|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|"
+    r"m['’]?occupe\s+tard|m['’]?occaque|moccupe\s+tard|moccaque|"
+    r"jarvis|elmo)\b[\s,.:;!?-]*",
+    re.IGNORECASE,
+)
 _VOICE_WAKE_ANYWHERE_RE = re.compile(
-    r"\b(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute)\s+)?"
-    r"(yo\s+moctar|moctar|moktar|mokhtar|mouctar|mouktar|motard|jarvis|elmo|yo\s+elmo|allo\s+moctar|dis\s+moctar)\b[\s,.:;!?-]*",
+    r"\b(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|et\s+vous|you)\s+)?"
+    r"(yo\s+moctar|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|"
+    r"m['’]?occupe\s+tard|m['’]?occaque|moccupe\s+tard|moccaque|"
+    r"jarvis|elmo|yo\s+elmo|allo\s+moctar|dis\s+moctar)\b[\s,.:;!?-]*",
     re.IGNORECASE,
 )
-_VOICE_PURE_GREETING_RE = re.compile(
-    r"^[\s,.:;!?-]*(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|oui)*[\s,.:;!?-]*$",
-    re.IGNORECASE,
-)
+_VOICE_FILLER_WORDS = {
+    "yo", "hey", "ok", "bonjour", "salut", "dis", "allo", "ecoute", "oui",
+    "et", "vous", "you", "tout", "le", "monde",
+    "moctar", "moktar", "mokta", "mokhtar", "mouctar", "mouktar", "motard",
+    "moccupe", "m'occupe", "tard", "moccaque", "m'occaque", "jarvis", "elmo",
+}
 
 
 def _strip_accents_1to1(value: str) -> str:
@@ -160,6 +171,14 @@ def _strip_accents_1to1(value: str) -> str:
     import unicodedata
 
     return "".join(unicodedata.normalize("NFD", ch)[0] for ch in value)
+
+
+def _is_pure_filler_or_wake(text: str) -> bool:
+    """Vérifie si une chaîne ne contient que des formules d'appel, répétitions de nom ou politesses."""
+    tokens = [tok.strip(" ,.:;!?-'\u2019").lower() for tok in re.split(r"[\s,.:;!?-]+", text) if tok.strip(" ,.:;!?-'\u2019")]
+    if not tokens:
+        return True
+    return all(tok in _VOICE_FILLER_WORDS for tok in tokens)
 
 
 def extract_voice_interact_command(transcript: str, session_active: bool = False) -> tuple[bool, str, bool]:
@@ -177,12 +196,12 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
     if anywhere_match:
         before = filtered[:anywhere_match.start()].strip(" ,.:;!?-")
         after = filtered[anywhere_match.end():].strip(" ,.:;!?-")
-        if _VOICE_PURE_GREETING_RE.match(_strip_accents_1to1(before)):
+        if _is_pure_filler_or_wake(before):
             before = ""
-        if _VOICE_PURE_GREETING_RE.match(_strip_accents_1to1(after)):
+        if _is_pure_filler_or_wake(after):
             after = ""
         remainder = f"{before} {after}".strip(" ,.:;!?-")
-        if not remainder:
+        if not remainder or _is_pure_filler_or_wake(remainder):
             return True, _WAKE_ONLY_SENTINEL, True
         return True, remainder, True
 

@@ -299,6 +299,7 @@ def transcribe_audio(audio_path: str | os.PathLike[str], *, allow_empty: bool = 
         vad_filter=True,
         condition_on_previous_text=False,
         no_speech_threshold=0.6,
+        initial_prompt="Moctar, Yo Moctar, Jarvis, ELMo, assistant vocal personnel de Moctar.",
     )
     pieces: list[str] = []
     size = 0

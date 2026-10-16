@@ -8,7 +8,8 @@
 
   const DEFAULT_WAKE_WORDS = [
     'yo moctar', 'hey moctar', 'allo moctar', 'dis moctar', 'ok moctar', 'salut moctar',
-    'moctar', 'moktar', 'mokhtar', 'mouctar', 'mouktar', 'motard', 'jarvis',
+    'moctar', 'moktar', 'mokta', 'mokhtar', 'mouctar', 'mouktar', 'motard',
+    "m'occupe tard", 'moccupe tard', "m'occaque", 'moccaque', 'jarvis',
     'yo elmo', 'hey elmo', 'hey el mo', 'el mo', 'elmo',
   ];
   const FOLLOWUP_MS = 45000;

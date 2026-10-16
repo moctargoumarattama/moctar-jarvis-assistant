@@ -305,12 +305,44 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
                 ("Quel est le statut réseau Mokhtar ?", "Quel est le statut réseau"),
                 ("Peux-tu vérifier les services Mouctar", "Peux-tu vérifier les services"),
                 ("Allô Moctar ouvre YouTube", "ouvre YouTube"),
+                ("et vous m'occupe tard donne le statut", "donne le statut"),
             ):
                 self.app.state.runtime.voice_session_until = 0.0
                 accepted, cmd, detected = main.extract_voice_interact_command(variant_phrase, session_active=False)
                 self.assertTrue(accepted, variant_phrase)
                 self.assertTrue(detected, variant_phrase)
                 self.assertEqual(cmd, expected_cmd, variant_phrase)
+
+            # 4. Approximations de dictionnaire du log live ("Mokta", "m'occupe tard", "m'occaque") sans ordre -> réponse majordome
+            for live_whisper_log in (
+                "tout le monde. Mokta. Mokta. Mokta.",
+                "You, m'occaque. You.",
+                "et vous m'occupe tard.",
+            ):
+                self.app.state.runtime.voice_session_until = 0.0
+                accepted, cmd, detected = main.extract_voice_interact_command(live_whisper_log, session_active=False)
+                self.assertTrue(accepted, live_whisper_log)
+                self.assertTrue(detected, live_whisper_log)
+                self.assertEqual(cmd, main._WAKE_ONLY_SENTINEL, live_whisper_log)
+
+    def test_transcribe_audio_passes_initial_prompt_to_bias_moctar(self) -> None:
+        """Vérifie que transcribe_audio injecte initial_prompt pour biaiser le décodeur de Whisper vers 'Moctar'."""
+        local_model(self.temp_dir / "models" / "whisper")
+        loud_wav = encode_pcm16_wav(struct.pack("<hhhh", 0, 10000, -10000, 0))
+        loud_path = self.temp_dir / "speech.wav"
+        loud_path.write_bytes(loud_wav)
+        engine = Mock()
+        engine.transcribe.return_value = (iter([SimpleNamespace(text="Moctar à l'écoute", no_speech_prob=0.05)]), None)
+        factory = Mock(return_value=engine)
+
+        with patch.object(voice_transcribe, "APP_DIR", self.temp_dir), patch.object(
+            voice_transcribe, "_dependency", return_value=(factory, False)
+        ):
+            text = voice_transcribe.transcribe_audio(loud_path)
+            self.assertEqual(text, "Moctar à l'écoute")
+            kwargs = engine.transcribe.call_args.kwargs
+            self.assertIn("initial_prompt", kwargs)
+            self.assertIn("Moctar", kwargs["initial_prompt"])
 
 
 if __name__ == "__main__":
