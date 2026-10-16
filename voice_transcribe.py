@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 APP_DIR = Path("/opt/noc-dashboard")
-MODEL_NAMES = ("tiny", "base")
+MODEL_NAMES = ("base", "tiny")
 
 
 def _dependency() -> tuple[Any, bool]:
@@ -151,10 +151,10 @@ def is_voice_ready() -> dict[str, Any]:
     download_available indique une capacité logicielle, pas un modèle installé
     ni un accès réseau garanti. À appeler via --check dans le Python vocal.
     """
-    requested = os.environ.get("NOC_WHISPER_MODEL", "tiny").strip().lower()
+    requested = os.environ.get("NOC_WHISPER_MODEL", "base").strip().lower()
     expected = os.environ.get("NOC_WHISPER_MODEL_PATH", "").strip() or str(APP_DIR / "models" / "whisper")
     result = {"status": "disabled", "ready": False,
-              "model": requested if requested in MODEL_NAMES else "tiny",
+              "model": requested if requested in MODEL_NAMES else "base",
               "model_path": str(Path(expected).expanduser().absolute()),
               "reason": "", "download_available": False}
     enabled = os.environ.get("NOC_VOICE_ENABLED", "true").strip().lower()
@@ -294,8 +294,8 @@ def transcribe_audio(audio_path: str | os.PathLike[str], *, allow_empty: bool = 
     segments, _ = model.transcribe(
         loaded_audio,
         language="fr",
-        beam_size=1,
-        best_of=1,
+        beam_size=5,
+        best_of=5,
         vad_filter=True,
         condition_on_previous_text=False,
         no_speech_threshold=0.6,

@@ -55,7 +55,37 @@ MOCTAR_SYSTEM_PROMPT = (
     "Utilise les observations réelles et le contexte pertinent ; n'invente aucun fait ni résultat d'action."
 )
 PROVIDER_FAILURE_TTL_SECONDS = 30.0
+GEMINI_BACKUP_MODEL = "gemini-2.5-flash"
+GEMINI_COURTESY_OFFLINE_REPLY = (
+    "Je subis une micro-coupure de liaison avec le serveur neural, mais je reste en ligne Moctar."
+)
 logger = logging.getLogger("jarvis.ai")
+
+
+def _is_gemini_503_or_server_error(exc: Any) -> bool:
+    """Détecte les erreurs 503, indisponibilités temporaires ou surcharges de serveur Gemini."""
+    if exc is None:
+        return False
+    code = getattr(exc, "code", None) or getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
+    if code in {500, 502, 503, 504}:
+        return True
+    exc_type = type(exc).__name__.lower()
+    if any(k in exc_type for k in ("servererror", "serviceunavailable", "unavailable")):
+        return True
+    msg = str(exc).lower()
+    if any(marker in msg for marker in (
+        "503",
+        "unavailable",
+        "service unavailable",
+        "overloaded",
+        "resource exhausted",
+        "server error",
+        "bad gateway",
+        "gateway timeout",
+        "temporarily unavailable",
+    )):
+        return True
+    return False
 
 
 class AIRequestError(RuntimeError):
@@ -1208,6 +1238,8 @@ def safe_ask_ai(prompt, fallback="Je ne peux pas utiliser l'IA pour le moment.",
         return ask_ai(prompt, **kwargs)
     except Exception as exc:
         logger.warning("Échec requête Gemini: %s", exc, exc_info=True)
+        if _is_gemini_503_or_server_error(exc):
+            return GEMINI_COURTESY_OFFLINE_REPLY
         return fallback
 
 
@@ -1283,8 +1315,11 @@ class AIBrain:
         )
 
     def _record_provider_result(self, provider, result):
-        online = bool(isinstance(result, dict) and result.get("finish_reason") != "error"
-                      and (result.get("content") or result.get("tool_calls")))
+        if isinstance(result, dict) and result.get("fallback_courtesy"):
+            online = False
+        else:
+            online = bool(isinstance(result, dict) and result.get("finish_reason") != "error"
+                          and (result.get("content") or result.get("tool_calls")))
         self._provider_online[provider] = online
         self._provider_checked_at[provider] = time.monotonic()
         if online:
@@ -1474,8 +1509,16 @@ class AIBrain:
             )
         except Exception as exc:
             logger.warning("Échec appel Gemini: %s", exc, exc_info=True)
-            result = {"content": "Le moteur IA est indisponible pour le moment.",
-                      "tool_calls": [], "finish_reason": "error"}
+            if _is_gemini_503_or_server_error(exc):
+                result = {
+                    "content": GEMINI_COURTESY_OFFLINE_REPLY,
+                    "tool_calls": [],
+                    "finish_reason": "stop",
+                    "fallback_courtesy": True,
+                }
+            else:
+                result = {"content": "Le moteur IA est indisponible pour le moment.",
+                          "tool_calls": [], "finish_reason": "error"}
         self._record_provider_result("gemini", result)
         return result
 
@@ -1570,31 +1613,88 @@ class AIBrain:
             contents = [genai_types.Content(
                 role=content["role"], parts=[genai_types.Part.model_validate(part) for part in content["parts"]],
             ) for content in contents]
+            active_model = self.gemini_model
+            current_config = generation_config
+            response = None
+
+            def _call_gemini_generate(model_name: str, config_obj: Any) -> Any:
+                return self.gemini_client.models.generate_content(
+                    model=model_name, contents=contents, config=config_obj,
+                )
+
             try:
-                response = self.gemini_client.models.generate_content(
-                    model=self.gemini_model, contents=contents, config=generation_config,
-                )
+                response = _call_gemini_generate(active_model, current_config)
             except Exception as exc:
-                detail = str(exc).lower()
-                bad_tool_schema = getattr(exc, "code", None) == 400 and any(
-                    marker in detail for marker in ("function_declarations", "function declaration", "json schema", "tools[")
-                ) and "deadline" not in detail
-                has_tool_history = any(message.get("role") == "tool" or message.get("tool_calls")
-                                       or message.get("_gemini_parts") for message in messages)
-                if not tools or not bad_tool_schema or has_tool_history:
-                    raise
-                logger.warning("Échec appel Gemini: %s", exc, exc_info=True)
-                # Retry only schema rejection, before any action; never retry auth/quota errors.
-                generation_config = generation_config.model_copy(update={
-                    "tools": None, "tool_config": None,
-                    "system_instruction": "\n\n".join(instructions + [
-                        "Les outils sont indisponibles pour cet appel. Réponds directement avec les informations "
-                        "disponibles ; ne prétends pas exécuter une action et n'invente aucune mesure."
-                    ]),
-                })
-                response = self.gemini_client.models.generate_content(
-                    model=self.gemini_model, contents=contents, config=generation_config,
-                )
+                if _is_gemini_503_or_server_error(exc):
+                    logger.warning(
+                        "Gemini 503 / ServerError détecté sur le modèle %s: %s. Pause de 1.0s avant réessai...",
+                        active_model,
+                        exc,
+                    )
+                    time.sleep(1.0)
+                    try:
+                        response = _call_gemini_generate(active_model, current_config)
+                    except Exception as retry_exc:
+                        if _is_gemini_503_or_server_error(retry_exc):
+                            logger.warning(
+                                "Échec du réessai 503 sur %s: %s. Basculement sur le modèle de secours %s...",
+                                active_model,
+                                retry_exc,
+                                GEMINI_BACKUP_MODEL,
+                            )
+                            if active_model != GEMINI_BACKUP_MODEL:
+                                backup_config = current_config.model_copy(update={"thinking_config": None})
+                                try:
+                                    response = _call_gemini_generate(GEMINI_BACKUP_MODEL, backup_config)
+                                    active_model = GEMINI_BACKUP_MODEL
+                                except Exception as backup_exc:
+                                    if _is_gemini_503_or_server_error(backup_exc):
+                                        logger.warning(
+                                            "Échec persistant du serveur Gemini (%s puis %s): %s. "
+                                            "Renvoi immédiat de la réponse de courtoisie vocale.",
+                                            active_model,
+                                            GEMINI_BACKUP_MODEL,
+                                            backup_exc,
+                                        )
+                                        return {
+                                            "content": GEMINI_COURTESY_OFFLINE_REPLY,
+                                            "tool_calls": [],
+                                            "finish_reason": "stop",
+                                            "fallback_courtesy": True,
+                                        }
+                                    raise
+                            else:
+                                logger.warning(
+                                    "Échec persistant Gemini 503 sur %s. Renvoi de la réponse de courtoisie vocale.",
+                                    active_model,
+                                )
+                                return {
+                                    "content": GEMINI_COURTESY_OFFLINE_REPLY,
+                                    "tool_calls": [],
+                                    "finish_reason": "stop",
+                                    "fallback_courtesy": True,
+                                }
+                        else:
+                            raise
+                else:
+                    detail = str(exc).lower()
+                    bad_tool_schema = getattr(exc, "code", None) == 400 and any(
+                        marker in detail for marker in ("function_declarations", "function declaration", "json schema", "tools[")
+                    ) and "deadline" not in detail
+                    has_tool_history = any(message.get("role") == "tool" or message.get("tool_calls")
+                                           or message.get("_gemini_parts") for message in messages)
+                    if not tools or not bad_tool_schema or has_tool_history:
+                        raise
+                    logger.warning("Échec appel Gemini: %s", exc, exc_info=True)
+                    # Retry only schema rejection, before any action; never retry auth/quota errors.
+                    current_config = current_config.model_copy(update={
+                        "tools": None, "tool_config": None,
+                        "system_instruction": "\n\n".join(instructions + [
+                            "Les outils sont indisponibles pour cet appel. Réponds directement avec les informations "
+                            "disponibles ; ne prétends pas exécuter une action et n'invente aucune mesure."
+                        ]),
+                    })
+                    response = _call_gemini_generate(active_model, current_config)
             candidates = response.candidates or []
             if not candidates or not candidates[0].content:
                 raise RuntimeError(f"Gemini returned no content (prompt_feedback={response.prompt_feedback})")
@@ -1626,6 +1726,13 @@ class AIBrain:
             return result
         except Exception as exc:
             logger.warning("Échec appel Gemini: %s", exc, exc_info=True)
+            if _is_gemini_503_or_server_error(exc):
+                return {
+                    "content": GEMINI_COURTESY_OFFLINE_REPLY,
+                    "tool_calls": [],
+                    "finish_reason": "stop",
+                    "fallback_courtesy": True,
+                }
             return error
 
     def _normalize_chat_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:

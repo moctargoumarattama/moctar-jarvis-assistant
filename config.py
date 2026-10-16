@@ -454,7 +454,7 @@ class Settings:
     whatsapp_max_audio_bytes: int = 8 * 1024 * 1024
     whatsapp_audio_seconds: int = 60
     voice_enabled: bool = True
-    whisper_model: str = "tiny"
+    whisper_model: str = "base"
     whisper_model_path: str = "/opt/jarvis/models/whisper"
     whisper_python: str = "/opt/jarvis/venv/bin/python"
     whisper_timeout: float = 120.0
@@ -505,7 +505,7 @@ class Settings:
             whatsapp_max_audio_bytes=int(_noc_number("NOC_WHATSAPP_MAX_AUDIO_BYTES", 8388608, 1024, 8388608)),
             whatsapp_audio_seconds=int(_noc_number("NOC_WHATSAPP_AUDIO_SECONDS", 60, 1, 60)),
             voice_enabled=_noc_boolean("NOC_VOICE_ENABLED", True),
-            whisper_model=os.environ.get("NOC_WHISPER_MODEL", "tiny") or "tiny",
+            whisper_model=os.environ.get("NOC_WHISPER_MODEL", "base") or "base",
             whisper_model_path=os.environ.get("NOC_WHISPER_MODEL_PATH", "/opt/jarvis/models/whisper") or "/opt/jarvis/models/whisper",
             whisper_python=os.environ.get("NOC_WHISPER_PYTHON", "/opt/jarvis/venv/bin/python"),
             whisper_timeout=_noc_number("NOC_WHISPER_TIMEOUT", 120, 5, 300),

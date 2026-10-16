@@ -341,8 +341,36 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             text = voice_transcribe.transcribe_audio(loud_path)
             self.assertEqual(text, "Moctar à l'écoute")
             kwargs = engine.transcribe.call_args.kwargs
+            self.assertEqual(kwargs["language"], "fr")
+            self.assertEqual(kwargs["beam_size"], 5)
+            self.assertEqual(kwargs["best_of"], 5)
             self.assertIn("initial_prompt", kwargs)
             self.assertIn("Moctar", kwargs["initial_prompt"])
+
+    def test_whisper_defaults_to_base_model(self) -> None:
+        """Vérifie que le modèle par défaut est 'base' dans config et voice_transcribe."""
+        self.assertEqual(self.settings.whisper_model, "base")
+        self.assertEqual(voice_transcribe.MODEL_NAMES[0], "base")
+
+    def test_gemini_503_fallback_courtesy_spoken_reply(self) -> None:
+        """Vérifie qu'en cas d'erreur 503 UNAVAILABLE, AIBrain bascule et renvoie la réponse de courtoisie vocale immédiate."""
+        import ai_brain
+
+        brain = ai_brain.AIBrain()
+        error_503 = Exception("503 UNAVAILABLE: The model is overloaded. Please try again later.")
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = error_503
+        brain.gemini_client = mock_client
+
+        with patch("time.sleep", return_value=None):
+            result = brain.chat("Bonjour")
+
+        self.assertEqual(result["finish_reason"], "stop")
+        self.assertEqual(
+            result["content"],
+            "Je subis une micro-coupure de liaison avec le serveur neural, mais je reste en ligne Moctar.",
+        )
+        self.assertTrue(result.get("fallback_courtesy"))
 
 
 if __name__ == "__main__":
