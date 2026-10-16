@@ -14,7 +14,10 @@ import os
 import re
 import wave
 from pathlib import Path
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 logger = logging.getLogger(__name__)
