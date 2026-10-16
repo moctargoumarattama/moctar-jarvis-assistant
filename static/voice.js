@@ -66,7 +66,7 @@
     const AudioPlayerClass = opts.Audio || (typeof win.Audio === 'function' ? win.Audio : (typeof Audio === 'function' ? Audio : null));
     const fetchImpl = opts.fetch || (typeof win.fetch === 'function' ? win.fetch.bind(win) : (typeof fetch === 'function' ? fetch : null));
     const interactUrl = opts.interactUrl || '/api/voice/interact';
-    const vadSilenceMs = typeof opts.vadSilenceMs === 'number' ? opts.vadSilenceMs : 850;
+    const vadSilenceMs = typeof opts.vadSilenceMs === 'number' ? opts.vadSilenceMs : 900;
     const vadThreshold = typeof opts.vadThreshold === 'number' ? opts.vadThreshold : 0.035;
     const minRecordingMs = typeof opts.minRecordingMs === 'number' ? opts.minRecordingMs : 1200;
     const maxSpeechMs = typeof opts.maxSpeechMs === 'number' ? opts.maxSpeechMs : 3500;
@@ -110,13 +110,35 @@
     let pendingStartPromise = null;
 
     const TARGET_SAMPLE_RATE = 16000;
-    const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.8); // 800 ms = 12800 échantillons à 16 kHz
+    const preRollMs = typeof opts.preRollMs === 'number' ? opts.preRollMs : 1000;
+    const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * (preRollMs / 1000)); // 1000 ms = 16000 échantillons à 16 kHz
     const preRollBuffer = new Float32Array(PRE_ROLL_SAMPLES);
     let preRollWriteIndex = 0;
     let preRollCount = 0;
     let activePcmChunks = [];
     let scriptNode = null;
     let silentGainNode = null;
+    let isAssistantSpeaking = false;
+    let echoDampeningTimer = null;
+
+    function clearPreRollBuffer() {
+      preRollWriteIndex = 0;
+      preRollCount = 0;
+      preRollBuffer.fill(0);
+    }
+
+    function releaseEchoLock() {
+      if (echoDampeningTimer !== null) {
+        cancel(echoDampeningTimer);
+        echoDampeningTimer = null;
+      }
+      clearPreRollBuffer();
+      echoDampeningTimer = delay(() => {
+        echoDampeningTimer = null;
+        clearPreRollBuffer();
+        isAssistantSpeaking = false;
+      }, 450);
+    }
 
     function downsampleTo16k(input, sourceRate) {
       if (!input || !input.length) return new Float32Array(0);
@@ -177,13 +199,18 @@
     }
 
     function handleAudioProcess(event) {
-      if (destroyed || suspended || status !== 'active') return;
+      if (destroyed || suspended || status !== 'active' || isAssistantSpeaking) {
+        if (isAssistantSpeaking) {
+          clearPreRollBuffer();
+        }
+        return;
+      }
       const input = event.inputBuffer.getChannelData(0);
       const srcRate = event.inputBuffer.sampleRate || (audioCtx && audioCtx.sampleRate) || 48000;
       const pcm16k = downsampleTo16k(input, srcRate);
 
       if (!isSpeaking) {
-        // Écoute passive : enregistre en continu dans le tampon circulaire pré-roll (800 ms)
+        // Écoute passive : enregistre en continu dans le tampon circulaire pré-roll (1000 ms)
         for (let i = 0; i < pcm16k.length; i++) {
           preRollBuffer[preRollWriteIndex] = pcm16k[i];
           preRollWriteIndex = (preRollWriteIndex + 1) % PRE_ROLL_SAMPLES;
@@ -475,8 +502,12 @@
         try { silentGainNode.disconnect?.(); } catch {}
         silentGainNode = null;
       }
-      preRollWriteIndex = 0;
-      preRollCount = 0;
+      if (echoDampeningTimer !== null) {
+        cancel(echoDampeningTimer);
+        echoDampeningTimer = null;
+      }
+      isAssistantSpeaking = false;
+      clearPreRollBuffer();
       activePcmChunks = [];
 
       if (sourceNode) {
@@ -580,6 +611,10 @@
         transcript: trimmed,
         message: isGreetingOnly ? `🔊 Moctar : "${GREETING}"` : THINKING_MESSAGE,
       });
+      if (isGreetingOnly) {
+        isAssistantSpeaking = true;
+        clearPreRollBuffer();
+      }
       try {
         if (isGreetingOnly) {
           await speakWithNativeSpeechSynthesis(GREETING);
@@ -595,6 +630,9 @@
           if (enabled || manual) openFollowup();
         }
       } finally {
+        if (isGreetingOnly) {
+          releaseEchoLock();
+        }
         if (job === current) job = null;
         reconcile();
       }
@@ -608,6 +646,12 @@
       if (!blob || (typeof blob.size === 'number' && blob.size < 64)) return;
 
       processingAudio = true;
+      isAssistantSpeaking = true;
+      if (echoDampeningTimer !== null) {
+        cancel(echoDampeningTimer);
+        echoDampeningTimer = null;
+      }
+      clearPreRollBuffer();
       // Réinitialisation immédiate du niveau RMS du Soleil dès l'envoi pour éviter toute dilatation bloquée
       currentRms = 0;
       updateSolarActivity(0, false);
@@ -623,14 +667,20 @@
         const response = await fetchImpl(interactUrl, {
           method: 'POST',
           headers: {
-            'Content-Type': (blob && blob.type) || mimeType || 'audio/webm',
+            'Content-Type': (blob && blob.type) || mimeType || 'audio/wav',
             'X-Voice-Session-Active': (phase === 'listening' || manual) ? 'true' : 'false',
           },
           body: blob,
         });
-        if (!response || !response.ok) return;
+        if (!response || !response.ok) {
+          releaseEchoLock();
+          return;
+        }
         const payload = await response.json();
-        if (!payload || destroyed || suspended) return;
+        if (!payload || destroyed || suspended) {
+          releaseEchoLock();
+          return;
+        }
 
         if (typeof payload.text === 'string' && payload.reply_text === undefined) {
           await handleLocalTextTranscript(payload.text);
@@ -638,6 +688,7 @@
         }
 
         if (payload.ignored || !payload.reply_text) {
+          releaseEchoLock();
           updateSolarVoiceState('idle');
           if (wanted()) {
             emit(phase, {
@@ -669,6 +720,7 @@
           if (!played && replyText) {
             await speakWithNativeSpeechSynthesis(replyText);
           }
+          releaseEchoLock();
           if (generation !== current.generation || destroyed || suspended) return;
           openFollowup();
         } finally {
@@ -677,6 +729,7 @@
           reconcile();
         }
       } catch {
+        releaseEchoLock();
         processingAudio = false;
         updateSolarVoiceState('idle');
         if (wanted()) {
@@ -818,7 +871,7 @@
       rafId = null;
       if (destroyed || status !== 'active' || !stream) return;
 
-      if (!processingAudio && !job && !busy && !suspended) {
+      if (!processingAudio && !isAssistantSpeaking && !job && !busy && !suspended) {
         const rmsLevel = computeRmsLevel();
         currentRms = rmsLevel;
 
@@ -1080,6 +1133,7 @@
       get rms() { return currentRms; },
       get isSpeaking() { return isSpeaking; },
       get isPushToTalk() { return isPushToTalk; },
+      get isAssistantSpeaking() { return isAssistantSpeaking; },
       startPushToTalk,
       stopPushToTalk,
       async enable() {

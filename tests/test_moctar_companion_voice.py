@@ -335,9 +335,9 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
         self.app.state.runtime.ai_brain = SimpleNamespace(chat=chat_mock)
 
         with patch("main.synthesize_edge_tts", new=AsyncMock(return_value=fake_mp3)):
-            # 1. Question conversationnelle simple : "Yo Moctar comment tu t'appelles ?"
+            # 1. Question conversationnelle simple : "Yo Moctar que penses-tu de l'astronomie ?"
             self.app.state.runtime.voice_session_until = 0.0
-            with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Moctar comment tu t'appelles ?"):
+            with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Moctar que penses-tu de l'astronomie ?"):
                 resp = self.client.post(
                     "/api/voice/interact",
                     content=wav_bytes,
@@ -348,13 +348,13 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
                 self.assertTrue(data["ok"])
                 self.assertFalse(data["ignored"])
                 self.assertTrue(data["fast_path"])
-                self.assertEqual(data["user_text"], "comment tu t'appelles")
+                self.assertEqual(data["user_text"], "que penses-tu de l'astronomie")
                 self.assertEqual(data["reply_text"], "Je m'appelle M.O.C.T.A.R, votre copilote vocal Moctar.")
                 self.assertTrue(data["audio_url"].startswith("/api/voice/tts/cache/"))
-                chat_mock.assert_called_once_with(
-                    "comment tu t'appelles",
-                    system_prompt=main.VOICE_FAST_SYSTEM_PROMPT,
-                )
+                chat_mock.assert_called_once()
+                self.assertEqual(chat_mock.call_args.args[0], "que penses-tu de l'astronomie")
+                self.assertIn(main.VOICE_FAST_SYSTEM_PROMPT, chat_mock.call_args.kwargs["system_prompt"])
+                self.assertIn("TÉLÉMÉTRIE EN TEMPS RÉEL", chat_mock.call_args.kwargs["system_prompt"])
                 jarvis_mock.assert_not_awaited()
 
             # 2. Requête système complexe : ne passe PAS par le fast-path, appelle execute_prompt_async
@@ -384,7 +384,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
                     source="web_voice",
                 )
 
-            # 3. Requête conversationnelle longue (> 6 mots) sans mot-clé système : routage direct Gemini par défaut (routeur inversé)
+            # 3. Requête conversationnelle longue (> 6 mots) sans mot-clé système : routage direct Llama/Gemini par défaut
             chat_mock.reset_mock()
             jarvis_mock.reset_mock()
             chat_mock.return_value = {
@@ -409,10 +409,9 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
                     data3["reply_text"],
                     "La première exoplanète confirmée autour d'une étoile similaire au Soleil a été découverte en 1995, Moctar.",
                 )
-                chat_mock.assert_called_once_with(
-                    "raconte-moi une découverte fascinante sur l'astrophysique et les trous noirs",
-                    system_prompt=main.VOICE_FAST_SYSTEM_PROMPT,
-                )
+                chat_mock.assert_called_once()
+                self.assertIn("raconte-moi une découverte fascinante", chat_mock.call_args.args[0])
+                self.assertIn(main.VOICE_FAST_SYSTEM_PROMPT, chat_mock.call_args.kwargs["system_prompt"])
                 jarvis_mock.assert_not_awaited()
 
     def test_transcribe_audio_removes_hallucinatory_prompt(self) -> None:
@@ -438,20 +437,36 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertIsNone(kwargs.get("initial_prompt"))
 
     def test_instant_local_commands_without_llm(self) -> None:
-        """Vérifie les commandes instantanées locales (0 ms, sans LLM) : heure, date, statut système."""
-        # Heure
+        """Vérifie les commandes instantanées locales (0 ms, sans LLM) : identité, heure, date, température °C, CPU/RAM."""
+        # 1. Identité
+        for phrase in ("comment t'appelles-tu", "qui es-tu", "c'est quoi ton nom"):
+            res_id = main.handle_instant_local_command(phrase)
+            self.assertEqual(
+                res_id,
+                "Je suis M.O.C.T.A.R, votre système autonome de contrôle et d'intelligence opérationnelle, Moctar.",
+            )
+
+        # 2. Heure
         res_heure = main.handle_instant_local_command("quelle heure est-il")
         self.assertIsNotNone(res_heure)
         self.assertIn("Il est", res_heure)
         self.assertTrue(res_heure.endswith(", Moctar."))
 
-        # Date
+        # 3. Date
         res_date = main.handle_instant_local_command("on est quel jour")
         self.assertIsNotNone(res_date)
         self.assertIn("Nous sommes le", res_date)
         self.assertTrue(res_date.endswith(", Moctar."))
 
-        # CPU / RAM
+        # 4. Température réelle en °C
+        with patch("main.get_cpu_temperature_celsius", return_value=53.4):
+            for phrase in ("la température actuelle", "température processeur", "le processeur chauffe ?"):
+                res_temp = main.handle_instant_local_command(phrase)
+                self.assertIsNotNone(res_temp)
+                self.assertIn("Le processeur du serveur est à 53°C", res_temp)
+                self.assertTrue(res_temp.endswith(", Moctar."))
+
+        # 5. CPU / RAM (sans mention de température)
         res_sys = main.handle_instant_local_command("donne-moi l'état de la mémoire et du processeur")
         self.assertIsNotNone(res_sys)
         self.assertIn("Processeur", res_sys)
@@ -460,6 +475,59 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
 
         # Non local
         self.assertIsNone(main.handle_instant_local_command("qui a peint la Joconde"))
+
+    def test_extract_voice_interact_command_clean_wake_and_after(self) -> None:
+        """Vérifie l'extraction du texte après le mot-clé, le traitement de 'au Mokhtar.' en réveil pur et le filtrage des bruits < 4 chars."""
+        # 1. 'au Mokhtar.' -> réveil pur (_WAKE_ONLY_SENTINEL)
+        accepted, cmd, detected = main.extract_voice_interact_command("au Mokhtar.", session_active=False)
+        self.assertTrue(accepted)
+        self.assertTrue(detected)
+        self.assertEqual(cmd, main._WAKE_ONLY_SENTINEL)
+
+        # 2. 'salut Moctar' -> réveil pur
+        accepted2, cmd2, detected2 = main.extract_voice_interact_command("salut Moctar", session_active=False)
+        self.assertTrue(accepted2)
+        self.assertTrue(detected2)
+        self.assertEqual(cmd2, main._WAKE_ONLY_SENTINEL)
+
+        # 3. Texte après le mot-clé -> priorité absolue
+        accepted3, cmd3, detected3 = main.extract_voice_interact_command("Yo Moctar ouvre YouTube", session_active=False)
+        self.assertTrue(accepted3)
+        self.assertTrue(detected3)
+        self.assertEqual(cmd3, "ouvre YouTube")
+
+        # 4. Phrase résiduelle de moins de 4 caractères en session active -> ignorée
+        for short_noise in ("au", "et", "ah", "ha"):
+            acc, _, _ = main.extract_voice_interact_command(short_noise, session_active=True)
+            self.assertFalse(acc, f"{short_noise} doit être ignoré")
+
+    def test_voice_fast_llm_reply_groq_llama_call(self) -> None:
+        """Vérifie l'appel direct à Groq Llama-3.3-70B avec télémétrie vivante injectée."""
+        import ai_brain
+
+        fake_resp = Mock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {
+            "choices": [{"message": {"content": "La vitesse de la lumière est d'environ 300 000 km/s, Moctar."}}],
+        }
+
+        with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test_mock_key"}), patch(
+            "requests.post", return_value=fake_resp
+        ) as post_mock:
+            reply = ai_brain.voice_fast_llm_reply("Quelle est la vitesse de la lumière ?")
+            self.assertEqual(reply, "La vitesse de la lumière est d'environ 300 000 km/s, Moctar.")
+            post_mock.assert_called_once()
+            call_kwargs = post_mock.call_args.kwargs
+            self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer gsk_test_mock_key")
+            payload = call_kwargs["json"]
+            self.assertEqual(payload["model"], "llama-3.3-70b-versatile")
+            self.assertEqual(payload["temperature"], 0.3)
+            self.assertEqual(payload["max_tokens"], 120)
+            self.assertEqual(call_kwargs["timeout"], 4.0)
+            system_msg = payload["messages"][0]["content"]
+            self.assertIn("TÉLÉMÉTRIE EN TEMPS RÉEL DU SERVEUR DELL PRECISION M4800", system_msg)
+            self.assertIn("Date et heure :", system_msg)
+            self.assertIn("Charge CPU :", system_msg)
 
     def test_whisper_defaults_to_base_model(self) -> None:
         """Vérifie que le modèle par défaut est 'base' dans config et voice_transcribe."""

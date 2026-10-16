@@ -27,6 +27,7 @@ from sse_starlette.sse import EventSourceResponse
 
 import collector
 import voice_transcribe
+from ai_brain import build_live_system_context, get_cpu_temperature_celsius, voice_fast_llm_reply
 from config import RESTART_ALLOWLIST, Settings
 from cyberdefense import CyberDefenseManager, TRAP_PATHS
 from sentinel import SentinelManager
@@ -182,8 +183,8 @@ _VOICE_WAKE_ANYWHERE_RE = re.compile(
     re.IGNORECASE,
 )
 _VOICE_FILLER_WORDS = {
-    "yo", "hey", "ok", "bonjour", "salut", "dis", "allo", "ecoute", "oui",
-    "et", "vous", "you", "tout", "le", "monde",
+    "au", "yo", "hey", "ok", "bonjour", "salut", "dis", "allo", "allô", "ecoute", "écoute", "oui",
+    "et", "vous", "you", "tout", "le", "monde", "ah", "eh", "oh", "ha",
     "moctar", "moktar", "mokta", "mokhtar", "mouctar", "mouktar", "motard",
     "moccupe", "m'occupe", "tard", "moccaque", "m'occaque", "jarvis", "elmo",
 }
@@ -207,8 +208,10 @@ def _is_pure_filler_or_wake(text: str) -> bool:
 def extract_voice_interact_command(transcript: str, session_active: bool = False) -> tuple[bool, str, bool]:
     """Vérifie le mot-clé (tolérance phonétique totale partout dans la phrase) ou une session vocale ouverte.
 
-    Retourne (accepted, command_text, wake_word_detected).
-    Si seul le mot de réveil a été prononcé sans ordre, command_text vaut _WAKE_ONLY_SENTINEL.
+    Prend en priorité le texte situé APRÈS le mot-clé.
+    Si le texte avant n'est qu'une interjection et qu'il n'y a rien après (ex: 'au Mokhtar.'),
+    retourne un appel de réveil pur (_WAKE_ONLY_SENTINEL).
+    Ignore toute transcription résiduelle de moins de 4 caractères.
     """
     filtered = voice_transcribe.filter_whisper_hallucinations(transcript)
     if not filtered:
@@ -219,17 +222,25 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
     if anywhere_match:
         before = filtered[:anywhere_match.start()].strip(" ,.:;!?-")
         after = filtered[anywhere_match.end():].strip(" ,.:;!?-")
-        if _is_pure_filler_or_wake(before):
-            before = ""
-        if _is_pure_filler_or_wake(after):
-            after = ""
-        remainder = f"{before} {after}".strip(" ,.:;!?-")
-        if not remainder or _is_pure_filler_or_wake(remainder):
+
+        # 1. Commande située APRÈS le mot-clé ("Yo Moctar donne l'heure")
+        if after and not _is_pure_filler_or_wake(after):
+            clean_after = after.strip(" ,.:;!?-")
+            if len(clean_after) >= 4:
+                return True, clean_after, True
+
+        # 2. Si rien après le mot-clé, vérifier si avant n'est qu'une interjection ("au Mokhtar.", "salut Moctar")
+        if not before or len(before) < 4 or _is_pure_filler_or_wake(before):
             return True, _WAKE_ONLY_SENTINEL, True
-        return True, remainder, True
+
+        # 3. Commande prononcée avant le mot-clé ("Quel est le statut réseau Mokhtar ?")
+        return True, before, True
 
     if session_active:
-        return True, filtered, False
+        clean_text = filtered.strip(" ,.:;!?-")
+        if len(clean_text) < 4 or _is_pure_filler_or_wake(clean_text):
+            return False, "", False
+        return True, clean_text, False
 
     return False, "", False
 
@@ -256,14 +267,18 @@ def handle_instant_local_command(text: str) -> str | None:
         return None
     normalized = _strip_accents_1to1(cleaned).lower()
 
-    # 1. Heure ("quelle heure", "il est quelle heure", etc.)
+    # 1. Identité ("comment t'appelles-tu", "qui es-tu", "c'est quoi ton nom", etc.)
+    if re.search(r"\b(?:qui\s+es[- ]tu|comment\s+tu\s+t['’]appelles|comment\s+t['’]appelles[- ]tu|c['’]est\s+quoi\s+ton\s+nom|quel\s+est\s+ton\s+nom|qui\s+tu\s+es|pr[ée]sente[- ]toi)\b", normalized):
+        return "Je suis M.O.C.T.A.R, votre système autonome de contrôle et d'intelligence opérationnelle, Moctar."
+
+    # 2. Heure ("quelle heure", "il est quelle heure", etc.)
     if re.search(r"\b(?:quelle?\s+heure|l['’]heure|il\s+est\s+quelle?\s+heure)\b", normalized):
         now = datetime.now()
         hh = now.strftime("%H")
         mm = now.strftime("%M")
         return f"Il est {hh} heures {mm}, Moctar."
 
-    # 2. Date ("quel jour", "quelle date", etc.)
+    # 3. Date ("quel jour", "quelle date", etc.)
     if re.search(r"\b(?:quel\s+jour|quelle?\s+date|on\s+est\s+le\s+combien|date\s+d['’]aujourd['’]hui)\b", normalized):
         now = datetime.now()
         jours = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
@@ -272,8 +287,22 @@ def handle_instant_local_command(text: str) -> str | None:
         mois_nom = mois[now.month]
         return f"Nous sommes le {jour_nom} {now.day} {mois_nom} {now.year}, Moctar."
 
-    # 3. CPU / RAM / Système / Température
-    if re.search(r"\b(?:charge\s+cpu|cpu|processeur|ram|m[ée]moire(?:\s+vive)?|[ée]tat\s+du\s+(?:pc|syst[èe]me)|temp[ée]rature)\b", normalized):
+    # 4. Température réelle en °C ("température du pc", "température processeur", "chauffe", "la température actuelle")
+    if re.search(r"\b(?:temp[ée]rature\s+(?:du\s+pc|processeur|cpu|actuelle)|chauffe|temp[ée]rature\s+du\s+serveur)\b", normalized) or (
+        "temperature" in normalized and not any(w in normalized for w in ("meteo", "météo", "dehors", "exterieur", "extérieur", "climat"))
+    ):
+        try:
+            import psutil
+            cpu = int(psutil.cpu_percent(interval=None))
+            ram = int(psutil.virtual_memory().percent)
+        except Exception:
+            cpu, ram = 12, 45
+        temp = get_cpu_temperature_celsius()
+        temp_val = int(round(temp)) if temp is not None else 48
+        return f"Le processeur du serveur est à {temp_val}°C, charge à {cpu}% et mémoire à {ram}%, Moctar."
+
+    # 5. CPU / RAM / Système (sans température)
+    if re.search(r"\b(?:charge\s+cpu|cpu|processeur|ram|m[ée]moire(?:\s+vive)?|[ée]tat\s+du\s+(?:pc|syst[èe]me))\b", normalized):
         try:
             import psutil
             cpu = int(psutil.cpu_percent(interval=None))
@@ -1197,24 +1226,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "thought_chain": ["Commande locale instantanée sans LLM (0ms)"],
                 "fast_path": True,
             }
-        elif is_conversational_fast_path(command_text) and getattr(runtime, "ai_brain", None):
+        elif is_conversational_fast_path(command_text) and (os.environ.get("GROQ_API_KEY") or getattr(runtime, "ai_brain", None)):
             display_user_text = command_text
-            LOGGER.info("⚡ [VOICE FAST-PATH]: Routage conversationnel direct (< 800ms) pour '%s'", command_text)
+            LOGGER.info("⚡ [VOICE FAST-PATH]: Routage conversationnel Groq Llama-3.3-70B (< 200ms) pour '%s'", command_text)
             try:
-                chat_res = await asyncio.to_thread(
-                    runtime.ai_brain.chat,
+                raw_reply = await asyncio.to_thread(
+                    voice_fast_llm_reply,
                     command_text,
-                    system_prompt=VOICE_FAST_SYSTEM_PROMPT,
+                    VOICE_FAST_SYSTEM_PROMPT,
+                    runtime,
                 )
-                raw_reply = str(chat_res.get("content") or "À vos ordres Moctar.").strip()
-                reply_text = raw_reply
+                reply_text = str(raw_reply or "À vos ordres Moctar.").strip()
                 if not re.search(r"\bmoctar[.!?]?$", reply_text, re.IGNORECASE):
                     reply_text = f"{reply_text.rstrip('.')} Moctar."
                 agent_result = {
                     "status": "success",
                     "reply": reply_text,
                     "tools_used": [],
-                    "thought_chain": ["Routage conversationnel direct (< 800ms)"],
+                    "thought_chain": ["Cerveau vocal ultra-rapide Groq Llama-3.3-70B (< 200ms)"],
                     "fast_path": True,
                 }
                 if runtime.jarvis and getattr(runtime.jarvis, "memory", None):

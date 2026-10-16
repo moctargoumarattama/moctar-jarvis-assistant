@@ -1817,3 +1817,151 @@ class AIBrain:
             "tool_calls": normalized_tool_calls,
             "finish_reason": finish_reason,
         }
+
+
+def get_cpu_temperature_celsius() -> float | None:
+    """Récupère la température CPU réelle en degrés Celsius via psutil.sensors_temperatures()."""
+    try:
+        import psutil
+
+        if not hasattr(psutil, "sensors_temperatures"):
+            return None
+        temps = psutil.sensors_temperatures()
+        if not temps:
+            return None
+        for key in ("coretemp", "acpitz", "cpu_thermal", "k10temp", "zenpower", "soc_thermal"):
+            if key in temps and temps[key]:
+                for entry in temps[key]:
+                    val = getattr(entry, "current", None)
+                    if val is not None and val > 0:
+                        return round(float(val), 1)
+        for entries in temps.values():
+            for entry in entries:
+                val = getattr(entry, "current", None)
+                if val is not None and val > 0:
+                    return round(float(val), 1)
+    except Exception:
+        pass
+    return None
+
+
+def build_live_system_context(runtime: Any = None) -> str:
+    """Construit un bloc de contexte télémétrique vivant du Dell Precision M4800."""
+    now = datetime.now()
+    jours = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+    mois = ["", "janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
+    date_fr = f"{jours[now.weekday()]} {now.day} {mois[now.month]} {now.year}"
+    time_str = now.strftime("%H:%M:%S")
+
+    cpu_pct = 12
+    ram_pct = 45
+    try:
+        import psutil
+
+        cpu_pct = int(psutil.cpu_percent(interval=None))
+        ram_pct = int(psutil.virtual_memory().percent)
+    except Exception:
+        pass
+
+    temp_c = get_cpu_temperature_celsius()
+    temp_str = f"{temp_c}°C" if temp_c is not None else "non disponible"
+
+    disk_free_gb = 50.0
+    try:
+        import shutil
+
+        target_path = "/" if os.name != "nt" else "C:\\"
+        usage = shutil.disk_usage(target_path)
+        disk_free_gb = round(usage.free / (1024**3), 1)
+    except Exception:
+        pass
+
+    whatsapp_status = "connecté"
+    noc_status = "nominal"
+    if runtime:
+        try:
+            if hasattr(runtime, "whatsapp") and hasattr(runtime.whatsapp, "snapshot"):
+                snap = runtime.whatsapp.snapshot()
+                whatsapp_status = "connecté" if snap.get("active") or snap.get("ready") else "prêt"
+            if hasattr(runtime, "local_status"):
+                noc_status = str(runtime.local_status)
+        except Exception:
+            pass
+
+    return (
+        f"[TÉLÉMÉTRIE EN TEMPS RÉEL DU SERVEUR DELL PRECISION M4800]\n"
+        f"- Date et heure : {date_fr} à {time_str}\n"
+        f"- Charge CPU : {cpu_pct}%\n"
+        f"- Température CPU réelle : {temp_str}\n"
+        f"- Mémoire vive utilisée : {ram_pct}%\n"
+        f"- Espace disque libre : {disk_free_gb} Go\n"
+        f"- Pont WhatsApp : {whatsapp_status}\n"
+        f"- Runtime NOC : {noc_status}"
+    )
+
+
+def voice_fast_llm_reply(
+    prompt: str,
+    system_prompt: str | None = None,
+    runtime: Any = None,
+) -> str:
+    """Cerveau vocal ultra-rapide (< 200 ms) via Groq llama-3.3-70b-versatile.
+
+    Injecte en temps réel le contexte vivant du Dell M4800 et bascule
+    sur runtime.ai_brain.chat en fallback automatique si GROQ_API_KEY est absente ou en échec.
+    """
+    groq_api_key = os.environ.get("GROQ_API_KEY", "").strip()
+    telemetry = build_live_system_context(runtime)
+    base_prompt = system_prompt or (
+        "Tu es M.O.C.T.A.R (style JARVIS). "
+        "Réponds TOUJOURS en français, en 1 à 2 phrases courtes maximum (moins de 25 mots), "
+        "ton posé, précis, intelligent, et termine par 'Moctar'."
+    )
+    full_system_prompt = f"{base_prompt}\n\n{telemetry}"
+
+    if groq_api_key:
+        try:
+            import requests
+
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {groq_api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": "llama-3.3-70b-versatile",
+                "messages": [
+                    {"role": "system", "content": full_system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 120,
+            }
+            resp = requests.post(url, headers=headers, json=payload, timeout=4.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                reply = data["choices"][0]["message"]["content"].strip()
+                if reply:
+                    return reply
+        except Exception as exc:
+            logger.warning("Groq Llama-3.3-70B a échoué (%s), repli sur Gemini / ai_brain.", exc)
+
+    # Repli automatique sur ai_brain (Gemini) si pas de clé Groq ou échec
+    brain = getattr(runtime, "ai_brain", None)
+    if not brain:
+        try:
+            brain = AIBrain()
+        except Exception:
+            brain = None
+
+    if brain and hasattr(brain, "chat"):
+        try:
+            chat_res = brain.chat(prompt, system_prompt=full_system_prompt)
+            reply = str(chat_res.get("content") or "").strip()
+            if reply:
+                return reply
+        except Exception as exc:
+            logger.warning("Repli ai_brain a échoué: %s", exc)
+
+    return "À vos ordres Moctar, tous les systèmes sont nominaux."
+

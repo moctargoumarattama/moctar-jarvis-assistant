@@ -635,3 +635,61 @@ test('continuous 800ms pre-roll buffer encodes to 16kHz mono WAV and sends audio
   assert.ok(capturedBody.size > 44, 'WAV size must exceed standard header size');
 });
 
+test('speaker anti-echo lock ignores microphone and clears pre-roll buffer during playback and 450ms dampening', async t => {
+  let finishAudio = null;
+  class FakeAudioDelayed {
+    constructor(url) {
+      this.src = url || '';
+    }
+    load() {}
+    play() {
+      return new Promise((resolve) => {
+        finishAudio = () => {
+          this.onended?.();
+          resolve();
+        };
+      });
+    }
+    pause() {}
+  }
+
+  const f = createWebAudioFixture(t, {
+    Audio: FakeAudioDelayed,
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        reply_text: 'Tous les systèmes sont nominaux, Moctar.',
+        audio_url: '/api/voice/tts/cache/echo_test.mp3',
+      }),
+    }),
+  });
+
+  await f.engine.enable();
+  await f.settle();
+
+  // Déclencher une interaction vocale
+  await f.engine.startPushToTalk();
+  await f.settle();
+  f.engine.stopPushToTalk();
+  await f.settle();
+
+  // Pendant que l'audio joue, isAssistantSpeaking doit être true
+  assert.equal(f.engine.isAssistantSpeaking, true);
+
+  // Fin de la lecture audio
+  finishAudio?.();
+  await f.settle();
+
+  // Immédiatement après la fin (avant 450ms), l'anti-écho doit TOUJOURS être verrouillé
+  assert.equal(f.engine.isAssistantSpeaking, true);
+
+  // Avancer le temps de 450ms (fin de la réverbération acoustique de la pièce)
+  f.time.advance(450);
+  await f.settle();
+
+  // L'anti-écho est maintenant déverrouillé
+  assert.equal(f.engine.isAssistantSpeaking, false);
+});
+
+
