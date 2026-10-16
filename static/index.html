@@ -2218,7 +2218,58 @@
 
       $('jarvis-open-btn')?.addEventListener('click', openJarvisModal);
       $('jarvis-close-btn')?.addEventListener('click', closeJarvisModal);
-      $('jarvis-mic-btn')?.addEventListener('click', toggleJarvisListening);
+      let micPressStartTime = 0;
+      let suppressNextClick = false;
+
+      function handleMicPointerDown(e) {
+        if (!window.jarvisVoice) return;
+        if (window.isSecureContext === false) return;
+        if (e.button && e.button !== 0) return;
+        micPressStartTime = Date.now();
+        suppressNextClick = false;
+        window.jarvisVoice.startPushToTalk?.();
+      }
+
+      function handleMicPointerUp() {
+        if (!window.jarvisVoice) return;
+        const duration = Date.now() - micPressStartTime;
+        if (micPressStartTime > 0 && duration >= 250) {
+          suppressNextClick = true;
+          window.jarvisVoice.stopPushToTalk?.();
+        } else if (micPressStartTime > 0) {
+          window.jarvisVoice.stopPushToTalk?.({ discard: true });
+        }
+        micPressStartTime = 0;
+      }
+
+      function handleMicPointerCancel() {
+        if (micPressStartTime > 0) {
+          micPressStartTime = 0;
+          suppressNextClick = true;
+          window.jarvisVoice?.stopPushToTalk?.({ discard: true });
+        }
+      }
+
+      function handleMicClick(e) {
+        if (suppressNextClick) {
+          suppressNextClick = false;
+          e.preventDefault?.();
+          e.stopPropagation?.();
+          return;
+        }
+        toggleJarvisListening();
+      }
+
+      const micBtn = $('jarvis-mic-btn');
+      if (micBtn) {
+        micBtn.addEventListener('mousedown', handleMicPointerDown);
+        micBtn.addEventListener('mouseup', handleMicPointerUp);
+        micBtn.addEventListener('mouseleave', handleMicPointerCancel);
+        micBtn.addEventListener('touchstart', handleMicPointerDown, { passive: true });
+        micBtn.addEventListener('touchend', handleMicPointerUp);
+        micBtn.addEventListener('touchcancel', handleMicPointerCancel);
+        micBtn.addEventListener('click', handleMicClick);
+      }
       initialiseBrowserVoice();
       $('jarvis-tts-toggle')?.addEventListener('change', event => {
         if (!event.target.checked) cancelJarvisSpeech();

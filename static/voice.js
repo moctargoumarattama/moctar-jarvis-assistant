@@ -66,8 +66,9 @@
     const AudioPlayerClass = opts.Audio || (typeof win.Audio === 'function' ? win.Audio : (typeof Audio === 'function' ? Audio : null));
     const fetchImpl = opts.fetch || (typeof win.fetch === 'function' ? win.fetch.bind(win) : (typeof fetch === 'function' ? fetch : null));
     const interactUrl = opts.interactUrl || '/api/voice/interact';
-    const vadSilenceMs = typeof opts.vadSilenceMs === 'number' ? opts.vadSilenceMs : 500;
-    const vadThreshold = typeof opts.vadThreshold === 'number' ? opts.vadThreshold : 0.04;
+    const vadSilenceMs = typeof opts.vadSilenceMs === 'number' ? opts.vadSilenceMs : 850;
+    const vadThreshold = typeof opts.vadThreshold === 'number' ? opts.vadThreshold : 0.035;
+    const minRecordingMs = typeof opts.minRecordingMs === 'number' ? opts.minRecordingMs : 1200;
     const maxSpeechMs = typeof opts.maxSpeechMs === 'number' ? opts.maxSpeechMs : 3500;
     const frameIntervalMs = typeof opts.frameIntervalMs === 'number' ? opts.frameIntervalMs : (1000 / 60);
     const highpassFrequencyHz = typeof opts.highpassFrequencyHz === 'number' ? opts.highpassFrequencyHz : 120;
@@ -100,10 +101,23 @@
     let followupTimer = null;
     let maxSpeechTimer = null;
     let isSpeaking = false;
+    let isPushToTalk = false;
     let silenceElapsedMs = 0;
+    let recordingElapsedMs = 0;
+    let phraseStartTime = 0;
     let currentRms = 0;
     let processingAudio = false;
     let pendingStartPromise = null;
+
+    function getNow() {
+      if (clock && typeof clock.now === 'function') return clock.now();
+      if (clock && typeof clock.now === 'number') return clock.now;
+      if (typeof opts.now === 'function') return opts.now();
+      if (typeof win.performance === 'object' && win.performance && typeof win.performance.now === 'function') {
+        return win.performance.now();
+      }
+      return Date.now();
+    }
 
     function resolveSolarEngine() {
       if (opts.SolarEngine) return opts.SolarEngine;
@@ -328,7 +342,7 @@
     }
 
     function pickMimeType() {
-      let mimeType = 'audio/webm';
+      let mimeType = 'audio/webm;codecs=opus';
       if (MediaRecorderClass && typeof MediaRecorderClass.isTypeSupported === 'function') {
         for (const candidate of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/wav']) {
           if (MediaRecorderClass.isTypeSupported(candidate)) {
@@ -344,7 +358,10 @@
       stopRafLoop();
       clearMaxSpeechTimer();
       isSpeaking = false;
+      isPushToTalk = false;
       silenceElapsedMs = 0;
+      recordingElapsedMs = 0;
+      phraseStartTime = 0;
       currentRms = 0;
       updateSolarActivity(0, false);
       updateSolarVoiceState('idle');
@@ -577,6 +594,8 @@
       clearMaxSpeechTimer();
       isSpeaking = false;
       silenceElapsedMs = 0;
+      recordingElapsedMs = 0;
+      phraseStartTime = 0;
       currentRms = 0;
       updateSolarActivity(0, false);
       updateSolarVoiceState('thinking');
@@ -603,14 +622,20 @@
       if (!stream || !MediaRecorderClass) return false;
       if (recorder && recorder.state === 'recording') return true;
       recordedChunks = [];
+      phraseStartTime = getNow();
+      recordingElapsedMs = 0;
       const mimeType = pickMimeType();
       try {
-        recorder = new MediaRecorderClass(stream, { mimeType });
+        recorder = new MediaRecorderClass(stream, { mimeType, audioBitsPerSecond: 128000 });
       } catch {
         try {
-          recorder = new MediaRecorderClass(stream);
+          recorder = new MediaRecorderClass(stream, { mimeType });
         } catch {
-          return false;
+          try {
+            recorder = new MediaRecorderClass(stream);
+          } catch {
+            return false;
+          }
         }
       }
       recorder.ondataavailable = (ev) => {
@@ -634,7 +659,7 @@
           if (isSpeaking && recorder && recorder.state === 'recording') {
             stopPhraseAndSend();
           }
-        }, maxSpeechMs);
+        }, isPushToTalk ? 15000 : maxSpeechMs);
         return true;
       } catch {
         clearMaxSpeechTimer();
@@ -642,31 +667,46 @@
       }
     }
 
-    function stepVuMeterFrame() {
+    function stepVuMeterFrame(timestamp) {
       rafId = null;
       if (destroyed || status !== 'active' || !stream) return;
 
       if (!processingAudio && !job && !busy && !suspended) {
         const rmsLevel = computeRmsLevel();
         currentRms = rmsLevel;
-        const voiceDetected = rmsLevel > vadThreshold;
-        updateSolarActivity(rmsLevel, voiceDetected);
 
-        if (voiceDetected) {
-          silenceElapsedMs = 0;
-          if (!isSpeaking) {
-            isSpeaking = true;
-            startPhraseRecorder();
-          }
+        if (isPushToTalk) {
+          recordingElapsedMs += frameIntervalMs;
+          updateSolarActivity(Math.max(rmsLevel, 0.08), true);
           emit('listening', {
             rms: rmsLevel,
             isSpeaking: true,
             message: VOICE_DETECTED_MESSAGE,
           });
-        } else if (isSpeaking) {
-          silenceElapsedMs += frameIntervalMs;
-          if (silenceElapsedMs >= vadSilenceMs) {
-            stopPhraseAndSend();
+        } else {
+          const voiceDetected = rmsLevel > vadThreshold;
+          updateSolarActivity(rmsLevel, voiceDetected);
+
+          if (voiceDetected) {
+            silenceElapsedMs = 0;
+            if (!isSpeaking) {
+              isSpeaking = true;
+              startPhraseRecorder();
+            }
+            recordingElapsedMs += frameIntervalMs;
+            emit('listening', {
+              rms: rmsLevel,
+              isSpeaking: true,
+              message: VOICE_DETECTED_MESSAGE,
+            });
+          } else if (isSpeaking) {
+            silenceElapsedMs += frameIntervalMs;
+            recordingElapsedMs += frameIntervalMs;
+            const currentNow = (typeof timestamp === 'number' && timestamp > 0) ? timestamp : getNow();
+            const elapsed = Math.max(recordingElapsedMs, phraseStartTime > 0 ? (currentNow - phraseStartTime) : 0);
+            if (silenceElapsedMs >= vadSilenceMs && elapsed >= minRecordingMs) {
+              stopPhraseAndSend();
+            }
           }
         }
       } else {
@@ -695,7 +735,12 @@
 
       pendingStartPromise = Promise.resolve()
         .then(() => mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 48000,
+          },
         }))
         .then((mediaStream) => {
           if (destroyed || startGen !== generation || !wanted()) {
@@ -799,6 +844,63 @@
       return true;
     }
 
+    async function startPushToTalk() {
+      if (!available()) return false;
+      ensureMoctarSpeakerUnlocked(true);
+      isPushToTalk = true;
+      generation += 1;
+      fault = null;
+      manual = true;
+      phase = 'listening';
+      clearFollowup();
+
+      if (status !== 'active' || !stream) {
+        await startWebAudioCapture();
+      }
+
+      if (status === 'active' && stream) {
+        isSpeaking = true;
+        silenceElapsedMs = 0;
+        startPhraseRecorder();
+        updateSolarVoiceState('listening');
+        emit('listening', {
+          rms: 0.1,
+          isSpeaking: true,
+          message: VOICE_DETECTED_MESSAGE,
+        });
+        return true;
+      }
+      return false;
+    }
+
+    function stopPushToTalk(options = {}) {
+      if (!isPushToTalk) return;
+      isPushToTalk = false;
+      if (options && options.discard) {
+        if (recorder) {
+          try {
+            recorder.ondataavailable = null;
+            recorder.onstop = null;
+            if (recorder.state && recorder.state !== 'inactive') {
+              recorder.stop();
+            }
+          } catch {}
+          recorder = null;
+        }
+        recordedChunks = [];
+        isSpeaking = false;
+        silenceElapsedMs = 0;
+        recordingElapsedMs = 0;
+        phraseStartTime = 0;
+        currentRms = 0;
+        updateSolarActivity(0, false);
+        updateSolarVoiceState('idle');
+        emit(phase, { rms: 0, isSpeaking: false, message: WAKE_READY_MESSAGE });
+        return;
+      }
+      stopPhraseAndSend();
+    }
+
     return {
       get enabled() { return enabled; },
       get listeningDesired() { return enabled; },
@@ -806,6 +908,9 @@
       get state() { return state; },
       get rms() { return currentRms; },
       get isSpeaking() { return isSpeaking; },
+      get isPushToTalk() { return isPushToTalk; },
+      startPushToTalk,
+      stopPushToTalk,
       async enable() {
         if (!available()) return false;
         ensureMoctarSpeakerUnlocked(true);

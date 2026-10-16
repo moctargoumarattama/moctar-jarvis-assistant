@@ -145,6 +145,7 @@ function createWebAudioFixture(t, overrides = {}) {
     constructor(stream, opts = {}) {
       this.stream = stream;
       this.mimeType = opts.mimeType || 'audio/webm';
+      this.audioBitsPerSecond = opts.audioBitsPerSecond;
       this.state = 'inactive';
       activeRecorders.push(this);
     }
@@ -244,8 +245,9 @@ function createWebAudioFixture(t, overrides = {}) {
     timers: time.timers,
     requestAnimationFrame: time.requestAnimationFrame,
     cancelAnimationFrame: time.cancelAnimationFrame,
-    vadSilenceMs: 500,
-    vadThreshold: 0.04,
+    vadSilenceMs: 850,
+    vadThreshold: 0.035,
+    minRecordingMs: 1200,
     maxSpeechMs: 3500,
     storage: { getItem: () => null, setItem() {}, removeItem() {} },
     onState: (state, detail) => states.push({ state, detail }),
@@ -347,7 +349,12 @@ test('enabling warms up window.MoctarSpeaker, inserts 120Hz highpass BiquadFilte
   assert.equal(f.sourceConnections[0], f.biquadFilters[0], 'microphone source must connect to BiquadFilterNode');
   assert.equal(f.getUserMediaCalls.length, 1);
   assert.deepEqual(f.getUserMediaCalls[0], {
-    audio: { echoCancellation: true, noiseSuppression: true },
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      sampleRate: 48000,
+    },
   });
   assert.equal(f.engine.state, 'wake');
   const wakeStates = f.states.filter(s => s.state === 'wake');
@@ -355,19 +362,19 @@ test('enabling warms up window.MoctarSpeaker, inserts 120Hz highpass BiquadFilte
   assert.equal(wakeStates.at(-1).detail.message, '🟢 À l\'écoute — Dites « Yo Moctar »');
 });
 
-test('60 FPS VU-meter triggers on RMS > 0.04, stops after 500ms silence, reuses window.MoctarSpeaker, and updates status labels', async t => {
+test('60 FPS VU-meter triggers on RMS > 0.035, stops after 850ms silence and min 1200ms recording, reuses window.MoctarSpeaker, and updates status labels', async t => {
   const f = createWebAudioFixture(t);
   await f.engine.enable();
   await f.settle();
 
-  // Frame 1: fan hum below threshold (RMS = 0.03 <= 0.04) -> ignored
-  f.rms = 0.03;
+  // Frame 1: fan hum below threshold (RMS = 0.02 <= 0.035) -> ignored
+  f.rms = 0.02;
   f.time.stepFrame(16);
   await f.settle();
   assert.equal(f.activeRecorders.length, 0);
   assert.equal(f.solarActivityCalls.at(-1).isSpeaking, false);
 
-  // Frame 2: user speaks (RMS = 0.12 > 0.04)
+  // Frame 2: user speaks (RMS = 0.12 > 0.035)
   f.rms = 0.12;
   f.time.stepFrame(16);
   await f.settle();
@@ -375,20 +382,21 @@ test('60 FPS VU-meter triggers on RMS > 0.04, stops after 500ms silence, reuses 
   assert.equal(f.engine.state, 'listening');
   assert.equal(f.states.at(-1).detail.message, '🎙️ Moctar vous écoute...');
   assert.equal(f.latestRecorder.state, 'recording');
+  assert.equal(f.latestRecorder.audioBitsPerSecond, 128000);
   assert.equal(f.solarActivityCalls.at(-1).volume, 0.12);
   assert.equal(f.solarActivityCalls.at(-1).isSpeaking, true);
 
-  // Silence begins: 20 frames at 60 FPS (~333ms < 600ms) -> still recording
+  // Silence begins: 30 frames at 60 FPS (~480ms < 850ms) -> still recording
   f.rms = 0.01;
-  for (let frame = 0; frame < 20; frame += 1) {
+  for (let frame = 0; frame < 30; frame += 1) {
     f.time.stepFrame(16);
   }
   await f.settle();
   assert.equal(f.latestRecorder.state, 'recording');
   assert.equal(f.interactCalls, 0);
 
-  // Advance remaining 18 frames (> 600ms total silence at 60 FPS) -> stops MediaRecorder, resets Sun RMS to 0, posts to /api/voice/interact
-  for (let frame = 0; frame < 18; frame += 1) {
+  // Advance remaining 50 frames (> 850ms silence AND > 1200ms total recording) -> stops MediaRecorder, resets Sun RMS to 0, posts to /api/voice/interact
+  for (let frame = 0; frame < 50; frame += 1) {
     f.time.stepFrame(16);
   }
   await f.settle();
@@ -404,6 +412,42 @@ test('60 FPS VU-meter triggers on RMS > 0.04, stops after 500ms silence, reuses 
   f.finishAudio();
   await f.settle();
   assert.equal(f.engine.state, 'listening');
+});
+
+test('push-to-talk mode starts recording immediately and sends upon release', async t => {
+  const f = createWebAudioFixture(t);
+  await f.engine.enable();
+  await f.settle();
+
+  assert.equal(f.engine.isSpeaking, false);
+  assert.equal(f.activeRecorders.length, 0);
+
+  // Press down: start push-to-talk
+  await f.engine.startPushToTalk();
+  await f.settle();
+
+  assert.equal(f.engine.isSpeaking, true);
+  assert.equal(f.engine.isPushToTalk, true);
+  assert.equal(f.latestRecorder.state, 'recording');
+  assert.equal(f.latestRecorder.audioBitsPerSecond, 128000);
+  assert.equal(f.interactCalls, 0);
+
+  // Even with silence for 1600ms, push-to-talk does NOT cut off automatically
+  f.rms = 0.001;
+  for (let frame = 0; frame < 100; frame += 1) {
+    f.time.stepFrame(16);
+  }
+  await f.settle();
+  assert.equal(f.latestRecorder.state, 'recording');
+  assert.equal(f.interactCalls, 0);
+
+  // Release button: stop push-to-talk -> immediately sends
+  f.engine.stopPushToTalk();
+  await f.settle();
+
+  assert.equal(f.latestRecorder.state, 'inactive');
+  assert.equal(f.interactCalls, 1);
+  assert.equal(f.engine.isPushToTalk, false);
 });
 
 test('maxSpeechTimer (3.5s) cuts recording and sends audio even if fan noise prevents silence detection', async t => {
@@ -437,7 +481,7 @@ test('fallback to window.speechSynthesis with French male voice triggers when MP
   f.time.stepFrame(16);
   await f.settle();
   f.rms = 0;
-  for (let frame = 0; frame < 40; frame += 1) {
+  for (let frame = 0; frame < 80; frame += 1) {
     f.time.stepFrame(16);
   }
   await f.settle();
