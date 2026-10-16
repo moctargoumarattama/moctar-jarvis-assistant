@@ -25,4 +25,5 @@ cffi>=1.16.0
 numpy>=1.23
 # faster-whisper uses PyAV for non-PCM fallback decoding; keep a compatible PyAV.
 av>=12.0.0
-
+edge-tts>=6.1.12
+soundfile>=0.12.1

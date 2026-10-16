@@ -1931,10 +1931,11 @@
       function cancelJarvisSpeech() {
         if (currentSpeechCancel) currentSpeechCancel();
         else window.speechSynthesis?.cancel();
+        window.CosmosEngine?.SolarEngine?.setVoiceState?.('idle');
       }
 
       function speakJarvisText(text) {
-        if (!('speechSynthesis' in window) || !$('jarvis-tts-toggle')?.checked || document.hidden) return Promise.resolve(false);
+        if (!$('jarvis-tts-toggle')?.checked || document.hidden) return Promise.resolve(false);
         const clean = String(text || '')
           .replace(/```[\s\S]*?```/g, '')
           .replace(/`([^`]+)`/g, '$1')
@@ -1943,60 +1944,126 @@
           .trim();
         if (!clean) return Promise.resolve(false);
         cancelJarvisSpeech();
-        return new Promise(resolve => {
-          let finished = false;
-          let watchdog = null;
-          let startWatchdog = null;
-          const finish = success => {
-            if (finished) return;
-            finished = true;
-            clearTimeout(watchdog);
-            clearTimeout(startWatchdog);
-            if (currentSpeechCancel === cancel) {
-              currentSpeechCancel = null;
-              const reactor = $('jarvis-reactor');
-              if (reactor?.dataset.reactorState === 'speaking') {
-                reactor.dataset.reactorState = 'idle';
-                set('jarvis-reactor-status', 'PRÊT');
-              }
+
+        const setSpeakingVisual = active => {
+          const reactor = $('jarvis-reactor');
+          if (active) {
+            if (reactor) reactor.dataset.reactorState = 'speaking';
+            set('jarvis-reactor-status', 'RÉPONSE VOCALE');
+            window.CosmosEngine?.SolarEngine?.setVoiceState?.('speaking');
+          } else {
+            if (reactor?.dataset.reactorState === 'speaking') {
+              reactor.dataset.reactorState = 'idle';
+              set('jarvis-reactor-status', 'PRÊT');
             }
-            resolve(success);
-          };
-          const cancel = () => {
-            finish(false);
-            window.speechSynthesis.cancel();
-          };
-          currentSpeechCancel = cancel;
-          try {
-            const utterance = new SpeechSynthesisUtterance(clean);
-            utterance.lang = 'fr-FR';
-            utterance.rate = 1.05;
-            const voice = window.speechSynthesis.getVoices().find(v => v.lang.startsWith('fr'));
-            if (voice) utterance.voice = voice;
-            utterance.onstart = () => {
-              clearTimeout(startWatchdog);
-              speechPlaybackBlocked = false;
-              const reactor = $('jarvis-reactor');
-              if (reactor) reactor.dataset.reactorState = 'speaking';
-              set('jarvis-reactor-status', 'RÉPONSE VOCALE');
-            };
-            utterance.onend = () => finish(true);
-            utterance.onerror = event => {
-              console.warn('Synthèse vocale interrompue:', event.error);
-              if (!['interrupted', 'canceled'].includes(event.error)) speechPlaybackBlocked = true;
-              finish(false);
-            };
-            startWatchdog = setTimeout(() => {
-              speechPlaybackBlocked = true;
-              cancel();
-            }, 5000);
-            watchdog = setTimeout(cancel, Math.min(90000, Math.max(10000, clean.length * 100)));
-            window.speechSynthesis.speak(utterance);
-          } catch (error) {
-            console.warn('Synthèse vocale indisponible:', error);
-            finish(false);
+            window.CosmosEngine?.SolarEngine?.setVoiceState?.('idle');
           }
-        });
+        };
+
+        return (async () => {
+          // 1. Synthèse neurale prioritaire via /api/voice/tts (edge-tts) + objet Audio standard
+          if (typeof window.fetch === 'function' && typeof window.Audio === 'function') {
+            try {
+              const ttsAbort = new AbortController();
+              const response = await fetch('/api/voice/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: clean, voice: 'fr-FR-HenriNeural' }),
+                signal: ttsAbort.signal
+              });
+              if (response.ok) {
+                const audioBlob = await response.blob();
+                if (audioBlob && audioBlob.size > 0) {
+                  const played = await new Promise(resolve => {
+                    const blobUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(blobUrl);
+                    let settled = false;
+                    const cleanup = ok => {
+                      if (settled) return;
+                      settled = true;
+                      try { audio.pause(); } catch {}
+                      try { URL.revokeObjectURL(blobUrl); } catch {}
+                      if (currentSpeechCancel === cancelAudio) {
+                        currentSpeechCancel = null;
+                        setSpeakingVisual(false);
+                      }
+                      resolve(ok);
+                    };
+                    const cancelAudio = () => cleanup(false);
+                    currentSpeechCancel = cancelAudio;
+                    audio.onplay = () => {
+                      speechPlaybackBlocked = false;
+                      setSpeakingVisual(true);
+                    };
+                    audio.onended = () => cleanup(true);
+                    audio.onerror = () => cleanup(false);
+                    const playPromise = audio.play();
+                    if (playPromise && typeof playPromise.catch === 'function') {
+                      playPromise.catch(err => {
+                        if (err && err.name === 'NotAllowedError') speechPlaybackBlocked = true;
+                        cleanup(false);
+                      });
+                    }
+                  });
+                  if (played) return true;
+                }
+              }
+            } catch (err) {
+              console.warn('Repli de /api/voice/tts vers speechSynthesis locale :', err);
+            }
+          }
+
+          // 2. Repli automatique sur Web SpeechSynthesis si hors-ligne
+          if (!('speechSynthesis' in window)) return false;
+          return new Promise(resolve => {
+            let finished = false;
+            let watchdog = null;
+            let startWatchdog = null;
+            const finish = success => {
+              if (finished) return;
+              finished = true;
+              clearTimeout(watchdog);
+              clearTimeout(startWatchdog);
+              if (currentSpeechCancel === cancel) {
+                currentSpeechCancel = null;
+                setSpeakingVisual(false);
+              }
+              resolve(success);
+            };
+            const cancel = () => {
+              finish(false);
+              window.speechSynthesis.cancel();
+            };
+            currentSpeechCancel = cancel;
+            try {
+              const utterance = new SpeechSynthesisUtterance(clean);
+              utterance.lang = 'fr-FR';
+              utterance.rate = 1.05;
+              const voice = window.speechSynthesis.getVoices().find(v => v.lang.startsWith('fr'));
+              if (voice) utterance.voice = voice;
+              utterance.onstart = () => {
+                clearTimeout(startWatchdog);
+                speechPlaybackBlocked = false;
+                setSpeakingVisual(true);
+              };
+              utterance.onend = () => finish(true);
+              utterance.onerror = event => {
+                console.warn('Synthèse vocale interrompue:', event.error);
+                if (!['interrupted', 'canceled'].includes(event.error)) speechPlaybackBlocked = true;
+                finish(false);
+              };
+              startWatchdog = setTimeout(() => {
+                speechPlaybackBlocked = true;
+                cancel();
+              }, 5000);
+              watchdog = setTimeout(cancel, Math.min(90000, Math.max(10000, clean.length * 100)));
+              window.speechSynthesis.speak(utterance);
+            } catch (error) {
+              console.warn('Synthèse vocale indisponible:', error);
+              finish(false);
+            }
+          });
+        })();
       }
 
       function renderBrowserVoice(phase, detail = {}) {
@@ -2035,9 +2102,11 @@
         set('jarvis-mic-hint', label);
         jarvisState.isListening = ['starting', 'wake', 'listening'].includes(phase);
         $('jarvis-mic-btn')?.classList.toggle('listening', jarvisState.isListening);
+        const solarVoiceState = phase === 'listening' ? 'listening' : phase === 'speaking' ? 'speaking' : 'idle';
+        window.CosmosEngine?.SolarEngine?.setVoiceState?.(solarVoiceState);
         const reactor = $('jarvis-reactor');
         if (reactor && !jarvisState.busy) {
-          reactor.dataset.reactorState = phase === 'listening' ? 'listening' : phase === 'speaking' ? 'speaking' : 'idle';
+          reactor.dataset.reactorState = solarVoiceState;
         }
         if (['error', 'unsupported'].includes(phase) && !active) {
           try { localStorage.setItem('jarvis_wakeword_active', 'false'); } catch {}
@@ -2085,6 +2154,9 @@
         if (!window.MoctarVoice) return renderBrowserVoice('unsupported');
         window.jarvisVoice = window.MoctarVoice.create({
           Recognition: window.SpeechRecognition || window.webkitSpeechRecognition,
+          mediaDevices: window.navigator?.mediaDevices,
+          MediaRecorder: window.MediaRecorder,
+          transcribeUrl: '/api/voice/transcribe',
           onState: renderBrowserVoice,
           onPrompt: text => sendJarvisPrompt(text, 'web_voice'),
           speak: speakJarvisText,

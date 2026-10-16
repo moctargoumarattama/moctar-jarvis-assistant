@@ -30,14 +30,23 @@
     const speak = typeof opts.speak === 'function' ? opts.speak : async () => false;
     const aliases = (opts.wakeWords || DEFAULT_WAKE_WORDS).map((item) => words(item).map((word) => word.value))
       .filter((item) => item.length).sort((a, b) => b.length - a.length);
+    const mediaDevices = opts.mediaDevices || (typeof window === 'object' && window && window.navigator ? window.navigator.mediaDevices : null);
+    const MediaRecorderClass = opts.MediaRecorder || (typeof window === 'object' && window ? window.MediaRecorder : null);
+    const fetchImpl = opts.fetch || (typeof window === 'object' && window && typeof window.fetch === 'function' ? window.fetch.bind(window) : null);
+    const transcribeUrl = opts.transcribeUrl || '/api/voice/transcribe';
+    const braveWatchdogMs = typeof opts.braveWatchdogMs === 'number' ? opts.braveWatchdogMs : 3000;
+    const hasRecorderFallback = Boolean(
+      mediaDevices && typeof mediaDevices.getUserMedia === 'function' && MediaRecorderClass
+    );
     let recognition = null;
+    let usingFallback = false;
     let enabled = false;
     let manual = false;
     let suspended = false;
     let destroyed = false;
     let busy = false;
     let phase = 'wake';
-    let state = opts.Recognition ? 'off' : 'unsupported';
+    let state = (opts.Recognition || hasRecorderFallback) ? 'off' : 'unsupported';
     let fault = null;
     let generation = 0;
     let job = null;
@@ -47,6 +56,7 @@
     let restartTimer = null;
     let followupTimer = null;
     let stopTimer = null;
+    let braveTimer = null;
     let stuck = false;
     const finalResults = new Set();
     const stoppedWaiters = [];
@@ -69,10 +79,14 @@
         cancel(stopTimer);
         stopTimer = null;
       }
+      if (name === 'brave' && braveTimer !== null) {
+        cancel(braveTimer);
+        braveTimer = null;
+      }
     }
 
     function clearTimers() {
-      ['followup', 'restart'].forEach(clearTimer);
+      ['followup', 'restart', 'brave'].forEach(clearTimer);
       pendingRetry = null;
     }
 
@@ -96,7 +110,242 @@
       requestStop();
     }
 
+    async function transcribeRecordedBlob(blob) {
+      if (typeof opts.transcribe === 'function') {
+        return opts.transcribe(blob);
+      }
+      if (!fetchImpl) return '';
+      const mime = (blob && blob.type) ? blob.type : 'audio/webm';
+      const response = await fetchImpl(transcribeUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': mime },
+        body: blob,
+      });
+      if (!response || !response.ok) return '';
+      const payload = await response.json();
+      return String(payload && payload.text || '').trim();
+    }
+
+    function createRecorderRecognition() {
+      let active = false;
+      let stream = null;
+      let recorder = null;
+      let chunkTimer = null;
+      let resultIndex = 0;
+      let chunks = [];
+      const sliceMs = typeof opts.recorderSliceMs === 'number' ? opts.recorderSliceMs : 2600;
+
+      function cleanupStream() {
+        if (chunkTimer !== null) {
+          cancel(chunkTimer);
+          chunkTimer = null;
+        }
+        if (recorder) {
+          try {
+            if (recorder.state && recorder.state !== 'inactive') recorder.stop();
+          } catch {}
+          recorder = null;
+        }
+        if (stream && typeof stream.getTracks === 'function') {
+          try {
+            stream.getTracks().forEach((track) => track.stop());
+          } catch {}
+        }
+        stream = null;
+      }
+
+      async function flushPhrase(blobParts, mimeType) {
+        if (!active || destroyed || !blobParts.length) return;
+        const blob = (blobParts.length === 1 && blobParts[0] && typeof blobParts[0].size === 'number')
+          ? blobParts[0]
+          : (typeof Blob === 'function' ? new Blob(blobParts, { type: mimeType || 'audio/webm' }) : blobParts[0]);
+        if (!blob || (typeof blob.size === 'number' && blob.size < 256)) return;
+        try {
+          const transcript = await transcribeRecordedBlob(blob);
+          if (!active || destroyed || !transcript) return;
+          const idx = resultIndex++;
+          const item = [{ transcript, confidence: 0.98 }];
+          item.isFinal = true;
+          const results = [];
+          results[idx] = item;
+          results.length = idx + 1;
+          adapter.onresult?.({ resultIndex: idx, results });
+        } catch {}
+      }
+
+      function scheduleCycle() {
+        if (!active || destroyed || !stream) return;
+        chunks = [];
+        let mimeType = 'audio/webm';
+        if (typeof MediaRecorderClass.isTypeSupported === 'function') {
+          for (const candidate of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']) {
+            if (MediaRecorderClass.isTypeSupported(candidate)) {
+              mimeType = candidate;
+              break;
+            }
+          }
+        }
+        try {
+          recorder = new MediaRecorderClass(stream, { mimeType });
+        } catch {
+          recorder = new MediaRecorderClass(stream);
+        }
+        recorder.ondataavailable = (ev) => {
+          if (ev && ev.data && (typeof ev.data.size !== 'number' || ev.data.size > 0)) {
+            chunks.push(ev.data);
+          }
+        };
+        recorder.onstop = () => {
+          const captured = chunks.splice(0);
+          const type = (recorder && recorder.mimeType) || mimeType;
+          void flushPhrase(captured, type);
+          if (active && !destroyed && stream) {
+            scheduleCycle();
+          }
+        };
+        try {
+          recorder.start();
+          chunkTimer = delay(() => {
+            chunkTimer = null;
+            if (active && recorder && recorder.state === 'recording') {
+              try { recorder.stop(); } catch {}
+            }
+          }, sliceMs);
+        } catch (err) {
+          adapter.onerror?.({ error: err && err.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture' });
+          adapter.abort();
+        }
+      }
+
+      const adapter = {
+        isFallbackRecorder: true,
+        onstart: null,
+        onresult: null,
+        onspeechstart: null,
+        onerror: null,
+        onend: null,
+        start() {
+          if (active) return;
+          active = true;
+          Promise.resolve()
+            .then(() => mediaDevices.getUserMedia({
+              audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            }))
+            .then((mediaStream) => {
+              if (!active || destroyed) {
+                if (mediaStream && typeof mediaStream.getTracks === 'function') {
+                  mediaStream.getTracks().forEach((t) => t.stop());
+                }
+                return;
+              }
+              stream = mediaStream;
+              adapter.onstart?.({});
+              scheduleCycle();
+            })
+            .catch((err) => {
+              if (!active) return;
+              active = false;
+              cleanupStream();
+              const isDenied = err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError' || err.name === 'SecurityError');
+              adapter.onerror?.({ error: isDenied ? 'not-allowed' : 'audio-capture' });
+              adapter.onend?.({});
+            });
+        },
+        abort() {
+          if (!active) return;
+          active = false;
+          cleanupStream();
+          Promise.resolve().then(() => adapter.onend?.({}));
+        },
+        stop() {
+          this.abort();
+        },
+      };
+      return adapter;
+    }
+
+    function wireRecognition(instance) {
+      instance.onstart = () => {
+        if (destroyed) return;
+        clearTimer('brave');
+        if (status === 'stopping') { requestStop(); return; }
+        status = 'active';
+        reconcile();
+      };
+      instance.onresult = handleResult;
+      instance.onspeechstart = () => {
+        if (wanted() && phase === 'listening') openFollowup();
+      };
+      instance.onerror = (event) => {
+        if (destroyed || status === 'idle' || (status === 'stopping' && intentionalStop)) return;
+        const error = event.error || 'unknown';
+        if (!usingFallback && hasRecorderFallback && ['network', 'service-not-allowed', 'not-allowed'].includes(error)) {
+          activateRecorderFallback(error);
+          return;
+        }
+        if (error === 'not-allowed') {
+          fail(error, 'Autorisez le microphone et la reconnaissance vocale dans le navigateur, puis réactivez l’écoute.');
+        } else if (!['no-speech', 'aborted', 'audio-capture'].includes(error)) {
+          retry(error);
+        }
+      };
+      instance.onend = () => {
+        if (destroyed || instance !== recognition) return;
+        intentionalStop = false;
+        status = 'idle';
+        clearTimer('stop');
+        stuck = false;
+        if (fault && fault.recoverOnEnd) fault = null;
+        settleStopped();
+        if (wanted() && pendingRetry === null) pendingRetry = 250;
+        reconcile();
+      };
+    }
+
+    function activateRecorderFallback(reason) {
+      if (destroyed || usingFallback || !hasRecorderFallback) return false;
+      clearTimer('brave');
+      clearTimer('stop');
+      clearTimer('restart');
+      pendingRetry = null;
+      const previous = recognition;
+      if (previous) {
+        previous.onstart = previous.onresult = previous.onspeechstart = previous.onerror = previous.onend = null;
+        try {
+          if (typeof previous.abort === 'function') previous.abort();
+          else if (typeof previous.stop === 'function') previous.stop();
+        } catch {}
+      }
+      usingFallback = true;
+      fault = null;
+      stuck = false;
+      intentionalStop = false;
+      status = 'idle';
+      settleStopped();
+      recognition = createRecorderRecognition();
+      wireRecognition(recognition);
+      emit('starting', {
+        fallback: 'mediarecorder',
+        reason,
+        message: 'Capture vocale directe M.O.C.T.A.R activée (contourneur Brave)…',
+      });
+      if (wanted()) startRecognition();
+      return true;
+    }
+
+    function armBraveWatchdog() {
+      if (usingFallback || !hasRecorderFallback || braveTimer !== null) return;
+      braveTimer = delay(() => {
+        braveTimer = null;
+        if (destroyed || usingFallback || !wanted()) return;
+        if (status === 'starting' || state === 'starting') {
+          activateRecorderFallback('starting-timeout');
+        }
+      }, braveWatchdogMs);
+    }
+
     function requestStop() {
+      clearTimer('brave');
       if (!recognition || status === 'idle' || status === 'stopping') return;
       intentionalStop = true;
       status = 'stopping';
@@ -138,6 +387,7 @@
           ? 'La reconnaissance vocale est bloquée par le navigateur. Vérifiez ses autorisations ; l’écoute reste activée.'
           : 'Connexion au service de reconnaissance vocale…',
       });
+      armBraveWatchdog();
     }
 
     function startRecognition() {
@@ -145,11 +395,19 @@
       status = 'starting';
       intentionalStop = false;
       finalResults.clear();
-      emit('starting', { message: 'Activation du microphone…' });
+      emit('starting', {
+        fallback: usingFallback ? 'mediarecorder' : undefined,
+        message: usingFallback ? 'Microphone direct M.O.C.T.A.R actif…' : 'Activation du microphone…',
+      });
+      armBraveWatchdog();
       try {
         recognition.start();
       } catch (error) {
         status = 'idle';
+        if (!usingFallback && hasRecorderFallback) {
+          activateRecorderFallback(error.name || 'start-error');
+          return;
+        }
         if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
           fail(error, 'Autorisez le microphone dans les réglages du navigateur, puis réactivez l’écoute.');
         } else {
@@ -178,7 +436,10 @@
           }, wait);
         } else startRecognition();
       } else if (status === 'active') {
-        emit(phase, { message: phase === 'wake' ? 'Dites « Yo Moctar » ou « ELMo ».' : 'Je vous écoute…' });
+        emit(phase, {
+          fallback: usingFallback ? 'mediarecorder' : undefined,
+          message: phase === 'wake' ? 'Dites « Yo Moctar » ou « ELMo ».' : 'Je vous écoute…',
+        });
       }
     }
 
@@ -236,6 +497,7 @@
       const results = event.results || [];
       for (let index = event.resultIndex || 0; index < results.length; index += 1) {
         const result = results[index];
+        if (!result) continue;
         if (!result.isFinal) {
           // A phrase started near the end of the conversation window must not
           // be discarded just because its final transcription arrives later.
@@ -267,44 +529,22 @@
         recognition.lang = opts.language || 'fr-FR';
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.onstart = () => {
-          if (destroyed) return;
-          if (status === 'stopping') { requestStop(); return; }
-          status = 'active';
-          reconcile();
-        };
-        recognition.onresult = handleResult;
-        recognition.onspeechstart = () => {
-          if (wanted() && phase === 'listening') openFollowup();
-        };
-        recognition.onerror = (event) => {
-          if (destroyed || status === 'idle' || (status === 'stopping' && intentionalStop)) return;
-          const error = event.error || 'unknown';
-          if (error === 'not-allowed') {
-            fail(error, 'Autorisez le microphone et la reconnaissance vocale dans le navigateur, puis réactivez l’écoute.');
-          } else if (!['no-speech', 'aborted', 'audio-capture'].includes(error)) {
-            retry(error);
-          }
-          // SpeechRecognition follows these recoverable errors with onend.
-          // Silence, an aborted session or an audio-device transition must not
-          // revoke listening intent or consume an artificial retry budget.
-        };
-        recognition.onend = () => {
-          if (destroyed) return;
-          intentionalStop = false;
-          status = 'idle';
-          clearTimer('stop');
-          stuck = false;
-          if (fault && fault.recoverOnEnd) fault = null;
-          settleStopped();
-          if (wanted() && pendingRetry === null) pendingRetry = 250;
-          reconcile();
-        };
+        wireRecognition(recognition);
       } catch (error) {
         recognition = null;
-        fault = { error, message: 'La reconnaissance vocale n’a pas pu être initialisée dans ce navigateur.' };
-        state = 'error';
+        if (hasRecorderFallback) {
+          usingFallback = true;
+          recognition = createRecorderRecognition();
+          wireRecognition(recognition);
+        } else {
+          fault = { error, message: 'La reconnaissance vocale n’a pas pu être initialisée dans ce navigateur.' };
+          state = 'error';
+        }
       }
+    } else if (hasRecorderFallback) {
+      usingFallback = true;
+      recognition = createRecorderRecognition();
+      wireRecognition(recognition);
     }
 
     function available() {
@@ -324,6 +564,7 @@
       get enabled() { return enabled; },
       get listeningDesired() { return enabled; },
       get state() { return state; },
+      get usingFallback() { return usingFallback; },
       async enable() {
         if (!available()) return false;
         generation += 1;

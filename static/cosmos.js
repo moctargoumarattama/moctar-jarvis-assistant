@@ -276,12 +276,38 @@
     sunRays: [],
     sunPulse: 1.0,
     sunPulseDir: 1,
+    voiceState: 'idle',
+    shockwaves: [],
+    lastShockwaveTime: 0,
     orbitTiltAngle: 0.32,   // Inclinaison de vue perspective (cosinus d'orbite)
     orbitRotation: -0.22,   // Rotation dans le plan
     timeScale: 0.0016,
     frameCount: 0,
     lastFrameTime: performance.now(),
     fps: 60,
+
+    setVoiceState(nextState) {
+      const normalized = ['idle', 'listening', 'speaking'].includes(nextState) ? nextState : 'idle';
+      this.voiceState = normalized;
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.dataset.voiceState = normalized;
+      }
+      if (normalized === 'speaking') {
+        this.shockwaves.push({ radius: 1.0, alpha: 0.9, color: 'rgba(94, 217, 236,' });
+      }
+    },
+
+    getVoiceState() {
+      if (this.voiceState && this.voiceState !== 'idle') return this.voiceState;
+      if (typeof document !== 'undefined') {
+        const reactor = document.getElementById('jarvis-reactor');
+        const rState = reactor?.dataset?.reactorState;
+        if (rState === 'listening' || rState === 'speaking') return rState;
+        const bState = document.body?.dataset?.voiceState;
+        if (bState === 'listening' || bState === 'speaking') return bState;
+      }
+      return 'idle';
+    },
 
     init() {
       this.canvas = document.getElementById('cosmos-canvas');
@@ -612,24 +638,52 @@
       this.ctx.save();
       const cx = this.centerX;
       const cy = this.centerY;
+      const now = typeof time === 'number' ? time : performance.now();
+      const state = this.getVoiceState();
 
-      // Pulsation douce du cœur
-      this.sunPulse += 0.003 * this.sunPulseDir;
-      if (this.sunPulse > 1.08) this.sunPulseDir = -1;
-      if (this.sunPulse < 0.95) this.sunPulseDir = 1;
+      // Modulation dynamique selon l'état vocal ('idle' | 'listening' | 'speaking')
+      if (state === 'speaking') {
+        // Ondulation cinétique rapide au rythme de la parole (style sphère Jarvis)
+        this.sunPulse = 1.04 + Math.sin(now * 0.018) * 0.13 + Math.abs(Math.cos(now * 0.031)) * 0.08;
+        if (now - this.lastShockwaveTime > 220) {
+          this.lastShockwaveTime = now;
+          this.shockwaves.push({
+            radius: 1.05,
+            alpha: 0.85,
+            color: this.shockwaves.length % 2 === 0 ? 'rgba(94, 217, 236,' : 'rgba(255, 209, 102,'
+          });
+        }
+      } else if (state === 'listening') {
+        // Pulsation dynamique cyan/or d'écoute active
+        this.sunPulse = 1.02 + Math.sin(now * 0.008) * 0.11 + Math.cos(now * 0.016) * 0.04;
+      } else {
+        // Respiration lente normale ('idle')
+        this.sunPulse += 0.003 * this.sunPulseDir;
+        if (this.sunPulse > 1.08) this.sunPulseDir = -1;
+        if (this.sunPulse < 0.95) this.sunPulseDir = 1;
+      }
 
       const baseR = Math.max(34, Math.min(this.width * 0.05, 52)) * this.sunPulse;
 
       // 1. Rayons coronaux tournants
       this.ctx.save();
-      for (const ray of this.sunRays) {
-        ray.angle += ray.speed;
-        const rLen = baseR + ray.length;
+      const raySpeedMult = state === 'speaking' ? 3.8 : state === 'listening' ? 2.4 : 1.0;
+      const rayBoost = state === 'speaking' ? 1.45 : state === 'listening' ? 1.25 : 1.0;
+      for (let i = 0; i < this.sunRays.length; i++) {
+        const ray = this.sunRays[i];
+        ray.angle += ray.speed * raySpeedMult;
+        const rLen = baseR + ray.length * rayBoost;
         const rx = cx + Math.cos(ray.angle) * rLen;
         const ry = cy + Math.sin(ray.angle) * rLen;
 
-        this.ctx.strokeStyle = `rgba(255, 200, 100, ${ray.opacity * 0.35})`;
-        this.ctx.lineWidth = 2;
+        if (state === 'listening' && i % 2 === 0) {
+          this.ctx.strokeStyle = `rgba(94, 217, 236, ${Math.min(0.9, ray.opacity * 0.65)})`;
+        } else if (state === 'speaking' && i % 3 === 0) {
+          this.ctx.strokeStyle = `rgba(94, 217, 236, ${Math.min(0.95, ray.opacity * 0.75)})`;
+        } else {
+          this.ctx.strokeStyle = `rgba(255, 200, 100, ${ray.opacity * (state === 'idle' ? 0.35 : 0.6)})`;
+        }
+        this.ctx.lineWidth = state === 'speaking' ? 2.6 : state === 'listening' ? 2.2 : 2;
         this.ctx.beginPath();
         this.ctx.moveTo(cx + Math.cos(ray.angle) * baseR, cy + Math.sin(ray.angle) * baseR);
         this.ctx.lineTo(rx, ry);
@@ -637,43 +691,109 @@
       }
       this.ctx.restore();
 
-      // 2. Halo extérieur chaud
-      const haloGrad = this.ctx.createRadialGradient(cx, cy, baseR * 0.4, cx, cy, baseR * 3.4);
-      haloGrad.addColorStop(0, 'rgba(255, 190, 80, 0.45)');
-      haloGrad.addColorStop(0.3, 'rgba(255, 120, 30, 0.22)');
-      haloGrad.addColorStop(0.7, 'rgba(255, 70, 10, 0.06)');
-      haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      // 2. Halo extérieur réactif
+      const haloRadius = baseR * (state === 'speaking' ? 4.2 : state === 'listening' ? 3.9 : 3.4);
+      const haloGrad = this.ctx.createRadialGradient(cx, cy, baseR * 0.4, cx, cy, haloRadius);
+      if (state === 'listening') {
+        haloGrad.addColorStop(0, 'rgba(94, 217, 236, 0.58)');
+        haloGrad.addColorStop(0.32, 'rgba(255, 205, 85, 0.36)');
+        haloGrad.addColorStop(0.68, 'rgba(94, 217, 236, 0.14)');
+        haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      } else if (state === 'speaking') {
+        haloGrad.addColorStop(0, 'rgba(255, 225, 130, 0.65)');
+        haloGrad.addColorStop(0.35, 'rgba(94, 217, 236, 0.38)');
+        haloGrad.addColorStop(0.72, 'rgba(255, 120, 30, 0.14)');
+        haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      } else {
+        haloGrad.addColorStop(0, 'rgba(255, 190, 80, 0.45)');
+        haloGrad.addColorStop(0.3, 'rgba(255, 120, 30, 0.22)');
+        haloGrad.addColorStop(0.7, 'rgba(255, 70, 10, 0.06)');
+        haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      }
       this.ctx.fillStyle = haloGrad;
       this.ctx.beginPath();
-      this.ctx.arc(cx, cy, baseR * 3.4, 0, Math.PI * 2);
+      this.ctx.arc(cx, cy, haloRadius, 0, Math.PI * 2);
       this.ctx.fill();
+
+      // 2b. Ondes de choc radiales (shockwaves) pendant la parole ('speaking')
+      if (this.shockwaves.length > 0) {
+        for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+          const wave = this.shockwaves[i];
+          wave.radius += 0.065;
+          wave.alpha -= 0.022;
+          if (wave.alpha <= 0.01 || wave.radius > 4.4) {
+            this.shockwaves.splice(i, 1);
+            continue;
+          }
+          this.ctx.save();
+          this.ctx.strokeStyle = `${wave.color} ${wave.alpha.toFixed(3)})`;
+          this.ctx.lineWidth = Math.max(1.2, 3.2 * wave.alpha);
+          this.ctx.beginPath();
+          this.ctx.arc(cx, cy, baseR * wave.radius, 0, Math.PI * 2);
+          this.ctx.stroke();
+          this.ctx.restore();
+        }
+      }
 
       // 3. Sphère solaire incandescente avec texture d'énergie
       const sunGrad = this.ctx.createRadialGradient(
         cx - baseR * 0.25, cy - baseR * 0.25, baseR * 0.1,
         cx, cy, baseR
       );
-      sunGrad.addColorStop(0, '#ffffff');
-      sunGrad.addColorStop(0.2, '#fff1a8');
-      sunGrad.addColorStop(0.55, '#ffad33');
-      sunGrad.addColorStop(0.85, '#e65c00');
-      sunGrad.addColorStop(1, '#b33600');
+      if (state === 'listening') {
+        sunGrad.addColorStop(0, '#ffffff');
+        sunGrad.addColorStop(0.25, '#bff6ff');
+        sunGrad.addColorStop(0.6, '#ffd166');
+        sunGrad.addColorStop(0.88, '#1ca3de');
+        sunGrad.addColorStop(1, '#0b5278');
+        this.ctx.shadowColor = '#5ed9ec';
+        this.ctx.shadowBlur = 42;
+      } else if (state === 'speaking') {
+        sunGrad.addColorStop(0, '#ffffff');
+        sunGrad.addColorStop(0.22, '#fff6bf');
+        sunGrad.addColorStop(0.52, '#5ed9ec');
+        sunGrad.addColorStop(0.82, '#ff9f1c');
+        sunGrad.addColorStop(1, '#c83e00');
+        this.ctx.shadowColor = '#ffd166';
+        this.ctx.shadowBlur = 48;
+      } else {
+        sunGrad.addColorStop(0, '#ffffff');
+        sunGrad.addColorStop(0.2, '#fff1a8');
+        sunGrad.addColorStop(0.55, '#ffad33');
+        sunGrad.addColorStop(0.85, '#e65c00');
+        sunGrad.addColorStop(1, '#b33600');
+        this.ctx.shadowColor = '#ffaa33';
+        this.ctx.shadowBlur = 32;
+      }
 
-      this.ctx.shadowColor = '#ffaa33';
-      this.ctx.shadowBlur = 32;
       this.ctx.fillStyle = sunGrad;
       this.ctx.beginPath();
       this.ctx.arc(cx, cy, baseR, 0, Math.PI * 2);
       this.ctx.fill();
       this.ctx.shadowBlur = 0;
 
-      // 4. Anneau holographique autour du soleil MOCTAR
-      this.ctx.strokeStyle = 'rgba(94, 217, 236, 0.4)';
-      this.ctx.lineWidth = 1.4;
+      // 4. Anneaux holographiques autour du soleil MOCTAR
+      this.ctx.strokeStyle = state === 'listening'
+        ? 'rgba(94, 217, 236, 0.85)'
+        : state === 'speaking'
+          ? 'rgba(255, 209, 102, 0.9)'
+          : 'rgba(94, 217, 236, 0.4)';
+      this.ctx.lineWidth = state === 'idle' ? 1.4 : 2.0;
       this.ctx.setLineDash([4, 8]);
       this.ctx.beginPath();
       this.ctx.arc(cx, cy, baseR * 1.35, 0, Math.PI * 2);
       this.ctx.stroke();
+
+      if (state === 'listening' || state === 'speaking') {
+        this.ctx.strokeStyle = state === 'speaking'
+          ? 'rgba(94, 217, 236, 0.78)'
+          : 'rgba(255, 209, 102, 0.72)';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.setLineDash([8, 6]);
+        this.ctx.beginPath();
+        this.ctx.arc(cx, cy, baseR * (1.62 + Math.sin(now * 0.012) * 0.08), 0, Math.PI * 2);
+        this.ctx.stroke();
+      }
       this.ctx.setLineDash([]);
 
       this.ctx.restore();

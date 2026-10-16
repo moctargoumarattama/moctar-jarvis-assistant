@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import hmac
 import json
 import logging
 import math
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -23,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from sse_starlette.sse import EventSourceResponse
 
 import collector
+import voice_transcribe
 from config import RESTART_ALLOWLIST, Settings
 from cyberdefense import CyberDefenseManager, TRAP_PATHS
 from sentinel import SentinelManager
@@ -31,6 +34,219 @@ from whatsapp import AUDIO_MIME_TYPES, WhatsAppController
 
 LOGGER = logging.getLogger("noc-dashboard")
 BASE_DIR = Path(__file__).resolve().parent
+
+DEFAULT_TTS_VOICE = "fr-FR-HenriNeural"
+ALLOWED_TTS_VOICES = {
+    "fr-FR-HenriNeural",
+    "fr-FR-RemyMultilingualNeural",
+    "fr-FR-DeniseNeural",
+    "fr-FR-EloiseNeural",
+}
+_TTS_MEMORY_CACHE: dict[str, bytes] = {}
+_TTS_CACHE_MAX_ITEMS = 128
+DIRECT_AUDIO_MIME_TYPES = AUDIO_MIME_TYPES | {
+    "application/octet-stream",
+    "audio/webm",
+    "video/webm",
+    "audio/mp4",
+    "audio/x-m4a",
+}
+
+
+def clean_tts_text(text: str) -> str:
+    """Nettoie le Markdown et les symboles techniques pour une diction vocale fluide."""
+    cleaned = re.sub(r"```[\s\S]*?```", " ", str(text or ""))
+    cleaned = re.sub(r"`([^`]+)`", r"\1", cleaned)
+    cleaned = re.sub(r"https?://\S+", " ", cleaned)
+    cleaned = re.sub(r"[*_#>[\]()~|]", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def get_tts_cache_dir() -> Path:
+    """Retourne le dossier de cache local pour les fichiers MP3 générés par edge-tts."""
+    configured = os.environ.get("MOCTAR_TTS_CACHE_DIR", "").strip()
+    candidates = (
+        [Path(configured).expanduser()] if configured else []
+    ) + [
+        BASE_DIR / "data" / "tts_cache",
+        Path(tempfile.gettempdir()) / "moctar_tts_cache",
+    ]
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            return candidate
+        except OSError:
+            continue
+    return Path(tempfile.gettempdir())
+
+
+async def synthesize_edge_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> bytes:
+    """Génère un flux audio MP3 via edge-tts pour le texte et la voix demandés."""
+    import edge_tts
+
+    communicate = edge_tts.Communicate(text, voice)
+    audio_buffer = bytearray()
+    async for chunk in communicate.stream():
+        if isinstance(chunk, dict) and chunk.get("type") == "audio":
+            data = chunk.get("data")
+            if data:
+                audio_buffer.extend(data)
+    if not audio_buffer:
+        raise RuntimeError("edge-tts n'a retourné aucun flux audio.")
+    return bytes(audio_buffer)
+
+
+async def generate_cached_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> tuple[bytes, bool]:
+    """Retourne (mp3_bytes, cache_hit) avec mise en cache mémoire et disque."""
+    cleaned = clean_tts_text(text)
+    if not cleaned:
+        raise ValueError("Le texte à synthétiser est vide.")
+    selected_voice = voice if voice in ALLOWED_TTS_VOICES else DEFAULT_TTS_VOICE
+    cache_key = hashlib.sha256(f"{selected_voice}:{cleaned}".encode("utf-8")).hexdigest()
+
+    if cache_key in _TTS_MEMORY_CACHE:
+        return _TTS_MEMORY_CACHE[cache_key], True
+
+    cache_file = get_tts_cache_dir() / f"{cache_key}.mp3"
+    try:
+        if cache_file.is_file() and cache_file.stat().st_size > 0:
+            data = await asyncio.to_thread(cache_file.read_bytes)
+            if data:
+                if len(_TTS_MEMORY_CACHE) >= _TTS_CACHE_MAX_ITEMS:
+                    _TTS_MEMORY_CACHE.pop(next(iter(_TTS_MEMORY_CACHE)), None)
+                _TTS_MEMORY_CACHE[cache_key] = data
+                return data, True
+    except OSError:
+        pass
+
+    audio_bytes = await synthesize_edge_tts(cleaned, selected_voice)
+    if len(_TTS_MEMORY_CACHE) >= _TTS_CACHE_MAX_ITEMS:
+        _TTS_MEMORY_CACHE.pop(next(iter(_TTS_MEMORY_CACHE)), None)
+    _TTS_MEMORY_CACHE[cache_key] = audio_bytes
+    try:
+        await asyncio.to_thread(cache_file.write_bytes, audio_bytes)
+    except OSError:
+        pass
+    return audio_bytes, False
+
+
+def _extract_multipart_audio(raw_body: bytes, content_type_header: str) -> tuple[bytes, str]:
+    """Extrait le fichier audio d'une requête multipart/form-data sans dépendance externe."""
+    match = re.search(r'boundary=(?:"([^"]+)"|([^;\s]+))', content_type_header, re.IGNORECASE)
+    if not match:
+        raise ValueError("Boundary multipart manquant.")
+    boundary = (match.group(1) or match.group(2)).encode("latin-1")
+    delimiter = b"--" + boundary
+    for part in raw_body.split(delimiter):
+        part = part.strip(b"\r\n")
+        if not part or part == b"--":
+            continue
+        if b"\r\n\r\n" in part:
+            header_block, payload = part.split(b"\r\n\r\n", 1)
+        elif b"\n\n" in part:
+            header_block, payload = part.split(b"\n\n", 1)
+        else:
+            continue
+        headers_text = header_block.decode("latin-1", errors="ignore")
+        if "content-disposition" not in headers_text.lower():
+            continue
+        if payload.endswith(b"\r\n"):
+            payload = payload[:-2]
+        mime_match = re.search(r"content-type:\s*([^\r\n;]+)", headers_text, re.IGNORECASE)
+        part_mime = mime_match.group(1).strip().lower() if mime_match else "audio/wav"
+        if payload:
+            return payload, part_mime
+    raise ValueError("Aucun fichier audio trouvé dans le corps multipart.")
+
+
+def _convert_audio_for_whisper(source_path: Path, content_type: str) -> Path | None:
+    """Convertit un fichier WebM/OGG/WAV non-PCM en WAV mono 16kHz PCM si possible."""
+    if voice_transcribe.read_wav_pcm(source_path) is not None:
+        return None
+    # Essai 1 : soundfile (rapide pour WAV/FLAC/OGG supportés par libsndfile)
+    try:
+        import numpy as np
+        import soundfile as sf
+
+        data, samplerate = sf.read(str(source_path), dtype="float32", always_2d=True)
+        if data.size > 0:
+            mono = data.mean(axis=1)
+            fd, wav_name = tempfile.mkstemp(prefix="moctar-sf-", suffix=".wav")
+            os.close(fd)
+            wav_path = Path(wav_name)
+            sf.write(str(wav_path), np.clip(mono, -1.0, 1.0), samplerate, subtype="PCM_16", format="WAV")
+            return wav_path
+    except Exception:
+        pass
+    # Essai 2 : ffmpeg (universel pour WebM/Opus/MP4 capturés par MediaRecorder)
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if ffmpeg_bin:
+        import subprocess
+
+        fd, wav_name = tempfile.mkstemp(prefix="moctar-ffmpeg-", suffix=".wav")
+        os.close(fd)
+        wav_path = Path(wav_name)
+        try:
+            proc = subprocess.run(
+                [
+                    ffmpeg_bin,
+                    "-nostdin",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(source_path),
+                    "-vn",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "16000",
+                    "-c:a",
+                    "pcm_s16le",
+                    str(wav_path),
+                ],
+                capture_output=True,
+                timeout=20,
+                check=False,
+            )
+            if proc.returncode == 0 and wav_path.is_file() and wav_path.stat().st_size > 44:
+                return wav_path
+        except Exception:
+            pass
+        wav_path.unlink(missing_ok=True)
+    return None
+
+
+async def transcribe_direct_audio(audio_bytes: bytes, content_type: str = "audio/wav") -> str:
+    """Transcrit directement un blob audio (WAV/WebM/OGG) via faster-whisper local."""
+    if not audio_bytes:
+        raise ValueError("Fichier audio vide.")
+    ext = ".wav"
+    if "webm" in content_type:
+        ext = ".webm"
+    elif "ogg" in content_type or "opus" in content_type:
+        ext = ".ogg"
+    elif "mp3" in content_type or "mpeg" in content_type:
+        ext = ".mp3"
+    elif "mp4" in content_type or "m4a" in content_type:
+        ext = ".m4a"
+
+    fd, tmp_name = tempfile.mkstemp(prefix="moctar-voice-direct-", suffix=ext)
+    tmp_path = Path(tmp_name)
+    converted_path: Path | None = None
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            await asyncio.to_thread(handle.write, audio_bytes)
+        converted_path = await asyncio.to_thread(_convert_audio_for_whisper, tmp_path, content_type)
+        target_path = converted_path if converted_path is not None else tmp_path
+        return await asyncio.to_thread(voice_transcribe.transcribe_audio, target_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+        if converted_path is not None:
+            converted_path.unlink(missing_ok=True)
+
 
 try:
     from headless_bridge import JarvisHeadlessBridge
@@ -315,7 +531,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob: data:; connect-src 'self'; font-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         return response
 
     @application.get("/")
@@ -546,6 +762,91 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/api/voice/status")
     async def voice_status():
         return application.state.runtime.whatsapp.snapshot()
+
+    class VoiceTTSPayload(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        text: str = Field(..., min_length=1, max_length=4000)
+        voice: str = Field(default=DEFAULT_TTS_VOICE, max_length=80)
+
+        @model_validator(mode="after")
+        def validate_text_and_voice(self) -> VoiceTTSPayload:
+            if not self.text.strip():
+                raise ValueError("Le texte ne peut pas être vide")
+            if self.voice not in ALLOWED_TTS_VOICES:
+                self.voice = DEFAULT_TTS_VOICE
+            return self
+
+    @application.post("/api/voice/tts")
+    async def voice_tts(request: Request):
+        data = await limited_json(request, 16384)
+        payload = validate_payload(VoiceTTSPayload, data)
+        try:
+            audio_bytes, cache_hit = await generate_cached_tts(payload.text, payload.voice)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        except Exception as exc:
+            LOGGER.warning("Synthèse vocale edge-tts indisponible : %s", exc)
+            raise HTTPException(503, f"Synthèse vocale indisponible : {exc}") from None
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={
+                "X-TTS-Cache": "HIT" if cache_hit else "MISS",
+                "X-TTS-Voice": payload.voice,
+            },
+        )
+
+    @application.post("/api/voice/transcribe")
+    async def voice_transcribe_endpoint(request: Request):
+        raw_content_type = request.headers.get("content-type", "")
+        content_type = raw_content_type.split(";", 1)[0].strip().lower()
+        max_bytes = 12 * 1024 * 1024  # 12 Mio max pour un enregistrement vocal direct
+        length = request.headers.get("content-length")
+        if length:
+            try:
+                if int(length) > max_bytes or int(length) < 0:
+                    raise HTTPException(413, "Audio trop volumineux (12 Mio maximum)")
+            except ValueError:
+                raise HTTPException(400, "Content-Length invalide") from None
+
+        body = bytearray()
+        async with asyncio.timeout(30):
+            async for chunk in request.stream():
+                if len(body) + len(chunk) > max_bytes:
+                    raise HTTPException(413, "Audio trop volumineux (12 Mio maximum)")
+                body.extend(chunk)
+
+        if not body:
+            raise HTTPException(422, "Fichier audio vide")
+
+        audio_bytes = bytes(body)
+        detected_mime = content_type or "audio/wav"
+        if content_type == "multipart/form-data":
+            try:
+                audio_bytes, detected_mime = _extract_multipart_audio(audio_bytes, raw_content_type)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from None
+        elif content_type and content_type not in DIRECT_AUDIO_MIME_TYPES:
+            raise HTTPException(415, "Format audio non supporté (attendu: WAV, WebM, OGG, MP3 ou multipart/form-data)")
+
+        try:
+            transcript = await transcribe_direct_audio(audio_bytes, detected_mime)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from None
+        except Exception as exc:
+            LOGGER.warning("Erreur de transcription faster-whisper : %s", exc)
+            raise HTTPException(500, f"Échec de transcription : {exc}") from None
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "text": transcript,
+                "language": "fr",
+                "engine": "faster-whisper",
+            }
+        )
 
     @application.post("/api/voice/simulate", status_code=202)
     async def voice_simulate(request: Request):

@@ -514,3 +514,59 @@ test('manual dictation shares the enabled wake listener and stopping it restores
   assert.equal(f.speech.length, 1);
   assert.equal(f.engine.state, 'listening');
 });
+
+test('Brave network block or >3s starting stall switches automatically to MediaRecorder + /api/voice/transcribe', async t => {
+  let activeRecorder = null;
+  class FakeMediaRecorder {
+    static isTypeSupported() { return true; }
+    constructor(stream, opts = {}) {
+      this.stream = stream;
+      this.mimeType = opts.mimeType || 'audio/webm';
+      this.state = 'inactive';
+      activeRecorder = this;
+    }
+    start() { this.state = 'recording'; }
+    stop() {
+      if (this.state === 'inactive') return;
+      this.state = 'inactive';
+      this.ondataavailable?.({ data: { size: 1024, type: this.mimeType } });
+      this.onstop?.();
+    }
+  }
+  class StalledRecognition {
+    constructor() {}
+    start() {
+      // Simule Brave bloqué sur "Connexion au service de reconnaissance vocale..." sans onstart
+    }
+    abort() {}
+    stop() {}
+  }
+
+  const f = fixture(t, {
+    Recognition: StalledRecognition,
+    mediaDevices: {
+      getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }),
+    },
+    MediaRecorder: FakeMediaRecorder,
+    recorderSliceMs: 1000,
+    transcribe: async () => 'Yo Moctar quel est le statut CPU',
+  });
+
+  await f.engine.enable();
+  await f.settle();
+  assert.equal(f.engine.usingFallback, false);
+  assert.equal(f.engine.state, 'starting');
+
+  // Avance de 3000 ms -> le watchdog Brave déclenche la bascule MediaRecorder
+  f.time.advance(3000);
+  await f.settle();
+  assert.equal(f.engine.usingFallback, true);
+  assert.equal(f.engine.state, 'wake');
+  assert.ok(activeRecorder, 'MediaRecorder fallback must be active');
+
+  // Fin du segment audio -> envoi à transcribe -> exécution de la commande après "Yo Moctar"
+  f.time.advance(1000);
+  await f.settle();
+  assert.deepEqual(f.prompts, ['quel est le statut CPU']);
+});
+
