@@ -1004,13 +1004,17 @@
 
       // Cyberdéfense (Sentinel)
       const sentinel = snapshot.sentinel || {};
+      const cyber = snapshot.cyber || {};
       const blocked = sentinel.blocked_today ?? 0;
       const homeBlocked = document.getElementById('home-blocked');
       const homeSentinel = document.getElementById('home-sentinel');
       if (homeBlocked) homeBlocked.textContent = `${blocked}`;
       if (homeSentinel) {
         const sActive = sentinel.agent_status === 'active';
-        homeSentinel.textContent = sActive ? 'Sentinel actif' : 'En veille';
+        const localDefenseActive = cyber.mode === 'application' || cyber.firewall_active === true ||
+          cyber.rules_loaded === true || cyber.rule_count > 0;
+        homeSentinel.textContent = sActive ? 'Sentinel actif' :
+          localDefenseActive ? 'Surveillance locale active' : 'En attente de protection';
       }
 
       // 5. Journal d'événements (2 derniers logs sur l'accueil)
@@ -1695,6 +1699,14 @@
   }
 
   // Exposition globale pour tests et compatibilité
+  // Browsers may suspend requestAnimationFrame in background tabs. Reset clocks
+  // on return so the next frame resumes smoothly without a large delta jump.
+  document.addEventListener('visibilitychange', () => {
+    const now = performance.now();
+    SolarEngine.lastFrameTime = now;
+    QuantumNexus.lastTime = now;
+  });
+
   window.CosmosEngine = {
     ModalManager,
     SolarEngine,

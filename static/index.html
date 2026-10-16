@@ -2203,7 +2203,7 @@
       });
 
       setTimeout(fetchJarvisStatus, 1500);
-      setInterval(() => { if (!document.hidden && !jarvisState.busy) fetchJarvisStatus(); }, 10000);
+      setInterval(() => { if (!jarvisState.busy) fetchJarvisStatus(); }, 10000);
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden && !jarvisState.busy) fetchJarvisStatus();
       });

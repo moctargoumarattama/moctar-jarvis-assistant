@@ -50,6 +50,14 @@ class EnvironmentConfigTests(unittest.TestCase):
             self.assertEqual(Settings.from_env().vps_token, '')
         with patch.dict(os.environ, {'NOC_VPS_TOKEN':'private-test-vps'}, clear=True):
             self.assertEqual(Settings.from_env().vps_token, 'private-test-vps')
+        for alias in ('VPS_TOKEN', 'X_VPS_TOKEN'):
+            with self.subTest(alias=alias), patch.dict(os.environ, {alias: 'private-test-alias'}, clear=True):
+                self.assertEqual(Settings.from_env().vps_token, 'private-test-alias')
+        with patch.dict(os.environ, {
+            'NOC_VPS_TOKEN': 'primary-token', 'VPS_TOKEN': 'fallback-token',
+            'X_VPS_TOKEN': 'last-resort-token',
+        }, clear=True):
+            self.assertEqual(Settings.from_env().vps_token, 'primary-token')
 
     def test_multiple_whatsapp_admins_are_normalized_and_deduplicated(self):
         with patch.dict(os.environ, {

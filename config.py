@@ -478,7 +478,7 @@ class Settings:
             interval=_noc_number("NOC_INTERVAL_SECONDS", 2, 0.5, 60),
             backup_path=os.environ.get("NOC_BACKUP_PATH", "/mnt/babamarket-backups"),
             gateway_secret=os.environ.get("NOC_GATEWAY_SECRET", cls.__dataclass_fields__["gateway_secret"].default),
-            vps_token=os.environ.get("NOC_VPS_TOKEN", ""),
+            vps_token=os.environ.get("NOC_VPS_TOKEN") or os.environ.get("VPS_TOKEN") or os.environ.get("X_VPS_TOKEN", ""),
             admin_token=os.environ.get("NOC_ADMIN_TOKEN", ""),
             enable_restart=_noc_boolean("NOC_ENABLE_RESTART", True),
             vps_stale_seconds=_noc_number("NOC_VPS_STALE_SECONDS", 20, 5, 3600),

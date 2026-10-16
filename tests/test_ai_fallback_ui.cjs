@@ -184,7 +184,7 @@ test('the obsolete offline dialog and local model controls are removed from the 
   }
 });
 
-test('cloud status refreshes every ten seconds and on visibility without interrupting a request', async () => {
+test('cloud status keeps polling in background and refreshes on return without interrupting a request', async () => {
   const ui = frontend({status: {online: true, model: 'gemini-3.5-flash-lite'}});
   vm.runInContext(section('      setTimeout(fetchJarvisStatus, 1500);',
     '      // -----------------------------------------------------------------------'), ui.context);
@@ -197,15 +197,23 @@ test('cloud status refreshes every ten seconds and on visibility without interru
   ui.intervals[0].fn();
   ui.events.visibilitychange();
   await new Promise(setImmediate);
-  assert.equal(ui.requests.length, 1);
+  assert.equal(ui.requests.length, 2);
   ui.context.document.hidden = false;
   ui.context.jarvisState.busy = true;
   ui.intervals[0].fn();
   ui.events.visibilitychange();
   await new Promise(setImmediate);
-  assert.equal(ui.requests.length, 1);
+  assert.equal(ui.requests.length, 2);
   ui.context.jarvisState.busy = false;
   ui.events.visibilitychange();
   await new Promise(setImmediate);
-  assert.equal(ui.requests.length, 2);
+  assert.equal(ui.requests.length, 3);
+});
+
+test('cyber defense dashboard reports local monitoring instead of idle when its module is active', () => {
+  const cosmos = fs.readFileSync(path.join(__dirname, '../static/cosmos.js'), 'utf8');
+  assert.match(cosmos, /cyber\.mode === 'application'/);
+  assert.match(cosmos, /'Surveillance locale active'/);
+  assert.doesNotMatch(cosmos, /homeSentinel\.textContent = sActive \? 'Sentinel actif' : 'En veille'/);
+  assert.match(cosmos, /visibilitychange[\s\S]*SolarEngine\.lastFrameTime = now/);
 });
