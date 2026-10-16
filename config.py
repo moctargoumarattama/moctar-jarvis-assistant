@@ -458,6 +458,7 @@ class Settings:
     whisper_model_path: str = "/opt/jarvis/models/whisper"
     whisper_python: str = "/opt/jarvis/venv/bin/python"
     whisper_timeout: float = 120.0
+    groq_api_key: str = ""
     backup_script: str = "/usr/local/bin/backup-babamarket.sh"
     backup_timeout: float = 300.0
     voice_remote_url: str = ""
@@ -509,6 +510,7 @@ class Settings:
             whisper_model_path=os.environ.get("NOC_WHISPER_MODEL_PATH", "/opt/jarvis/models/whisper") or "/opt/jarvis/models/whisper",
             whisper_python=os.environ.get("NOC_WHISPER_PYTHON", "/opt/jarvis/venv/bin/python"),
             whisper_timeout=_noc_number("NOC_WHISPER_TIMEOUT", 120, 5, 300),
+            groq_api_key=os.environ.get("GROQ_API_KEY", "") or os.environ.get("NOC_GROQ_API_KEY", ""),
             backup_script=os.environ.get("NOC_BACKUP_SCRIPT", os.environ.get("NOC_BABAMARKET_BACKUP_SCRIPT", "/usr/local/bin/backup-babamarket.sh")) or "/usr/local/bin/backup-babamarket.sh",
             backup_timeout=_noc_number("NOC_BACKUP_TIMEOUT", 300, 5, 1800),
             voice_remote_url=os.environ.get("NOC_VOICE_REMOTE_URL", ""),

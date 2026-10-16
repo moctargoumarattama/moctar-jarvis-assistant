@@ -463,6 +463,64 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
         )
         self.assertTrue(result.get("fallback_courtesy"))
 
+    def test_transcribe_audio_groq_whisper_and_fallback_to_local(self) -> None:
+        """Vérifie la transcription via l'API Groq Whisper Large-v3 et le repli local si la clé est absente ou en échec."""
+        loud_wav = encode_pcm16_wav(struct.pack("<hhhh", 0, 10000, -10000, 0))
+        loud_path = self.temp_dir / "groq_test.wav"
+        loud_path.write_bytes(loud_wav)
+
+        # 1. Groq API réussie avec GROQ_API_KEY
+        with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test_secret_key"}), patch(
+            "voice_transcribe.transcribe_groq_api", return_value="Yo Moctar ouvre YouTube"
+        ) as groq_mock, patch("voice_transcribe._dependency") as dep_mock:
+            result = voice_transcribe.transcribe_audio(loud_path)
+            self.assertEqual(result, "Yo Moctar ouvre YouTube")
+            groq_mock.assert_called_once_with(loud_path, api_key=None)
+            dep_mock.assert_not_called()
+
+        # 2. Rejet des hallucinations répétitives (ex: 'c'est une vidéo' répété 4+ fois)
+        repetitive_hallucination = "c'est une vidéo, c'est une vidéo, c'est une vidéo, c'est une vidéo"
+        self.assertTrue(voice_transcribe.has_repetitive_hallucination(repetitive_hallucination))
+        self.assertEqual(voice_transcribe.filter_whisper_hallucinations(repetitive_hallucination), "")
+
+        # 3. Repli automatique sur faster-whisper local si Groq échoue ou si GROQ_API_KEY est absente
+        local_model(self.temp_dir / "models" / "whisper")
+        engine = Mock()
+        engine.transcribe.return_value = (iter([SimpleNamespace(text="Moctar en local", no_speech_prob=0.05)]), None)
+        factory = Mock(return_value=engine)
+
+        with patch.dict(os.environ, {"GROQ_API_KEY": ""}, clear=False), patch(
+            "voice_transcribe.transcribe_groq_api", return_value=None
+        ), patch.object(voice_transcribe, "APP_DIR", self.temp_dir), patch.object(
+            voice_transcribe, "_dependency", return_value=(factory, False)
+        ):
+            fallback_text = voice_transcribe.transcribe_audio(loud_path)
+            self.assertEqual(fallback_text, "Moctar en local")
+            self.assertEqual(engine.transcribe.call_count, 1)
+            kwargs = engine.transcribe.call_args.kwargs
+            self.assertEqual(kwargs["compression_ratio_threshold"], 2.2)
+
+    def test_transcribe_groq_api_direct_http_call(self) -> None:
+        """Vérifie l'appel HTTP vers l'API Groq Whisper Large-v3."""
+        fake_wav = self.temp_dir / "test_api.wav"
+        fake_wav.write_bytes(b"RIFF44WAVEfmt 16000data0000")
+        fake_response = Mock()
+        fake_response.status_code = 200
+        fake_response.json.return_value = {"text": "Bonjour Moctar"}
+
+        with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_12345"}), patch(
+            "requests.post", return_value=fake_response
+        ) as post_mock:
+            text = voice_transcribe.transcribe_groq_api(fake_wav)
+            self.assertEqual(text, "Bonjour Moctar")
+            post_mock.assert_called_once()
+            call_kwargs = post_mock.call_args.kwargs
+            self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer gsk_12345")
+            self.assertEqual(call_kwargs["data"]["model"], "whisper-large-v3-turbo")
+            self.assertEqual(call_kwargs["data"]["language"], "fr")
+            self.assertEqual(call_kwargs["data"]["temperature"], "0.0")
+            self.assertIn("prompt", call_kwargs["data"])
+
 
 if __name__ == "__main__":
     unittest.main()

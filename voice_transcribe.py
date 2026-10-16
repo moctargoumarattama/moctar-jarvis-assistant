@@ -12,7 +12,9 @@ import json
 import logging
 import os
 import re
+import time
 import wave
+from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
 
@@ -235,6 +237,26 @@ HALLUCINATION_EXACT_PHRASES = {
 }
 
 
+def has_repetitive_hallucination(text: str) -> bool:
+    """Détecte les répétitions dégénérées de motifs (ex: 'c'est une vidéo' répété plus de 3 fois)."""
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return False
+    # Répétition d'un motif textuel de 3 à 50 caractères plus de 3 fois (au moins 4 occurrences consécutives)
+    pattern = r"(\b.{3,50}?\b)(?:[\s,.:;!?…—–-]+(?:\1)){3,}"
+    if re.search(pattern, cleaned, re.IGNORECASE):
+        return True
+    # Répétition de n-grams de mots plus de 3 fois (>= 4 occurrences)
+    words = [w.lower() for w in re.split(r"[\s,.:;!?…—–-]+", cleaned) if w]
+    if len(words) >= 8:
+        for n in (1, 2, 3, 4, 5):
+            ngrams = [" ".join(words[i : i + n]) for i in range(len(words) - n + 1)]
+            counts = Counter(ngrams)
+            if any(cnt >= 4 for cnt in counts.values()):
+                return True
+    return False
+
+
 def filter_whisper_hallucinations(text: str) -> str:
     """Élimine les hallucinations récurrentes de Whisper sur du silence ou du bruit de fond."""
     cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
@@ -246,6 +268,8 @@ def filter_whisper_hallucinations(text: str) -> str:
     for pattern in HALLUCINATION_SUBSTRINGS:
         if pattern in lowered:
             return ""
+    if has_repetitive_hallucination(cleaned):
+        return ""
     # Rejeter les répétitions dégénérées d'un même mot ou symbole bruité
     tokens = [tok for tok in re.split(r"\W+", lowered) if tok]
     if not tokens:
@@ -277,17 +301,103 @@ def load_audio(path: str | os.PathLike[str]) -> np.ndarray | str:
     return samples if samples is not None else str(path)
 
 
-def transcribe_audio(audio_path: str | os.PathLike[str], *, allow_empty: bool = False) -> str:
-    """Transcrire l'audio fourni avec le modèle local résolu, CPU/int8, deux threads."""
+def transcribe_groq_api(audio_path: str | os.PathLike[str], api_key: str | None = None) -> str | None:
+    """Transcrit l'audio via l'API Groq Whisper Large-v3 (< 150ms) si GROQ_API_KEY est configurée."""
+    key = (api_key or os.environ.get("GROQ_API_KEY", "") or os.environ.get("NOC_GROQ_API_KEY", "")).strip()
+    if not key:
+        return None
+
+    audio = Path(audio_path)
+    if not audio.is_file() or audio.stat().st_size == 0:
+        return None
+
+    start_time = time.perf_counter()
+    url = "https://api.groq.com/openai/v1/audio/transcriptions"
+    model = os.environ.get("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
+
+    # Essai 1 : SDK groq si présent
+    try:
+        from groq import Groq  # type: ignore[import-not-found]
+
+        client = Groq(api_key=key, timeout=12.0)
+        with audio.open("rb") as f:
+            resp = client.audio.transcriptions.create(
+                file=(audio.name, f.read()),
+                model=model,
+                language="fr",
+                temperature=0.0,
+                prompt="Moctar, Yo Moctar, Jarvis, assistant vocal personnel.",
+                response_format="json",
+            )
+        text = str(getattr(resp, "text", "") or "").strip()
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        logger.info(f"⚡ [GROQ WHISPER LARGE-V3] ({duration_ms}ms): '{text}'")
+        return text
+    except ImportError:
+        pass
+    except Exception as exc:
+        logger.warning("Groq SDK transcription a échoué (%s), tentative via HTTP direct", exc)
+
+    # Essai 2 : requêtes HTTP directes via requests ou httpx
+    suffix = audio.suffix.lower()
+    mime = "audio/wav" if suffix == ".wav" else "audio/webm" if suffix == ".webm" else "audio/mpeg" if suffix == ".mp3" else "application/octet-stream"
+    headers = {"Authorization": f"Bearer {key}"}
+    data = {
+        "model": model,
+        "language": "fr",
+        "temperature": "0.0",
+        "prompt": "Moctar, Yo Moctar, Jarvis, assistant vocal personnel.",
+        "response_format": "json",
+    }
+
+    try:
+        import requests
+
+        with audio.open("rb") as f:
+            files = {"file": (audio.name, f, mime)}
+            res = requests.post(url, headers=headers, files=files, data=data, timeout=12.0)
+        if res.status_code == 200:
+            text = str(res.json().get("text") or "").strip()
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
+            logger.info(f"⚡ [GROQ WHISPER LARGE-V3] ({duration_ms}ms): '{text}'")
+            return text
+        else:
+            logger.warning("Groq API HTTP %s: %s", res.status_code, res.text[:200])
+            return None
+    except Exception as exc:
+        logger.warning("Groq API transcription indisponible (%s), repli sur faster-whisper local", exc)
+        return None
+
+
+def transcribe_audio(
+    audio_path: str | os.PathLike[str],
+    *,
+    allow_empty: bool = False,
+    groq_api_key: str | None = None,
+) -> str:
+    """Transcrire l'audio fourni via Groq Whisper Large-v3 (< 150ms) ou repli sur faster-whisper local."""
     audio = Path(audio_path)
     if not _readable_asset(audio):
         raise ValueError("Audio absent, vide ou non lisible.")
-    readiness = is_voice_ready()
-    if not readiness["ready"]:
-        raise RuntimeError(readiness["reason"])
     loaded_audio = load_audio(audio)
     if is_silent_pcm(loaded_audio):
         return ""
+
+    # 1. Tentative ultra-rapide via Groq API si GROQ_API_KEY est configurée
+    groq_text = transcribe_groq_api(audio, api_key=groq_api_key)
+    if groq_text is not None:
+        filtered = filter_whisper_hallucinations(groq_text)
+        if groq_text.strip() and not filtered:
+            if allow_empty:
+                return ""
+            raise ValueError("Aucune parole reconnue.")
+        return filtered
+
+    # 2. Repli automatique sur faster-whisper local avec garde-fous stricts
+    readiness = is_voice_ready()
+    if not readiness["ready"]:
+        raise RuntimeError(readiness["reason"])
+
     factory, _ = _dependency()
     model = factory(readiness["model_path"], device="cpu", compute_type="int8",
                     cpu_threads=2, num_workers=1, local_files_only=True)
@@ -299,6 +409,7 @@ def transcribe_audio(audio_path: str | os.PathLike[str], *, allow_empty: bool = 
         temperature=0.0,
         vad_filter=True,
         condition_on_previous_text=False,
+        compression_ratio_threshold=2.2,
         no_speech_threshold=0.6,
         initial_prompt="Moctar, Yo Moctar, Jarvis, ELMo, assistant vocal personnel de Moctar.",
     )
