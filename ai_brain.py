@@ -1910,16 +1910,57 @@ def voice_fast_llm_reply(
     Injecte en temps réel le contexte vivant du Dell M4800 et bascule
     sur runtime.ai_brain.chat en fallback automatique si GROQ_API_KEY est absente ou en échec.
     """
-    groq_api_key = os.environ.get("GROQ_API_KEY", "").strip()
+    groq_api_key = (
+        os.environ.get("GROQ_API_KEY", "")
+        or os.environ.get("NOC_GROQ_API_KEY", "")
+        or getattr(getattr(runtime, "settings", None), "groq_api_key", "")
+        or getattr(config, "GROQ_API_KEY", "")
+        or ""
+    ).strip()
     telemetry = build_live_system_context(runtime)
     base_prompt = system_prompt or (
-        "Tu es M.O.C.T.A.R (style JARVIS). "
-        "Réponds TOUJOURS en français, en 1 à 2 phrases courtes maximum (moins de 25 mots), "
-        "ton posé, précis, intelligent, et termine par 'Moctar'."
+        "Tu es M.O.C.T.A.R, l'intelligence artificielle avancée, OS personnel et copilote d'ingénierie de Moctar (style JARVIS suprême). "
+        "Tu t'exprimes toujours en français avec assurance, intelligence, culture et respect. "
+        "Pour une salutation simple, sois cordial, direct et bref (1 phrase). "
+        "Pour une question de savoir, recherche, culture, géographie ou sciences (par exemple des informations sur le Maroc, le Niger, ou la physique), "
+        "fournis une synthèse intelligente, structurée et captivante en 2 à 4 phrases fluides (environ 40 à 60 mots), "
+        "en donnant directement les faits essentiels et pertinents. "
+        "Ne dis jamais que tu es un simple assistant ou que tu n'as pas accès à internet. "
+        "Termine naturellement par 'Moctar'."
     )
     full_system_prompt = f"{base_prompt}\n\n{telemetry}"
 
     if groq_api_key:
+        # Essai 1 : SDK Groq officiel (utilisé si le package groq est installé)
+        try:
+            from groq import Groq  # type: ignore[import-not-found]
+
+            client = Groq(api_key=groq_api_key, timeout=8.0)
+            for model_candidate in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
+                try:
+                    start_t = time.perf_counter()
+                    completion = client.chat.completions.create(
+                        model=model_candidate,
+                        messages=[
+                            {"role": "system", "content": full_system_prompt},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.3,
+                        max_tokens=250,
+                    )
+                    reply = str(completion.choices[0].message.content or "").strip()
+                    duration_ms = int((time.perf_counter() - start_t) * 1000)
+                    if reply:
+                        logger.info("⚡ [GROQ SDK %s] (%dms): '%s'", model_candidate.upper(), duration_ms, reply)
+                        return reply
+                except Exception as model_err:
+                    logger.warning("Groq SDK modèle %s a échoué: %s", model_candidate, model_err)
+        except ImportError:
+            pass
+        except Exception as sdk_err:
+            logger.warning("Groq SDK initialisation a échoué: %s", sdk_err)
+
+        # Essai 2 : Requête HTTP directe vers l'API Groq (fallback direct universel)
         try:
             import requests
 
@@ -1928,23 +1969,27 @@ def voice_fast_llm_reply(
                 "Authorization": f"Bearer {groq_api_key}",
                 "Content-Type": "application/json",
             }
-            payload = {
-                "model": "llama-3.3-70b-versatile",
-                "messages": [
-                    {"role": "system", "content": full_system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.3,
-                "max_tokens": 120,
-            }
-            resp = requests.post(url, headers=headers, json=payload, timeout=4.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                reply = data["choices"][0]["message"]["content"].strip()
-                if reply:
-                    return reply
+            for model_candidate in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
+                payload = {
+                    "model": model_candidate,
+                    "messages": [
+                        {"role": "system", "content": full_system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 250,
+                }
+                resp = requests.post(url, headers=headers, json=payload, timeout=8.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    reply = str(data["choices"][0]["message"]["content"] or "").strip()
+                    if reply:
+                        logger.info("⚡ [GROQ HTTP %s]: '%s'", model_candidate.upper(), reply)
+                        return reply
+                else:
+                    logger.warning("Groq Chat API HTTP %s (%s): %s", resp.status_code, model_candidate, resp.text)
         except Exception as exc:
-            logger.warning("Groq Llama-3.3-70B a échoué (%s), repli sur Gemini / ai_brain.", exc)
+            logger.warning("Groq HTTP a échoué (%s), repli sur Gemini / ai_brain.", exc)
 
     # Repli automatique sur ai_brain (Gemini) si pas de clé Groq ou échec
     brain = getattr(runtime, "ai_brain", None)
@@ -1958,10 +2003,10 @@ def voice_fast_llm_reply(
         try:
             chat_res = brain.chat(prompt, system_prompt=full_system_prompt)
             reply = str(chat_res.get("content") or "").strip()
-            if reply:
+            if reply and not chat_res.get("fallback_courtesy"):
                 return reply
         except Exception as exc:
             logger.warning("Repli ai_brain a échoué: %s", exc)
 
-    return "À vos ordres Moctar, tous les systèmes sont nominaux."
+    return "À vos ordres Moctar, je suis en ligne et tous les systèmes sont opérationnels."
 

@@ -564,8 +564,8 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             payload = call_kwargs["json"]
             self.assertEqual(payload["model"], "llama-3.3-70b-versatile")
             self.assertEqual(payload["temperature"], 0.3)
-            self.assertEqual(payload["max_tokens"], 120)
-            self.assertEqual(call_kwargs["timeout"], 4.0)
+            self.assertEqual(payload["max_tokens"], 250)
+            self.assertEqual(call_kwargs["timeout"], 8.0)
             system_msg = payload["messages"][0]["content"]
             self.assertIn("TÉLÉMÉTRIE EN TEMPS RÉEL DU SERVEUR DELL PRECISION M4800", system_msg)
             self.assertIn("Date et heure :", system_msg)

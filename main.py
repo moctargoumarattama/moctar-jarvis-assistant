@@ -254,9 +254,14 @@ except Exception:
         AGENT_SYSTEM_PROMPT = "Tu es M.O.C.T.A.R, l'OS personnel et copilote d'ingénierie de Moctar. Réponds avec concision et précision en français."
 
 VOICE_FAST_SYSTEM_PROMPT = (
-    "Tu es M.O.C.T.A.R (style JARVIS). "
-    "Réponds TOUJOURS en français, en 1 à 2 phrases courtes maximum (moins de 25 mots), "
-    "ton posé, précis, intelligent, et termine par 'Moctar'."
+    "Tu es M.O.C.T.A.R, l'intelligence artificielle avancée, OS personnel et copilote d'ingénierie de Moctar (style JARVIS suprême). "
+    "Tu t'exprimes toujours en français avec assurance, intelligence, culture et respect. "
+    "Pour une salutation simple, sois cordial, direct et bref (1 phrase). "
+    "Pour une question de savoir, recherche, culture, géographie ou sciences (par exemple des informations sur le Maroc, le Niger, ou la physique), "
+    "fournis une synthèse intelligente, structurée et captivante en 2 à 4 phrases fluides (environ 40 à 60 mots), "
+    "en donnant directement les faits essentiels et pertinents. "
+    "Ne dis jamais que tu es un simple assistant ou que tu n'as pas accès à internet. "
+    "Termine naturellement par 'Moctar'."
 )
 
 
@@ -1228,7 +1233,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "thought_chain": ["Commande locale instantanée sans LLM (0ms)"],
                 "fast_path": True,
             }
-        elif is_conversational_fast_path(command_text) and (os.environ.get("GROQ_API_KEY") or getattr(runtime, "ai_brain", None)):
+        elif is_conversational_fast_path(command_text) and (
+            os.environ.get("GROQ_API_KEY")
+            or os.environ.get("NOC_GROQ_API_KEY")
+            or getattr(getattr(runtime, "settings", None), "groq_api_key", None)
+            or getattr(runtime, "ai_brain", None)
+        ):
             display_user_text = command_text
             LOGGER.info("⚡ [VOICE FAST-PATH]: Routage conversationnel Groq Llama-3.3-70B (< 200ms) pour '%s'", command_text)
             try:
