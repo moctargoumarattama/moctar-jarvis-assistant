@@ -83,7 +83,7 @@ def get_tts_cache_dir() -> Path:
 
 async def synthesize_edge_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> bytes:
     """Génère un flux audio MP3 via edge-tts pour le texte et la voix demandés."""
-    import edge_tts
+    import edge_tts  # type: ignore[import-not-found,import-untyped]
 
     communicate = edge_tts.Communicate(text, voice)
     audio_buffer = bytearray()
@@ -210,7 +210,7 @@ def _convert_audio_for_whisper(source_path: Path, content_type: str) -> Path | N
     # Essai 1 : soundfile (rapide pour WAV/FLAC/OGG supportés par libsndfile)
     try:
         import numpy as np
-        import soundfile as sf
+        import soundfile as sf  # type: ignore[import-not-found,import-untyped]
 
         data, samplerate = sf.read(str(source_path), dtype="float32", always_2d=True)
         if data.size > 0:
