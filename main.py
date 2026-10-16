@@ -211,6 +211,54 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
     return False, "", False
 
 
+try:
+    from agent_core import AGENT_SYSTEM_PROMPT
+except Exception:
+    try:
+        from ai_brain import MOCTAR_SYSTEM_PROMPT as AGENT_SYSTEM_PROMPT
+    except Exception:
+        AGENT_SYSTEM_PROMPT = "Tu es M.O.C.T.A.R, l'OS personnel et copilote d'ingénierie de Moctar. Réponds avec concision et précision en français."
+
+
+_SYSTEM_ACTION_KEYWORDS = {
+    "relance", "restart", "redemarre", "redemarrer", "arrete", "arreter", "stop",
+    "vps", "docker", "container", "whatsapp", "cpu", "memoire", "ram", "disque", "disk", "log", "logs",
+    "iot", "lampe", "lumiere", "relais", "temperature", "capteur",
+    "service", "services", "systemctl", "bannir", "bloquer", "ip", "fail2ban", "sentinel", "cyber",
+    "backup", "sauvegarde", "ouvre", "ouvrir", "lance", "lancer", "execute", "executer",
+    "cherche", "chercher", "recherche", "rechercher", "youtube", "site", "web",
+    "processus", "port", "tache", "taches", "ping", "reseau", "connexion", "statut", "status", "metrique", "metriques", "charge",
+    "kill", "ps", "top", "htop", "journalctl", "systeme",
+}
+
+
+def is_conversational_fast_path(text: str) -> bool:
+    """Détecte les échanges conversationnels ou questions générales simples (< 6 mots sans action système)."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return False
+    normalized = _strip_accents_1to1(cleaned).lower()
+    tokens = [tok.strip(" ,.:;!?-'\u2019") for tok in re.split(r"[\s,.:;!?-]+", normalized) if tok.strip(" ,.:;!?-'\u2019")]
+    if not tokens:
+        return False
+
+    for tok in tokens:
+        if tok in _SYSTEM_ACTION_KEYWORDS:
+            return False
+
+    explicit_patterns = (
+        r"^(c['’]?est\s+quoi\s+ton\s+nom|quel\s+est\s+ton\s+nom|comment\s+tu\s+t['’]?appelles|"
+        r"qui\s+es[- ]tu|presente[- ]toi|tu\s+es\s+qui|que\s+fais[- ]tu|tu\s+sers\s+a\s+quoi|"
+        r"comment\s+(?:vas[- ]tu|ca\s+va|tu\s+vas)|ca\s+va|tu\s+vas\s+bien|"
+        r"bonjour|salut|bonsoir|coucou|hello|merci|bonne\s+nuit|au\s+revoir|a\s+plus\s+tard|"
+        r"qui\s+t['’]?a\s+cree|d['’]?ou\s+viens[- ]tu|qui\s+est\s+ton\s+createur)$"
+    )
+    if re.search(explicit_patterns, normalized):
+        return True
+
+    return len(tokens) < 6
+
+
 def _extract_multipart_audio(raw_body: bytes, content_type_header: str) -> tuple[bytes, str]:
     """Extrait le fichier audio d'une requête multipart/form-data sans dépendance externe."""
     match = re.search(r'boundary=(?:"([^"]+)"|([^;\s]+))', content_type_header, re.IGNORECASE)
@@ -469,6 +517,13 @@ class Runtime:
                 LOGGER.info("JarvisHeadlessBridge connecté au Runtime NOC.")
             except Exception as exc:
                 LOGGER.error("Erreur lors de l'initialisation de JarvisHeadlessBridge: %s", exc)
+        self.ai_brain: Any = getattr(self.jarvis, "brain", None) if self.jarvis else None
+        if self.ai_brain is None:
+            try:
+                from ai_brain import AIBrain
+                self.ai_brain = AIBrain()
+            except Exception:
+                self.ai_brain = None
 
     def vps_snapshot(self) -> list[dict[str, Any]]:
         now = time.monotonic()
@@ -1054,7 +1109,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         runtime.voice_session_until = time.monotonic() + VOICE_SESSION_DURATION_SECONDS
 
         agent_result: dict[str, Any] = {}
-        if command_text == _WAKE_ONLY_SENTINEL:
+        if command_text == _WAKE_ONLY_SENTINEL or _is_pure_filler_or_wake(command_text):
             display_user_text = transcript
             reply_text = VOICE_BUTLER_GREETINGS[0]
             agent_result = {
@@ -1062,7 +1117,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "reply": reply_text,
                 "tools_used": [],
                 "thought_chain": [],
+                "fast_path": True,
             }
+        elif is_conversational_fast_path(command_text) and getattr(runtime, "ai_brain", None):
+            display_user_text = command_text
+            LOGGER.info("⚡ [VOICE FAST-PATH]: Routage conversationnel direct (< 800ms) pour '%s'", command_text)
+            try:
+                chat_res = await asyncio.to_thread(
+                    runtime.ai_brain.chat,
+                    command_text,
+                    system_prompt=AGENT_SYSTEM_PROMPT,
+                )
+                reply_text = str(chat_res.get("content") or "À vos ordres Moctar.").strip()
+                agent_result = {
+                    "status": "success",
+                    "reply": reply_text,
+                    "tools_used": [],
+                    "thought_chain": ["Routage conversationnel direct (< 800ms)"],
+                    "fast_path": True,
+                }
+                if runtime.jarvis and getattr(runtime.jarvis, "memory", None):
+                    try:
+                        session_id = getattr(runtime.jarvis, "active_session_id", "session_voice")
+                        runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
+                        runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
+                    except Exception:
+                        pass
+            except Exception as exc:
+                LOGGER.warning("Erreur fast-path conversationnel : %s", exc)
+                if runtime.jarvis:
+                    agent_result = await runtime.jarvis.execute_prompt_async(
+                        user_input=command_text,
+                        source="web_voice",
+                    )
+                else:
+                    agent_result = {
+                        "status": "error",
+                        "reply": "Je reste à votre écoute Moctar.",
+                    }
+                reply_text = str(
+                    agent_result.get("reply")
+                    or agent_result.get("response")
+                    or "Bien reçu, Moctar."
+                ).strip()
         else:
             display_user_text = command_text
             if runtime.jarvis:
@@ -1110,6 +1207,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "title": agent_result.get("title"),
                 "tools_used": agent_result.get("tools_used", []),
                 "thought_chain": agent_result.get("thought_chain", []),
+                "fast_path": bool(agent_result.get("fast_path")),
                 "fallback_mode": bool(agent_result.get("fallback_mode")),
                 "model_offline": bool(agent_result.get("model_offline")),
             }

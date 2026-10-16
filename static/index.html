@@ -2102,7 +2102,7 @@
           starting: '🟢 À l\'écoute — Dites « Yo Moctar »',
           wake: '🟢 À l\'écoute — Dites « Yo Moctar »',
           listening: '🎙️ Moctar vous écoute...',
-          processing: '⚡ Moctar réfléchit...',
+          processing: '⚡ M.O.C.T.A.R calcule la réponse...',
           speaking: '🔊 Moctar vous parle…',
           paused: 'Écoute suspendue : revenez sur le dashboard.',
           error: 'Écoute interrompue. Réactivez le micro.',
@@ -2131,7 +2131,7 @@
         set('jarvis-mic-hint', label);
         jarvisState.isListening = ['starting', 'wake', 'listening'].includes(phase);
         $('jarvis-mic-btn')?.classList.toggle('listening', jarvisState.isListening);
-        const solarVoiceState = phase === 'listening' ? 'listening' : phase === 'speaking' ? 'speaking' : 'idle';
+        const solarVoiceState = phase === 'listening' ? 'listening' : phase === 'processing' ? 'thinking' : phase === 'speaking' ? 'speaking' : 'idle';
         window.CosmosEngine?.SolarEngine?.setVoiceState?.(solarVoiceState);
         const reactor = $('jarvis-reactor');
         if (reactor && !jarvisState.busy) {

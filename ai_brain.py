@@ -1482,13 +1482,15 @@ class AIBrain:
         messages: Union[str, List[Dict[str, Any]]],
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: Optional[float] = None,
+        system_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Exécute un tour de conversation avec support universel du Tool Calling.
 
         Args:
-            messages: Historique des messages au format [{"role": "...", "content": "..."}].
+            messages: Historique des messages au format [{"role": "...", "content": "..."}] ou simple chaîne prompt.
             tools: Schémas des outils disponibles au format JSON Schema standard.
             temperature: Température d'échantillonnage (0.2 par defaut).
+            system_prompt: Prompt système optionnel pour orienter l'inférence.
 
         Returns:
             Dict[str, Any] normalisé :
@@ -1499,10 +1501,20 @@ class AIBrain:
             }
         """
         try:
-            messages = self._chat_messages(messages)
+            if isinstance(messages, str):
+                msg_list: list[dict[str, Any]] = []
+                if system_prompt:
+                    msg_list.append({"role": "system", "content": str(system_prompt)})
+                msg_list.append({"role": "user", "content": messages})
+                normalized_messages = self._chat_messages(msg_list)
+            else:
+                msg_list = list(messages)
+                if system_prompt and not any(isinstance(m, dict) and m.get("role") == "system" for m in msg_list):
+                    msg_list.insert(0, {"role": "system", "content": str(system_prompt)})
+                normalized_messages = self._chat_messages(msg_list)
             result = _with_inference_deadline(
                 lambda: self._chat_gemini(
-                    messages, tools=tools,
+                    normalized_messages, tools=tools,
                     temperature=GENERATION_CONFIG["temperature"] if temperature is None else temperature,
                 ),
                 self.gemini_timeout,

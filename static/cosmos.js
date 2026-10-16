@@ -325,7 +325,7 @@
     },
 
     setVoiceState(nextState) {
-      const normalized = ['idle', 'listening', 'speaking'].includes(nextState) ? nextState : 'idle';
+      const normalized = ['idle', 'listening', 'thinking', 'speaking'].includes(nextState) ? nextState : 'idle';
       this.voiceState = normalized;
       if (normalized === 'idle') {
         this.isUserSpeaking = false;
@@ -344,9 +344,9 @@
       if (typeof document !== 'undefined') {
         const reactor = document.getElementById('jarvis-reactor');
         const rState = reactor?.dataset?.reactorState;
-        if (rState === 'listening' || rState === 'speaking') return rState;
+        if (rState === 'listening' || rState === 'thinking' || rState === 'speaking') return rState;
         const bState = document.body?.dataset?.voiceState;
-        if (bState === 'listening' || bState === 'speaking') return bState;
+        if (bState === 'listening' || bState === 'thinking' || bState === 'speaking') return bState;
       }
       return 'idle';
     },
@@ -615,6 +615,8 @@
     },
 
     drawOrbits() {
+      const state = this.getVoiceState();
+      this.orbitRotation += (state === 'thinking' ? 0.0035 : 0.0006);
       this.ctx.save();
       this.ctx.translate(this.centerX, this.centerY);
       this.ctx.rotate(this.orbitRotation);
@@ -633,6 +635,12 @@
           this.ctx.shadowColor = p.color;
           this.ctx.shadowBlur = 12;
           this.ctx.setLineDash([6, 6]);
+        } else if (state === 'thinking') {
+          this.ctx.strokeStyle = 'rgba(94, 217, 236, 0.24)';
+          this.ctx.lineWidth = 1.3;
+          this.ctx.shadowColor = 'rgba(94, 217, 236, 0.4)';
+          this.ctx.shadowBlur = 6;
+          this.ctx.setLineDash([5, 5]);
         } else {
           this.ctx.strokeStyle = 'rgba(140, 200, 255, 0.08)';
           this.ctx.lineWidth = 1.0;
@@ -646,8 +654,10 @@
     },
 
     updatePlanets(time) {
+      const state = this.getVoiceState();
+      const speedMult = state === 'thinking' ? 2.6 : 1.0;
       for (const p of this.planets) {
-        p.angle += p.speed * this.timeScale;
+        p.angle += p.speed * this.timeScale * speedMult;
 
         // Position 3D avec perspective elliptique inclinée
         const a = p.actualRadius;
@@ -689,7 +699,7 @@
       const userTalking = Boolean(this.isUserSpeaking || vol > 0.04);
       const voiceBoost = Math.min(0.65, vol * 2.8);
 
-      // Modulation dynamique selon l'état vocal ('idle' | 'listening' | 'speaking') + VU-mètre temps réel
+      // Modulation dynamique selon l'état vocal ('idle' | 'listening' | 'thinking' | 'speaking') + VU-mètre temps réel
       if (state === 'speaking') {
         // Quand MOCTAR répond : ondes de choc radiales synchronisées avec la lecture audio edge-tts
         this.sunPulse = 1.04 + Math.sin(now * 0.018) * 0.13 + Math.abs(Math.cos(now * 0.031)) * 0.08 + voiceBoost * 0.35;
@@ -698,6 +708,17 @@
           this.shockwaves.push({
             radius: 1.05,
             alpha: 0.88,
+            color: this.shockwaves.length % 2 === 0 ? 'rgba(94, 217, 236,' : 'rgba(255, 209, 102,'
+          });
+        }
+      } else if (state === 'thinking') {
+        // Quand MOCTAR calcule : pulsation haute fréquence bleu cyan / or étincelant
+        this.sunPulse = 1.03 + Math.sin(now * 0.038) * 0.09 + Math.cos(now * 0.024) * 0.05;
+        if (now - this.lastShockwaveTime > 220) {
+          this.lastShockwaveTime = now;
+          this.shockwaves.push({
+            radius: 1.02,
+            alpha: 0.8,
             color: this.shockwaves.length % 2 === 0 ? 'rgba(94, 217, 236,' : 'rgba(255, 209, 102,'
           });
         }
@@ -723,8 +744,8 @@
 
       // 1. Rayons coronaux tournants
       this.ctx.save();
-      const raySpeedMult = state === 'speaking' ? 3.8 : (userTalking || state === 'listening') ? (2.2 + vol * 5.0) : 1.0;
-      const rayBoost = state === 'speaking' ? 1.45 : (userTalking || state === 'listening') ? (1.2 + voiceBoost * 1.1) : 1.0;
+      const raySpeedMult = state === 'speaking' ? 3.8 : state === 'thinking' ? 4.8 : (userTalking || state === 'listening') ? (2.2 + vol * 5.0) : 1.0;
+      const rayBoost = state === 'speaking' ? 1.45 : state === 'thinking' ? 1.35 : (userTalking || state === 'listening') ? (1.2 + voiceBoost * 1.1) : 1.0;
       for (let i = 0; i < this.sunRays.length; i++) {
         const ray = this.sunRays[i];
         ray.angle += ray.speed * raySpeedMult;
@@ -732,14 +753,18 @@
         const rx = cx + Math.cos(ray.angle) * rLen;
         const ry = cy + Math.sin(ray.angle) * rLen;
 
-        if ((userTalking || state === 'listening') && i % 2 === 0) {
+        if (state === 'thinking') {
+          this.ctx.strokeStyle = i % 2 === 0
+            ? `rgba(94, 217, 236, ${Math.min(0.95, ray.opacity * 0.9)})`
+            : `rgba(255, 209, 102, ${Math.min(0.95, ray.opacity * 0.85)})`;
+        } else if ((userTalking || state === 'listening') && i % 2 === 0) {
           this.ctx.strokeStyle = `rgba(255, 215, 110, ${Math.min(0.95, ray.opacity * (0.65 + vol))})`;
         } else if (state === 'speaking' && i % 3 === 0) {
           this.ctx.strokeStyle = `rgba(94, 217, 236, ${Math.min(0.95, ray.opacity * 0.75)})`;
         } else {
           this.ctx.strokeStyle = `rgba(255, 200, 100, ${ray.opacity * (state === 'idle' ? 0.35 : 0.6)})`;
         }
-        this.ctx.lineWidth = state === 'speaking' ? 2.6 : (userTalking || state === 'listening') ? (2.1 + vol * 2.5) : 2;
+        this.ctx.lineWidth = state === 'speaking' ? 2.6 : state === 'thinking' ? 2.4 : (userTalking || state === 'listening') ? (2.1 + vol * 2.5) : 2;
         this.ctx.beginPath();
         this.ctx.moveTo(cx + Math.cos(ray.angle) * baseR, cy + Math.sin(ray.angle) * baseR);
         this.ctx.lineTo(rx, ry);
@@ -747,16 +772,23 @@
       }
       this.ctx.restore();
 
-      // 2. Halo doré extérieur réactif au volume RMS de la voix
+      // 2. Halo doré/cyan extérieur réactif
       const haloScale = state === 'speaking'
         ? 4.2
-        : (userTalking || state === 'listening')
-          ? (3.6 + voiceBoost * 2.4)
-          : 3.4;
+        : state === 'thinking'
+          ? 3.9
+          : (userTalking || state === 'listening')
+            ? (3.6 + voiceBoost * 2.4)
+            : 3.4;
       const haloRadius = baseR * haloScale;
       const haloAlphaBoost = Math.min(0.38, vol * 1.4);
       const haloGrad = this.ctx.createRadialGradient(cx, cy, baseR * 0.35, cx, cy, haloRadius);
-      if (userTalking || state === 'listening') {
+      if (state === 'thinking') {
+        haloGrad.addColorStop(0, 'rgba(94, 217, 236, 0.65)');
+        haloGrad.addColorStop(0.32, 'rgba(255, 209, 102, 0.42)');
+        haloGrad.addColorStop(0.7, 'rgba(14, 116, 144, 0.16)');
+        haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      } else if (userTalking || state === 'listening') {
         haloGrad.addColorStop(0, `rgba(255, 218, 110, ${(0.55 + haloAlphaBoost).toFixed(3)})`);
         haloGrad.addColorStop(0.32, `rgba(94, 217, 236, ${(0.34 + haloAlphaBoost * 0.7).toFixed(3)})`);
         haloGrad.addColorStop(0.68, `rgba(255, 155, 45, ${(0.14 + haloAlphaBoost * 0.4).toFixed(3)})`);
@@ -802,7 +834,15 @@
         cx - baseR * 0.25, cy - baseR * 0.25, baseR * 0.1,
         cx, cy, baseR
       );
-      if (userTalking || state === 'listening') {
+      if (state === 'thinking') {
+        sunGrad.addColorStop(0, '#ffffff');
+        sunGrad.addColorStop(0.18, '#c8f8ff');
+        sunGrad.addColorStop(0.48, '#5ed9ec');
+        sunGrad.addColorStop(0.78, '#ffd166');
+        sunGrad.addColorStop(1, '#ff9f1c');
+        this.ctx.shadowColor = '#5ed9ec';
+        this.ctx.shadowBlur = 54;
+      } else if (userTalking || state === 'listening') {
         sunGrad.addColorStop(0, '#ffffff');
         sunGrad.addColorStop(0.25, '#fff4b8');
         sunGrad.addColorStop(0.58, '#ffd166');
@@ -837,19 +877,21 @@
       // 4. Anneaux holographiques et VU-mètre autour du soleil MOCTAR
       this.ctx.strokeStyle = (userTalking || state === 'listening')
         ? 'rgba(255, 209, 102, 0.92)'
-        : state === 'speaking'
-          ? 'rgba(94, 217, 236, 0.92)'
+        : (state === 'speaking' || state === 'thinking')
+          ? 'rgba(94, 217, 236, 0.95)'
           : 'rgba(94, 217, 236, 0.4)';
-      this.ctx.lineWidth = state === 'idle' && !userTalking ? 1.4 : (2.0 + vol * 2.5);
+      this.ctx.lineWidth = (state === 'idle' && !userTalking) ? 1.4 : (2.0 + vol * 2.5);
       this.ctx.setLineDash([4, 8]);
       this.ctx.beginPath();
-      this.ctx.arc(cx, cy, baseR * (1.35 + voiceBoost * 0.35), 0, Math.PI * 2);
+      this.ctx.arc(cx, cy, baseR * (1.35 + voiceBoost * 0.35 + (state === 'thinking' ? Math.sin(now * 0.03) * 0.04 : 0)), 0, Math.PI * 2);
       this.ctx.stroke();
 
-      if (userTalking || state === 'listening' || state === 'speaking') {
+      if (userTalking || state === 'listening' || state === 'speaking' || state === 'thinking') {
         this.ctx.strokeStyle = state === 'speaking'
           ? 'rgba(94, 217, 236, 0.78)'
-          : 'rgba(255, 209, 102, 0.82)';
+          : state === 'thinking'
+            ? 'rgba(255, 209, 102, 0.9)'
+            : 'rgba(255, 209, 102, 0.82)';
         this.ctx.lineWidth = 1.6 + vol * 2.0;
         this.ctx.setLineDash([8, 6]);
         this.ctx.beginPath();

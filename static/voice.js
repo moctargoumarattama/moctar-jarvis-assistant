@@ -16,7 +16,7 @@
   const GREETING = 'À vos ordres Moctar, je vous écoute.';
   const WAKE_READY_MESSAGE = "🟢 À l'écoute — Dites « Yo Moctar »";
   const VOICE_DETECTED_MESSAGE = '🎙️ Moctar vous écoute...';
-  const THINKING_MESSAGE = '⚡ Moctar réfléchit...';
+  const THINKING_MESSAGE = '⚡ M.O.C.T.A.R calcule la réponse...';
 
   // Micro-WAV PCM 8kHz mono 16-bit silencieux valide (46 octets) pour déverrouiller l'autoplay sur Brave / iOS / Chrome
   const SILENT_WAV_DATA_URI =
@@ -117,6 +117,43 @@
       const solar = resolveSolarEngine();
       if (solar && typeof solar.setVoiceActivity === 'function') {
         solar.setVoiceActivity(rmsLevel, speakingFlag);
+      }
+    }
+
+    function updateSolarVoiceState(voiceState) {
+      const solar = resolveSolarEngine();
+      if (solar && typeof solar.setVoiceState === 'function') {
+        solar.setVoiceState(voiceState);
+      }
+    }
+
+    /**
+     * Bip sonore synthétique discret de confirmation de fin de prise de parole (880Hz -> 1320Hz sur 90 ms).
+     */
+    function playEndSpeechChime() {
+      try {
+        const ctx = audioCtx || (AudioContextClass ? new AudioContextClass() : null);
+        if (!ctx) return;
+        if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+          ctx.resume().catch(() => {});
+        }
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(1320, now + 0.09);
+
+        gain.gain.setValueAtTime(0.08, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.095);
+      } catch {
+        // Fallback muet sécurisé si AudioContext bloqué ou indisponible
       }
     }
 
@@ -310,6 +347,7 @@
       silenceElapsedMs = 0;
       currentRms = 0;
       updateSolarActivity(0, false);
+      updateSolarVoiceState('idle');
 
       if (recorder) {
         try {
@@ -482,6 +520,7 @@
         }
 
         if (payload.ignored || !payload.reply_text) {
+          updateSolarVoiceState('idle');
           if (wanted()) {
             emit(phase, {
               rms: 0,
@@ -498,6 +537,7 @@
         try {
           onInteractResult?.(payload);
           const replyText = String(payload.reply_text || '').trim();
+          updateSolarVoiceState('speaking');
           emit('speaking', {
             transcript: payload.user_text || '',
             reply: replyText,
@@ -520,6 +560,7 @@
         }
       } catch {
         processingAudio = false;
+        updateSolarVoiceState('idle');
         if (wanted()) {
           emit(phase, {
             rms: 0,
@@ -538,6 +579,8 @@
       silenceElapsedMs = 0;
       currentRms = 0;
       updateSolarActivity(0, false);
+      updateSolarVoiceState('thinking');
+      playEndSpeechChime();
       emit('processing', {
         rms: 0,
         isSpeaking: false,
@@ -577,6 +620,7 @@
       };
       recorder.onstop = () => {
         clearMaxSpeechTimer();
+        updateSolarVoiceState('thinking');
         const captured = recordedChunks.splice(0);
         const type = (recorder && recorder.mimeType) || mimeType;
         recorder = null;

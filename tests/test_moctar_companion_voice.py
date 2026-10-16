@@ -325,6 +325,65 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
                 self.assertTrue(detected, live_whisper_log)
                 self.assertEqual(cmd, main._WAKE_ONLY_SENTINEL, live_whisper_log)
 
+    def test_voice_interact_conversational_fast_path(self) -> None:
+        """Vérifie le routage rapide (< 1s) direct vers ai_brain.chat pour les salutations et questions simples sans action système."""
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 2500, -2500, 2500, -2500))
+        fake_mp3 = b"ID3-FASTPATH-MP3"
+        jarvis_mock = AsyncMock()
+        self.app.state.runtime.jarvis = SimpleNamespace(execute_prompt_async=jarvis_mock)
+        chat_mock = Mock(return_value={"content": "Je m'appelle M.O.C.T.A.R, votre copilote vocal.", "finish_reason": "stop"})
+        self.app.state.runtime.ai_brain = SimpleNamespace(chat=chat_mock)
+
+        with patch("main.synthesize_edge_tts", new=AsyncMock(return_value=fake_mp3)):
+            # 1. Question conversationnelle simple : "Yo Moctar comment tu t'appelles ?"
+            self.app.state.runtime.voice_session_until = 0.0
+            with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Moctar comment tu t'appelles ?"):
+                resp = self.client.post(
+                    "/api/voice/interact",
+                    content=wav_bytes,
+                    headers={"Content-Type": "audio/wav"},
+                )
+                self.assertEqual(resp.status_code, 200)
+                data = resp.json()
+                self.assertTrue(data["ok"])
+                self.assertFalse(data["ignored"])
+                self.assertTrue(data["fast_path"])
+                self.assertEqual(data["user_text"], "comment tu t'appelles")
+                self.assertEqual(data["reply_text"], "Je m'appelle M.O.C.T.A.R, votre copilote vocal.")
+                self.assertTrue(data["audio_url"].startswith("/api/voice/tts/cache/"))
+                chat_mock.assert_called_once_with(
+                    "comment tu t'appelles",
+                    system_prompt=main.AGENT_SYSTEM_PROMPT,
+                )
+                jarvis_mock.assert_not_awaited()
+
+            # 2. Requête système complexe : ne passe PAS par le fast-path, appelle execute_prompt_async
+            chat_mock.reset_mock()
+            jarvis_mock.reset_mock()
+            jarvis_mock.return_value = {
+                "status": "success",
+                "reply": "Service docker relancé avec succès.",
+                "tools_used": ["docker_restart"],
+                "thought_chain": ["Relance du service docker"],
+            }
+            with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Moctar relance docker"):
+                resp2 = self.client.post(
+                    "/api/voice/interact",
+                    content=wav_bytes,
+                    headers={"Content-Type": "audio/wav"},
+                )
+                self.assertEqual(resp2.status_code, 200)
+                data2 = resp2.json()
+                self.assertTrue(data2["ok"])
+                self.assertFalse(data2["ignored"])
+                self.assertFalse(data2["fast_path"])
+                self.assertEqual(data2["reply_text"], "Service docker relancé avec succès.")
+                chat_mock.assert_not_called()
+                jarvis_mock.assert_awaited_once_with(
+                    user_input="relance docker",
+                    source="web_voice",
+                )
+
     def test_transcribe_audio_passes_initial_prompt_to_bias_moctar(self) -> None:
         """Vérifie que transcribe_audio injecte initial_prompt pour biaiser le décodeur de Whisper vers 'Moctar'."""
         local_model(self.temp_dir / "models" / "whisper")
