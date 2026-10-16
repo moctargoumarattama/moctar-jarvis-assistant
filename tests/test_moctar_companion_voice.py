@@ -384,8 +384,39 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
                     source="web_voice",
                 )
 
+            # 3. Requête conversationnelle longue (> 6 mots) sans mot-clé système : routage direct Gemini par défaut (routeur inversé)
+            chat_mock.reset_mock()
+            jarvis_mock.reset_mock()
+            chat_mock.return_value = {
+                "content": "La première exoplanète confirmée autour d'une étoile similaire au Soleil a été découverte en 1995, Moctar.",
+                "finish_reason": "stop",
+            }
+            with patch(
+                "main.voice_transcribe.transcribe_audio",
+                return_value="Yo Moctar raconte-moi une découverte fascinante sur l'astrophysique et les trous noirs",
+            ):
+                resp3 = self.client.post(
+                    "/api/voice/interact",
+                    content=wav_bytes,
+                    headers={"Content-Type": "audio/wav"},
+                )
+                self.assertEqual(resp3.status_code, 200)
+                data3 = resp3.json()
+                self.assertTrue(data3["ok"])
+                self.assertFalse(data3["ignored"])
+                self.assertTrue(data3["fast_path"])
+                self.assertEqual(
+                    data3["reply_text"],
+                    "La première exoplanète confirmée autour d'une étoile similaire au Soleil a été découverte en 1995, Moctar.",
+                )
+                chat_mock.assert_called_once_with(
+                    "raconte-moi une découverte fascinante sur l'astrophysique et les trous noirs",
+                    system_prompt=main.AGENT_SYSTEM_PROMPT,
+                )
+                jarvis_mock.assert_not_awaited()
+
     def test_transcribe_audio_passes_initial_prompt_to_bias_moctar(self) -> None:
-        """Vérifie que transcribe_audio injecte initial_prompt pour biaiser le décodeur de Whisper vers 'Moctar'."""
+        """Vérifie que transcribe_audio injecte initial_prompt pour biaiser le décodeur de Whisper vers 'Moctar' avec décodage greedy rapide."""
         local_model(self.temp_dir / "models" / "whisper")
         loud_wav = encode_pcm16_wav(struct.pack("<hhhh", 0, 10000, -10000, 0))
         loud_path = self.temp_dir / "speech.wav"
@@ -401,8 +432,9 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertEqual(text, "Moctar à l'écoute")
             kwargs = engine.transcribe.call_args.kwargs
             self.assertEqual(kwargs["language"], "fr")
-            self.assertEqual(kwargs["beam_size"], 5)
-            self.assertEqual(kwargs["best_of"], 5)
+            self.assertEqual(kwargs["beam_size"], 1)
+            self.assertEqual(kwargs["best_of"], 1)
+            self.assertEqual(kwargs["temperature"], 0.0)
             self.assertIn("initial_prompt", kwargs)
             self.assertIn("Moctar", kwargs["initial_prompt"])
 

@@ -294,8 +294,9 @@ def transcribe_audio(audio_path: str | os.PathLike[str], *, allow_empty: bool = 
     segments, _ = model.transcribe(
         loaded_audio,
         language="fr",
-        beam_size=5,
-        best_of=5,
+        beam_size=1,
+        best_of=1,
+        temperature=0.0,
         vad_filter=True,
         condition_on_previous_text=False,
         no_speech_threshold=0.6,

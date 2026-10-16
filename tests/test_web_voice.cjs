@@ -244,7 +244,7 @@ function createWebAudioFixture(t, overrides = {}) {
     timers: time.timers,
     requestAnimationFrame: time.requestAnimationFrame,
     cancelAnimationFrame: time.cancelAnimationFrame,
-    vadSilenceMs: 600,
+    vadSilenceMs: 500,
     vadThreshold: 0.04,
     maxSpeechMs: 3500,
     storage: { getItem: () => null, setItem() {}, removeItem() {} },
@@ -355,7 +355,7 @@ test('enabling warms up window.MoctarSpeaker, inserts 120Hz highpass BiquadFilte
   assert.equal(wakeStates.at(-1).detail.message, '🟢 À l\'écoute — Dites « Yo Moctar »');
 });
 
-test('60 FPS VU-meter triggers on RMS > 0.04, stops after 600ms silence, reuses window.MoctarSpeaker, and updates status labels', async t => {
+test('60 FPS VU-meter triggers on RMS > 0.04, stops after 500ms silence, reuses window.MoctarSpeaker, and updates status labels', async t => {
   const f = createWebAudioFixture(t);
   await f.engine.enable();
   await f.settle();

@@ -66,7 +66,7 @@
     const AudioPlayerClass = opts.Audio || (typeof win.Audio === 'function' ? win.Audio : (typeof Audio === 'function' ? Audio : null));
     const fetchImpl = opts.fetch || (typeof win.fetch === 'function' ? win.fetch.bind(win) : (typeof fetch === 'function' ? fetch : null));
     const interactUrl = opts.interactUrl || '/api/voice/interact';
-    const vadSilenceMs = typeof opts.vadSilenceMs === 'number' ? opts.vadSilenceMs : 600;
+    const vadSilenceMs = typeof opts.vadSilenceMs === 'number' ? opts.vadSilenceMs : 500;
     const vadThreshold = typeof opts.vadThreshold === 'number' ? opts.vadThreshold : 0.04;
     const maxSpeechMs = typeof opts.maxSpeechMs === 'number' ? opts.maxSpeechMs : 3500;
     const frameIntervalMs = typeof opts.frameIntervalMs === 'number' ? opts.frameIntervalMs : (1000 / 60);

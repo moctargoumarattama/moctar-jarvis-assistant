@@ -36,6 +36,8 @@ LOGGER = logging.getLogger("noc-dashboard")
 BASE_DIR = Path(__file__).resolve().parent
 
 DEFAULT_TTS_VOICE = "fr-FR-HenriNeural"
+DEFAULT_TTS_RATE = "+20%"
+DEFAULT_TTS_PITCH = "+2Hz"
 ALLOWED_TTS_VOICES = {
     "fr-FR-HenriNeural",
     "fr-FR-RemyMultilingualNeural",
@@ -81,11 +83,16 @@ def get_tts_cache_dir() -> Path:
     return Path(tempfile.gettempdir())
 
 
-async def synthesize_edge_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> bytes:
-    """Génère un flux audio MP3 via edge-tts pour le texte et la voix demandés."""
+async def synthesize_edge_tts(
+    text: str,
+    voice: str = DEFAULT_TTS_VOICE,
+    rate: str = DEFAULT_TTS_RATE,
+    pitch: str = DEFAULT_TTS_PITCH,
+) -> bytes:
+    """Génère un flux audio MP3 via edge-tts avec cadence vive (+20%) et pitch adapté."""
     import edge_tts  # type: ignore[import-not-found,import-untyped]
 
-    communicate = edge_tts.Communicate(text, voice)
+    communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
     audio_buffer = bytearray()
     async for chunk in communicate.stream():
         if isinstance(chunk, dict) and chunk.get("type") == "audio":
@@ -97,13 +104,20 @@ async def synthesize_edge_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> byte
     return bytes(audio_buffer)
 
 
-async def generate_cached_tts_with_key(text: str, voice: str = DEFAULT_TTS_VOICE) -> tuple[bytes, bool, str]:
+async def generate_cached_tts_with_key(
+    text: str,
+    voice: str = DEFAULT_TTS_VOICE,
+    rate: str = DEFAULT_TTS_RATE,
+    pitch: str = DEFAULT_TTS_PITCH,
+) -> tuple[bytes, bool, str]:
     """Retourne (mp3_bytes, cache_hit, cache_key) avec mise en cache mémoire et disque."""
     cleaned = clean_tts_text(text)
     if not cleaned:
         raise ValueError("Le texte à synthétiser est vide.")
     selected_voice = voice if voice in ALLOWED_TTS_VOICES else DEFAULT_TTS_VOICE
-    cache_key = hashlib.sha256(f"{selected_voice}:{cleaned}".encode("utf-8")).hexdigest()
+    selected_rate = rate or DEFAULT_TTS_RATE
+    selected_pitch = pitch or DEFAULT_TTS_PITCH
+    cache_key = hashlib.sha256(f"{selected_voice}:{selected_rate}:{selected_pitch}:{cleaned}".encode("utf-8")).hexdigest()
 
     if cache_key in _TTS_MEMORY_CACHE:
         return _TTS_MEMORY_CACHE[cache_key], True, cache_key
@@ -120,7 +134,10 @@ async def generate_cached_tts_with_key(text: str, voice: str = DEFAULT_TTS_VOICE
     except OSError:
         pass
 
-    audio_bytes = await synthesize_edge_tts(cleaned, selected_voice)
+    if selected_rate == DEFAULT_TTS_RATE and selected_pitch == DEFAULT_TTS_PITCH:
+        audio_bytes = await synthesize_edge_tts(cleaned, selected_voice)
+    else:
+        audio_bytes = await synthesize_edge_tts(cleaned, selected_voice, rate=selected_rate, pitch=selected_pitch)
     if len(_TTS_MEMORY_CACHE) >= _TTS_CACHE_MAX_ITEMS:
         _TTS_MEMORY_CACHE.pop(next(iter(_TTS_MEMORY_CACHE)), None)
     _TTS_MEMORY_CACHE[cache_key] = audio_bytes
@@ -131,9 +148,14 @@ async def generate_cached_tts_with_key(text: str, voice: str = DEFAULT_TTS_VOICE
     return audio_bytes, False, cache_key
 
 
-async def generate_cached_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> tuple[bytes, bool]:
+async def generate_cached_tts(
+    text: str,
+    voice: str = DEFAULT_TTS_VOICE,
+    rate: str = DEFAULT_TTS_RATE,
+    pitch: str = DEFAULT_TTS_PITCH,
+) -> tuple[bytes, bool]:
     """Retourne (mp3_bytes, cache_hit) avec mise en cache mémoire et disque."""
-    audio_bytes, cache_hit, _ = await generate_cached_tts_with_key(text, voice)
+    audio_bytes, cache_hit, _ = await generate_cached_tts_with_key(text, voice, rate=rate, pitch=pitch)
     return audio_bytes, cache_hit
 
 
@@ -220,43 +242,37 @@ except Exception:
         AGENT_SYSTEM_PROMPT = "Tu es M.O.C.T.A.R, l'OS personnel et copilote d'ingénierie de Moctar. Réponds avec concision et précision en français."
 
 
-_SYSTEM_ACTION_KEYWORDS = {
-    "relance", "restart", "redemarre", "redemarrer", "arrete", "arreter", "stop",
-    "vps", "docker", "container", "whatsapp", "cpu", "memoire", "ram", "disque", "disk", "log", "logs",
-    "iot", "lampe", "lumiere", "relais", "temperature", "capteur",
-    "service", "services", "systemctl", "bannir", "bloquer", "ip", "fail2ban", "sentinel", "cyber",
-    "backup", "sauvegarde", "ouvre", "ouvrir", "lance", "lancer", "execute", "executer",
-    "cherche", "chercher", "recherche", "rechercher", "youtube", "site", "web",
-    "processus", "port", "tache", "taches", "ping", "reseau", "connexion", "statut", "status", "metrique", "metriques", "charge",
-    "kill", "ps", "top", "htop", "journalctl", "systeme",
+SYSTEM_COMMAND_KEYWORDS = {
+    "redémarre", "redemarre", "relance", "arrête", "arrete", "stop",
+    "status", "statut", "docker", "vps", "whatsapp", "cpu", "ram",
+    "disque", "memoire", "mémoire", "systemctl", "service", "services",
+    "iot", "onduleur", "solaire", "batterie", "audit",
 }
 
 
-def is_conversational_fast_path(text: str) -> bool:
-    """Détecte les échanges conversationnels ou questions générales simples (< 6 mots sans action système)."""
+def is_system_command(text: str) -> bool:
+    """Détecte si la commande contient un ordre ou un mot-clé système strict."""
     cleaned = (text or "").strip()
     if not cleaned:
         return False
     normalized = _strip_accents_1to1(cleaned).lower()
     tokens = [tok.strip(" ,.:;!?-'\u2019") for tok in re.split(r"[\s,.:;!?-]+", normalized) if tok.strip(" ,.:;!?-'\u2019")]
-    if not tokens:
+    raw_tokens = [tok.strip(" ,.:;!?-'\u2019") for tok in re.split(r"[\s,.:;!?-]+", cleaned.lower()) if tok.strip(" ,.:;!?-'\u2019")]
+    all_tokens = set(tokens) | set(raw_tokens)
+    for tok in all_tokens:
+        if tok in SYSTEM_COMMAND_KEYWORDS:
+            return True
+        if tok.endswith("s") and tok[:-1] in SYSTEM_COMMAND_KEYWORDS:
+            return True
+    return False
+
+
+def is_conversational_fast_path(text: str) -> bool:
+    """Routeur inversé par défaut : 100% des interactions vocales sans mot-clé système explicite vont au fast-path Gemini direct (< 800ms)."""
+    cleaned = (text or "").strip()
+    if not cleaned:
         return False
-
-    for tok in tokens:
-        if tok in _SYSTEM_ACTION_KEYWORDS:
-            return False
-
-    explicit_patterns = (
-        r"^(c['’]?est\s+quoi\s+ton\s+nom|quel\s+est\s+ton\s+nom|comment\s+tu\s+t['’]?appelles|"
-        r"qui\s+es[- ]tu|presente[- ]toi|tu\s+es\s+qui|que\s+fais[- ]tu|tu\s+sers\s+a\s+quoi|"
-        r"comment\s+(?:vas[- ]tu|ca\s+va|tu\s+vas)|ca\s+va|tu\s+vas\s+bien|"
-        r"bonjour|salut|bonsoir|coucou|hello|merci|bonne\s+nuit|au\s+revoir|a\s+plus\s+tard|"
-        r"qui\s+t['’]?a\s+cree|d['’]?ou\s+viens[- ]tu|qui\s+est\s+ton\s+createur)$"
-    )
-    if re.search(explicit_patterns, normalized):
-        return True
-
-    return len(tokens) < 6
+    return not is_system_command(cleaned)
 
 
 def _extract_multipart_audio(raw_body: bytes, content_type_header: str) -> tuple[bytes, str]:
@@ -909,6 +925,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         model_config = ConfigDict(extra="ignore")
         text: str = Field(..., min_length=1, max_length=4000)
         voice: str = Field(default=DEFAULT_TTS_VOICE, max_length=80)
+        rate: str = Field(default=DEFAULT_TTS_RATE, max_length=20)
+        pitch: str = Field(default=DEFAULT_TTS_PITCH, max_length=20)
 
         @model_validator(mode="after")
         def validate_text_and_voice(self) -> VoiceTTSPayload:
@@ -923,7 +941,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data = await limited_json(request, 16384)
         payload = validate_payload(VoiceTTSPayload, data)
         try:
-            audio_bytes, cache_hit = await generate_cached_tts(payload.text, payload.voice)
+            audio_bytes, cache_hit = await generate_cached_tts(
+                payload.text,
+                payload.voice,
+                rate=payload.rate,
+                pitch=payload.pitch,
+            )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
         except Exception as exc:
