@@ -5,9 +5,11 @@ import contextlib
 import io
 import json
 import os
+import struct
 import sys
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -178,6 +180,44 @@ class VoiceReadinessTests(unittest.TestCase):
         self.assertTrue(engine.transcribe.call_args.kwargs["vad_filter"])
         self.assertEqual(engine.transcribe.call_args.kwargs["language"], "fr")
         self.download.assert_not_called()
+
+    def test_pcm_wav_is_passed_as_float32_array_without_pyav(self) -> None:
+        import numpy as np
+
+        path = local_model(self.app / "models" / "whisper")
+        audio = self.temporary / "pcm.wav"
+        with wave.open(str(audio), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes(struct.pack("<hhh", 0, 16384, -32768))
+
+        engine = Mock()
+        engine.transcribe.return_value = (iter([SimpleNamespace(text="statut")]), None)
+        self.factory.return_value = engine
+        self.assertEqual(voice.transcribe_audio(audio), "statut")
+        samples = engine.transcribe.call_args.args[0]
+        self.assertIsInstance(samples, np.ndarray)
+        self.assertEqual(samples.dtype, np.float32)
+        np.testing.assert_allclose(samples, [0.0, 0.5, -1.0])
+        self.assertNotIsInstance(samples, (str, Path))
+        self.assertEqual(self.factory.call_args.args[0], str(path.resolve()))
+
+    def test_non_pcm_wav_falls_back_to_faster_whisper_path(self) -> None:
+        path = local_model(self.app / "models" / "whisper")
+        audio = self.temporary / "stereo.wav"
+        with wave.open(str(audio), "wb") as wav:
+            wav.setnchannels(2)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes(struct.pack("<hh", 0, 0))
+
+        engine = Mock()
+        engine.transcribe.return_value = (iter([SimpleNamespace(text="statut")]), None)
+        self.factory.return_value = engine
+        self.assertEqual(voice.transcribe_audio(audio), "statut")
+        self.assertEqual(engine.transcribe.call_args.args[0], str(audio))
+        self.assertEqual(self.factory.call_args.args[0], str(path.resolve()))
 
     def test_no_model_or_missing_audio_never_constructs_engine(self) -> None:
         with self.assertRaises(ValueError):

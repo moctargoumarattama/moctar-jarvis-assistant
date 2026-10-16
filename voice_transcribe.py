@@ -11,6 +11,7 @@ import importlib
 import json
 import os
 import re
+import wave
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -183,6 +184,26 @@ def is_voice_ready() -> dict[str, Any]:
     return result
 
 
+def read_wav_pcm(path: str | os.PathLike[str]) -> np.ndarray | None:
+    """Read mono 16-bit PCM WAV directly, avoiding PyAV's decoder path."""
+    import numpy as np
+
+    try:
+        with wave.open(str(path), "rb") as wf:
+            if wf.getsampwidth() != 2 or wf.getnchannels() != 1:
+                return None
+            frames = wf.readframes(wf.getnframes())
+            return np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+    except Exception:
+        return None
+
+
+def load_audio(path: str | os.PathLike[str]) -> np.ndarray | str:
+    """Prefer direct PCM decoding; leave other supported formats to faster-whisper."""
+    samples = read_wav_pcm(path)
+    return samples if samples is not None else str(path)
+
+
 def transcribe_audio(audio_path: str | os.PathLike[str]) -> str:
     """Transcrire l'audio fourni avec le modèle local résolu, CPU/int8, deux threads."""
     audio = Path(audio_path)
@@ -194,7 +215,7 @@ def transcribe_audio(audio_path: str | os.PathLike[str]) -> str:
     factory, _ = _dependency()
     model = factory(readiness["model_path"], device="cpu", compute_type="int8",
                     cpu_threads=2, num_workers=1, local_files_only=True)
-    segments, _ = model.transcribe(str(audio), language="fr", beam_size=1, best_of=1,
+    segments, _ = model.transcribe(load_audio(audio), language="fr", beam_size=1, best_of=1,
                                    vad_filter=True, condition_on_previous_text=False)
     pieces: list[str] = []
     size = 0
@@ -231,9 +252,9 @@ def main() -> int:
     try:
         print(json.dumps({"text": transcribe_audio(args.audio)}, ensure_ascii=True))
         return 0
-    except Exception:
-        # Pas de transcription, de secret ni de traceback dans les journaux.
-        print(json.dumps({"error": "Transcription locale impossible; vérifier --check."}))
+    except Exception as exc:
+        # Le worker est jetable: rendre le vrai motif exploitable dans son JSON.
+        print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=True))
         return 1
 
 
