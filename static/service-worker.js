@@ -1,6 +1,6 @@
 'use strict';
 
-const SW_VERSION = 'v3.1';
+const SW_VERSION = 'v4.0';
 
 // Installation metadata only: pages, scripts, telemetry and API responses are never cached.
 self.addEventListener('install', event => {
@@ -9,7 +9,7 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
-    // Delete dashboard caches and purge any stale .js entries from CacheStorage (v3.1).
+    // Delete dashboard caches and purge any stale .js or /api/voice/* entries from CacheStorage (v4.0).
     const ownedPrefixes = ['moctar-noc-', 'jarvis-noc-', 'moctar-', 'jarvis-'];
     const names = await caches.keys();
     for (const name of names) {
@@ -21,7 +21,10 @@ self.addEventListener('activate', event => {
           const requests = await cache.keys();
           await Promise.all(
             requests
-              .filter(req => new URL(req.url).pathname.endsWith('.js'))
+              .filter(req => {
+                const pathname = new URL(req.url).pathname;
+                return pathname.endsWith('.js') || pathname.startsWith('/api/voice/');
+              })
               .map(req => cache.delete(req))
           );
         } catch {}
@@ -34,7 +37,13 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const request = event.request;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin || request.method !== 'GET') return;
+  if (url.origin !== self.location.origin) return;
+  // Mode NetworkOnly strict pour toutes les routes vocales (/api/voice/*)
+  if (url.pathname.startsWith('/api/voice/')) {
+    event.respondWith(fetch(request, {cache: 'no-store'}));
+    return;
+  }
+  if (request.method !== 'GET') return;
   // Let the native connection stream SSE without an intermediary response.
   if ((request.headers.get('accept') || '').includes('text/event-stream')) return;
   event.respondWith(fetch(request, {cache: 'no-store'}));

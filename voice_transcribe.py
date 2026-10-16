@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import logging
 import os
 import re
 import wave
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
+logger = logging.getLogger(__name__)
 APP_DIR = Path("/opt/noc-dashboard")
 MODEL_NAMES = ("tiny", "base")
 
@@ -311,6 +313,8 @@ def transcribe_audio(audio_path: str | os.PathLike[str], *, allow_empty: bool = 
             raise ValueError("Transcription trop longue.")
         pieces.append(piece)
     raw_text = " ".join(pieces).strip()
+    text = raw_text
+    logger.info(f"🎙️ [WHISPER BRUT]: '{text}'")
     text = filter_whisper_hallucinations(raw_text)
     if raw_text and not text:
         filtered_noise_or_hallucination = True

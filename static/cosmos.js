@@ -290,15 +290,36 @@
 
     setVoiceActivity(volume = 0, isSpeaking = false) {
       const clamped = Number.isFinite(volume) ? Math.max(0, Math.min(1, Number(volume))) : 0;
-      // Attaque rapide et relâchement fluide (style réacteur Iron Man vivant)
-      this.voiceVolume = clamped > this.voiceVolume
-        ? this.voiceVolume * 0.32 + clamped * 0.68
-        : this.voiceVolume * 0.80 + clamped * 0.20;
-      this.isUserSpeaking = Boolean(isSpeaking || clamped > 0.02);
-      if (this.isUserSpeaking && this.voiceState !== 'speaking') {
-        this.voiceState = 'listening';
+      const speakingActive = Boolean(isSpeaking);
+      if (!speakingActive && clamped <= 0.005) {
+        // Amortissement rapide vers 0 dès l'arrêt de la voix pour empêcher tout blocage en dilatation maximale
+        this.voiceVolume = this.voiceVolume > 0.01 ? this.voiceVolume * 0.45 : 0;
+      } else if (clamped > this.voiceVolume) {
+        this.voiceVolume = this.voiceVolume * 0.30 + clamped * 0.70;
+      } else {
+        this.voiceVolume = this.voiceVolume * 0.55 + clamped * 0.45;
+      }
+      this.isUserSpeaking = Boolean(speakingActive || clamped > 0.04);
+      if (speakingActive) {
+        const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+        if (now - this.lastShockwaveTime > 160) {
+          this.lastShockwaveTime = now;
+          this.shockwaves.push({
+            radius: 1.02,
+            alpha: Math.min(0.92, 0.45 + clamped * 2.0),
+            color: 'rgba(255, 209, 102,'
+          });
+        }
+        if (this.voiceState !== 'speaking') {
+          this.voiceState = 'listening';
+          if (typeof document !== 'undefined' && document.body) {
+            document.body.dataset.voiceState = 'listening';
+          }
+        }
+      } else if (!this.isUserSpeaking && this.voiceState === 'listening') {
+        this.voiceState = 'idle';
         if (typeof document !== 'undefined' && document.body) {
-          document.body.dataset.voiceState = 'listening';
+          document.body.dataset.voiceState = 'idle';
         }
       }
     },
@@ -661,8 +682,11 @@
       const cy = this.centerY;
       const now = typeof time === 'number' ? time : performance.now();
       const state = this.getVoiceState();
+      if (!this.isUserSpeaking && this.voiceVolume > 0) {
+        this.voiceVolume = this.voiceVolume > 0.005 ? this.voiceVolume * 0.78 : 0;
+      }
       const vol = Math.max(0, Math.min(1, this.voiceVolume || 0));
-      const userTalking = Boolean(this.isUserSpeaking || vol > 0.02);
+      const userTalking = Boolean(this.isUserSpeaking || vol > 0.04);
       const voiceBoost = Math.min(0.65, vol * 2.8);
 
       // Modulation dynamique selon l'état vocal ('idle' | 'listening' | 'speaking') + VU-mètre temps réel

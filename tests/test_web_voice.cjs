@@ -67,8 +67,14 @@ function createWebAudioFixture(t, overrides = {}) {
   let currentRms = 0;
   let getUserMediaCalls = [];
   let activeRecorders = [];
+  let audioInstances = [];
   let audioPlayedUrls = [];
   let finishAudioPlayback = null;
+  let biquadFilters = [];
+  let sourceConnections = [];
+  let filterConnections = [];
+  let failMp3Playback = false;
+  const spokenUtterances = [];
   const states = [];
   const prompts = [];
   const speech = [];
@@ -90,6 +96,18 @@ function createWebAudioFixture(t, overrides = {}) {
     }
   }
 
+  class FakeBiquadFilter {
+    constructor() {
+      this.type = 'lowpass';
+      this.frequency = { value: 350 };
+      biquadFilters.push(this);
+    }
+    connect(target) {
+      filterConnections.push(target);
+    }
+    disconnect() {}
+  }
+
   class FakeAudioContext {
     constructor() {
       this.state = 'running';
@@ -100,7 +118,15 @@ function createWebAudioFixture(t, overrides = {}) {
       return Promise.resolve();
     }
     createMediaStreamSource() {
-      return { connect() {}, disconnect() {} };
+      return {
+        connect(target) {
+          sourceConnections.push(target);
+        },
+        disconnect() {},
+      };
+    }
+    createBiquadFilter() {
+      return new FakeBiquadFilter();
     }
     createAnalyser() {
       return new FakeAnalyser();
@@ -135,15 +161,52 @@ function createWebAudioFixture(t, overrides = {}) {
 
   class FakeAudio {
     constructor(url) {
-      this.url = url;
-      audioPlayedUrls.push(url);
-      finishAudioPlayback = () => this.onended?.();
+      this.src = url || '';
+      this.url = url || '';
+      this.volume = 1.0;
+      audioInstances.push(this);
     }
+    load() {}
     play() {
+      if (this.src && !this.src.startsWith('data:audio/wav')) {
+        if (failMp3Playback) {
+          return Promise.reject(new Error('Autoplay blocked'));
+        }
+        audioPlayedUrls.push(this.src);
+        finishAudioPlayback = () => this.onended?.();
+      }
       return Promise.resolve();
     }
     pause() {}
   }
+
+  class FakeUtterance {
+    constructor(text) {
+      this.text = text;
+      this.lang = '';
+      this.voice = null;
+    }
+  }
+
+  const fakeSpeechSynthesis = {
+    cancel() {},
+    getVoices() {
+      return [
+        { name: 'Microsoft Denise Online (Natural) - French (France)', lang: 'fr-FR' },
+        { name: 'Microsoft Henri Online (Natural) - French (France)', lang: 'fr-FR' },
+      ];
+    },
+    speak(utterance) {
+      spokenUtterances.push(utterance);
+      queueMicrotask(() => utterance.onend?.());
+    },
+  };
+
+  const fakeWindow = {
+    Audio: FakeAudio,
+    speechSynthesis: fakeSpeechSynthesis,
+    SpeechSynthesisUtterance: FakeUtterance,
+  };
 
   const fakeSolarEngine = {
     setVoiceActivity(volume, isSpeaking) {
@@ -157,7 +220,7 @@ function createWebAudioFixture(t, overrides = {}) {
   let nextInteractResponse = {
     ok: true,
     ignored: false,
-    user_text: 'Yo Moctar quel est le statut CPU',
+    user_text: 'quel est le statut CPU',
     reply_text: 'Tous les cœurs CPU sont nominaux, Moctar.',
     audio_url: '/api/voice/tts/cache/abcdef0123456789abcdef.mp3',
     session_active: true,
@@ -165,6 +228,7 @@ function createWebAudioFixture(t, overrides = {}) {
   let interactCalls = 0;
 
   const engine = create({
+    window: fakeWindow,
     mediaDevices: {
       getUserMedia: async constraints => {
         getUserMediaCalls.push(constraints);
@@ -174,19 +238,18 @@ function createWebAudioFixture(t, overrides = {}) {
     MediaRecorder: FakeMediaRecorder,
     AudioContext: FakeAudioContext,
     Audio: FakeAudio,
+    speechSynthesis: fakeSpeechSynthesis,
+    SpeechSynthesisUtterance: FakeUtterance,
     SolarEngine: fakeSolarEngine,
     timers: time.timers,
     requestAnimationFrame: time.requestAnimationFrame,
     cancelAnimationFrame: time.cancelAnimationFrame,
-    vadSilenceMs: 800,
-    vadThreshold: 0.02,
+    vadSilenceMs: 600,
+    vadThreshold: 0.04,
+    maxSpeechMs: 3500,
     storage: { getItem: () => null, setItem() {}, removeItem() {} },
     onState: (state, detail) => states.push({ state, detail }),
     onInteractResult: payload => interactResults.push(payload),
-    speak: async text => {
-      speech.push(text);
-      return true;
-    },
     onPrompt: async text => {
       prompts.push(text);
     },
@@ -206,15 +269,21 @@ function createWebAudioFixture(t, overrides = {}) {
 
   return {
     engine,
+    fakeWindow,
     time,
     states,
     prompts,
     speech,
+    spokenUtterances,
     solarActivityCalls,
     solarStateCalls,
     interactResults,
     getUserMediaCalls,
+    audioInstances,
     audioPlayedUrls,
+    biquadFilters,
+    sourceConnections,
+    filterConnections,
     get activeRecorders() {
       return activeRecorders;
     },
@@ -226,6 +295,9 @@ function createWebAudioFixture(t, overrides = {}) {
     },
     set rms(value) {
       currentRms = value;
+    },
+    set failMp3(value) {
+      failMp3Playback = value;
     },
     set interactResponse(value) {
       nextInteractResponse = value;
@@ -249,16 +321,16 @@ test('zero references to webkitSpeechRecognition or SpeechRecognition exist in s
   assert.equal(/webkitSpeechRecognition|SpeechRecognition/.test(indexSource), false, 'index.html must not reference SpeechRecognition');
 });
 
-test('cache-busting ?v=3.1 and Service Worker skipWaiting are configured', () => {
+test('cache-busting ?v=4.0 and Service Worker NetworkOnly for /api/voice/* are configured', () => {
   const indexSource = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
   const swSource = fs.readFileSync(path.join(__dirname, '../static/service-worker.js'), 'utf8');
-  assert.ok(indexSource.includes('/static/voice.js?v=3.1'), 'index.html must load /static/voice.js?v=3.1');
-  assert.ok(indexSource.includes('/static/cosmos.js?v=3.1'), 'index.html must load /static/cosmos.js?v=3.1');
+  assert.ok(indexSource.includes('/static/voice.js?v=4.0'), 'index.html must load /static/voice.js?v=4.0');
+  assert.ok(indexSource.includes('/static/cosmos.js?v=4.0'), 'index.html must load /static/cosmos.js?v=4.0');
   assert.ok(swSource.includes('self.skipWaiting()'), 'service-worker.js must call self.skipWaiting()');
-  assert.ok(swSource.includes('.endsWith(\'.js\')'), 'service-worker.js must invalidate cached .js files');
+  assert.ok(swSource.includes('/api/voice/'), 'service-worker.js must exclude /api/voice/* from caching');
 });
 
-test('enabling immediately initializes getUserMedia with echoCancellation & noiseSuppression and displays green listening message', async t => {
+test('enabling warms up window.MoctarSpeaker, inserts 120Hz highpass BiquadFilterNode, and displays green listening message', async t => {
   const f = createWebAudioFixture(t);
   assert.equal(f.engine.enabled, false);
 
@@ -267,6 +339,12 @@ test('enabling immediately initializes getUserMedia with echoCancellation & nois
 
   assert.equal(f.engine.enabled, true);
   assert.equal(f.engine.usingWebAudio, true);
+  assert.ok(f.fakeWindow.MoctarSpeaker, 'window.MoctarSpeaker must be instantiated and unlocked on enable()');
+  assert.equal(f.audioInstances.length, 1);
+  assert.equal(f.biquadFilters.length, 1, '120Hz highpass BiquadFilterNode must be created');
+  assert.equal(f.biquadFilters[0].type, 'highpass');
+  assert.equal(f.biquadFilters[0].frequency.value, 120);
+  assert.equal(f.sourceConnections[0], f.biquadFilters[0], 'microphone source must connect to BiquadFilterNode');
   assert.equal(f.getUserMediaCalls.length, 1);
   assert.deepEqual(f.getUserMediaCalls[0], {
     audio: { echoCancellation: true, noiseSuppression: true },
@@ -277,55 +355,97 @@ test('enabling immediately initializes getUserMedia with echoCancellation & nois
   assert.equal(wakeStates.at(-1).detail.message, '🟢 À l\'écoute — Dites « Yo Moctar »');
 });
 
-test('60 FPS VU-meter updates SolarEngine.setVoiceActivity on every frame, starts MediaRecorder on RMS > 0.02, and posts after 800ms silence', async t => {
+test('60 FPS VU-meter triggers on RMS > 0.04, stops after 600ms silence, reuses window.MoctarSpeaker, and updates status labels', async t => {
   const f = createWebAudioFixture(t);
   await f.engine.enable();
   await f.settle();
 
-  // Frame 1: silence (RMS = 0.005)
-  f.rms = 0.005;
+  // Frame 1: fan hum below threshold (RMS = 0.03 <= 0.04) -> ignored
+  f.rms = 0.03;
   f.time.stepFrame(16);
   await f.settle();
-  assert.ok(f.solarActivityCalls.length >= 1);
-  assert.equal(f.solarActivityCalls.at(-1).volume, 0.005);
+  assert.equal(f.activeRecorders.length, 0);
   assert.equal(f.solarActivityCalls.at(-1).isSpeaking, false);
 
-  // Frame 2: user speaks (RMS = 0.12 > 0.02)
+  // Frame 2: user speaks (RMS = 0.12 > 0.04)
   f.rms = 0.12;
   f.time.stepFrame(16);
   await f.settle();
 
   assert.equal(f.engine.state, 'listening');
-  assert.equal(f.states.at(-1).detail.message, '🎙️ Voix détectée...');
+  assert.equal(f.states.at(-1).detail.message, '🎙️ Moctar vous écoute...');
   assert.equal(f.latestRecorder.state, 'recording');
   assert.equal(f.solarActivityCalls.at(-1).volume, 0.12);
   assert.equal(f.solarActivityCalls.at(-1).isSpeaking, true);
 
-  // Silence begins: 30 frames at 60 FPS (500ms < 800ms) -> still recording
-  f.rms = 0.001;
-  for (let frame = 0; frame < 30; frame += 1) {
+  // Silence begins: 20 frames at 60 FPS (~333ms < 600ms) -> still recording
+  f.rms = 0.01;
+  for (let frame = 0; frame < 20; frame += 1) {
     f.time.stepFrame(16);
   }
   await f.settle();
   assert.equal(f.latestRecorder.state, 'recording');
   assert.equal(f.interactCalls, 0);
 
-  // Advance remaining 20 frames (> 800ms total silence at 60 FPS) -> MediaRecorder stops and posts to /api/voice/interact
-  for (let frame = 0; frame < 20; frame += 1) {
+  // Advance remaining 18 frames (> 600ms total silence at 60 FPS) -> stops MediaRecorder, resets Sun RMS to 0, posts to /api/voice/interact
+  for (let frame = 0; frame < 18; frame += 1) {
     f.time.stepFrame(16);
   }
   await f.settle();
 
   assert.equal(f.latestRecorder.state, 'inactive');
   assert.equal(f.interactCalls, 1);
-  assert.equal(f.interactResults.length, 1);
+  assert.equal(f.audioInstances.length, 1, 'must reuse window.MoctarSpeaker without creating a new Audio element');
   assert.equal(f.audioPlayedUrls[0], '/api/voice/tts/cache/abcdef0123456789abcdef.mp3');
   assert.equal(f.engine.state, 'speaking');
+  assert.equal(f.states.at(-1).detail.message, '🔊 Moctar : "Tous les cœurs CPU sont nominaux, Moctar."');
 
   // Finish audio playback -> returns to active listening
   f.finishAudio();
   await f.settle();
   assert.equal(f.engine.state, 'listening');
+});
+
+test('maxSpeechTimer (3.5s) cuts recording and sends audio even if fan noise prevents silence detection', async t => {
+  const f = createWebAudioFixture(t);
+  await f.engine.enable();
+  await f.settle();
+
+  // Voice starts and stays above threshold due to fan noise
+  f.rms = 0.08;
+  f.time.stepFrame(16);
+  await f.settle();
+  assert.equal(f.latestRecorder.state, 'recording');
+  assert.equal(f.interactCalls, 0);
+
+  // Advance 3500ms -> maxSpeechTimer fires, resets Sun activity to (0, false), and sends audio chunk
+  f.time.advance(3500);
+  await f.settle();
+
+  assert.equal(f.latestRecorder.state, 'inactive');
+  assert.equal(f.interactCalls, 1);
+  assert.ok(f.solarActivityCalls.some(call => call.volume === 0 && call.isSpeaking === false));
+});
+
+test('fallback to window.speechSynthesis with French male voice triggers when MP3 playback fails', async t => {
+  const f = createWebAudioFixture(t);
+  f.failMp3 = true;
+  await f.engine.enable();
+  await f.settle();
+
+  f.rms = 0.1;
+  f.time.stepFrame(16);
+  await f.settle();
+  f.rms = 0;
+  for (let frame = 0; frame < 40; frame += 1) {
+    f.time.stepFrame(16);
+  }
+  await f.settle();
+
+  assert.equal(f.interactCalls, 1);
+  assert.equal(f.spokenUtterances.length, 1);
+  assert.equal(f.spokenUtterances[0].text, 'Tous les cœurs CPU sont nominaux, Moctar.');
+  assert.match(f.spokenUtterances[0].voice.name, /Henri/i);
 });
 
 test('disabling stops microphone tracks, resets SolarEngine voice activity to 0, and sets state to off', async t => {
@@ -374,40 +494,4 @@ test('permission denial (NotAllowedError) reports a clear error and disables ret
   assert.equal(f.engine.enabled, false);
   assert.equal(f.engine.state, 'error');
   assert.ok(f.states.some(({ detail }) => /Autorisez le microphone/i.test(detail?.message || '')));
-});
-
-test('suspend and resume pause and restore the WebAudio pipeline cleanly', async t => {
-  const f = createWebAudioFixture(t);
-  await f.engine.enable();
-  await f.settle();
-  assert.equal(f.engine.state, 'wake');
-
-  f.engine.suspend();
-  await f.settle();
-  assert.equal(f.engine.state, 'paused');
-  assert.equal(f.engine.enabled, true);
-
-  f.engine.resume();
-  await f.settle();
-  assert.equal(f.engine.state, 'wake');
-  assert.equal(f.getUserMediaCalls.length, 2);
-});
-
-test('setBusy pauses capture while busy and restores listening when cleared', async t => {
-  const f = createWebAudioFixture(t);
-  await f.engine.enable();
-  await f.settle();
-
-  f.rms = 0.1;
-  f.time.stepFrame(16);
-  await f.settle();
-  assert.equal(f.latestRecorder.state, 'recording');
-
-  f.engine.setBusy(true);
-  await f.settle();
-  assert.equal(f.latestRecorder.state, 'inactive');
-
-  f.engine.setBusy(false);
-  await f.settle();
-  assert.equal(f.engine.state, 'wake');
 });

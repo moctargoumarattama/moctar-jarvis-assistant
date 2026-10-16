@@ -1,19 +1,26 @@
 (function (root, factory) {
   'use strict';
-  const api = factory();
+  const api = factory(root);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.MoctarVoice = api;
-})(typeof window === 'object' ? window : null, function () {
+})(typeof window === 'object' ? window : (typeof globalThis === 'object' ? globalThis : null), function (root) {
   'use strict';
 
   const DEFAULT_WAKE_WORDS = [
-    'yo moctar', 'hey moctar', 'moctar', 'ok moctar', 'salut moctar',
-    'dis moctar', 'elmo', 'el mo', 'hey elmo', 'hey el mo',
+    'yo moctar', 'hey moctar', 'allo moctar', 'dis moctar', 'ok moctar', 'salut moctar',
+    'moctar', 'moktar', 'mokhtar', 'mouctar', 'mouktar', 'motard', 'jarvis',
+    'yo elmo', 'hey elmo', 'hey el mo', 'el mo', 'elmo',
   ];
-  const FOLLOWUP_MS = 15000;
-  const GREETING = 'Oui Moctar, je t’écoute. Que souhaites-tu ?';
+  const FOLLOWUP_MS = 45000;
+  const GREETING = 'À vos ordres Moctar, je vous écoute.';
   const WAKE_READY_MESSAGE = "🟢 À l'écoute — Dites « Yo Moctar »";
-  const VOICE_DETECTED_MESSAGE = '🎙️ Voix détectée...';
+  const VOICE_DETECTED_MESSAGE = '🎙️ Moctar vous écoute...';
+  const THINKING_MESSAGE = '⚡ Moctar réfléchit...';
+
+  // Micro-WAV PCM 8kHz mono 16-bit silencieux valide (46 octets) pour déverrouiller l'autoplay sur Brave / iOS / Chrome
+  const SILENT_WAV_DATA_URI =
+    'data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQIAAAAAAA==';
+
   const normalize = (value) => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const words = (text) => Array.from(String(text).matchAll(/[\p{L}\p{N}]+/gu), (match) => ({
     value: normalize(match[0]), index: match.index, end: match.index + match[0].length,
@@ -23,43 +30,46 @@
 
   function create(options) {
     const opts = options || {};
+    const win = opts.window || (typeof window === 'object' && window ? window : root) || {};
     const clock = opts.timers || {};
     const delay = clock.setTimeout ? clock.setTimeout.bind(clock) : setTimeout;
     const cancel = clock.clearTimeout ? clock.clearTimeout.bind(clock) : clearTimeout;
 
-    // 60 FPS frame scheduler: uses requestAnimationFrame in browsers, or 16ms timer when deterministic test clock is injected
+    // 60 FPS frame scheduler
     const requestFrame = typeof opts.requestAnimationFrame === 'function'
       ? opts.requestAnimationFrame
       : (clock.setTimeout
         ? (cb) => delay(() => cb(Date.now()), 16)
-        : (typeof window === 'object' && window && typeof window.requestAnimationFrame === 'function'
-          ? window.requestAnimationFrame.bind(window)
+        : (typeof win.requestAnimationFrame === 'function'
+          ? win.requestAnimationFrame.bind(win)
           : (cb) => setTimeout(() => cb(Date.now()), 16)));
     const cancelFrame = typeof opts.cancelAnimationFrame === 'function'
       ? opts.cancelAnimationFrame
       : (clock.clearTimeout
         ? (id) => cancel(id)
-        : (typeof window === 'object' && window && typeof window.cancelAnimationFrame === 'function'
-          ? window.cancelAnimationFrame.bind(window)
+        : (typeof win.cancelAnimationFrame === 'function'
+          ? win.cancelAnimationFrame.bind(win)
           : (id) => clearTimeout(id)));
 
     const onState = typeof opts.onState === 'function' ? opts.onState : () => {};
     const onPrompt = typeof opts.onPrompt === 'function' ? opts.onPrompt : async () => {};
-    const speak = typeof opts.speak === 'function' ? opts.speak : async () => false;
+    const speak = typeof opts.speak === 'function' ? opts.speak : null;
     const onInteractResult = typeof opts.onInteractResult === 'function' ? opts.onInteractResult : null;
 
     const aliases = (opts.wakeWords || DEFAULT_WAKE_WORDS).map((item) => words(item).map((word) => word.value))
       .filter((item) => item.length).sort((a, b) => b.length - a.length);
 
-    const mediaDevices = opts.mediaDevices || (typeof window === 'object' && window && window.navigator ? window.navigator.mediaDevices : null);
-    const MediaRecorderClass = opts.MediaRecorder || (typeof window === 'object' && window ? window.MediaRecorder : null);
-    const AudioContextClass = opts.AudioContext || (typeof window === 'object' && window ? (window.AudioContext || window.webkitAudioContext) : null);
-    const AudioPlayerClass = opts.Audio || (typeof window === 'object' && window && typeof window.Audio === 'function' ? window.Audio : (typeof Audio === 'function' ? Audio : null));
-    const fetchImpl = opts.fetch || (typeof window === 'object' && window && typeof window.fetch === 'function' ? window.fetch.bind(window) : null);
+    const mediaDevices = opts.mediaDevices || (win.navigator ? win.navigator.mediaDevices : null);
+    const MediaRecorderClass = opts.MediaRecorder || win.MediaRecorder || null;
+    const AudioContextClass = opts.AudioContext || win.AudioContext || win.webkitAudioContext || null;
+    const AudioPlayerClass = opts.Audio || (typeof win.Audio === 'function' ? win.Audio : (typeof Audio === 'function' ? Audio : null));
+    const fetchImpl = opts.fetch || (typeof win.fetch === 'function' ? win.fetch.bind(win) : (typeof fetch === 'function' ? fetch : null));
     const interactUrl = opts.interactUrl || '/api/voice/interact';
-    const vadSilenceMs = typeof opts.vadSilenceMs === 'number' ? opts.vadSilenceMs : 800;
-    const vadThreshold = typeof opts.vadThreshold === 'number' ? opts.vadThreshold : 0.02;
+    const vadSilenceMs = typeof opts.vadSilenceMs === 'number' ? opts.vadSilenceMs : 600;
+    const vadThreshold = typeof opts.vadThreshold === 'number' ? opts.vadThreshold : 0.04;
+    const maxSpeechMs = typeof opts.maxSpeechMs === 'number' ? opts.maxSpeechMs : 3500;
     const frameIntervalMs = typeof opts.frameIntervalMs === 'number' ? opts.frameIntervalMs : (1000 / 60);
+    const highpassFrequencyHz = typeof opts.highpassFrequencyHz === 'number' ? opts.highpassFrequencyHz : 120;
 
     const hasWebAudioSupport = Boolean(
       mediaDevices && typeof mediaDevices.getUserMedia === 'function'
@@ -80,22 +90,24 @@
     let stream = null;
     let audioCtx = null;
     let sourceNode = null;
+    let highpassFilter = null;
     let analyser = null;
     let timeDomainData = null;
     let recorder = null;
     let recordedChunks = [];
     let rafId = null;
     let followupTimer = null;
+    let maxSpeechTimer = null;
     let isSpeaking = false;
     let silenceElapsedMs = 0;
     let currentRms = 0;
     let processingAudio = false;
-    let activeAudioPlayer = null;
+    let pendingStartPromise = null;
 
     function resolveSolarEngine() {
       if (opts.SolarEngine) return opts.SolarEngine;
-      if (typeof window === 'object' && window) {
-        return window.SolarEngine || (window.CosmosEngine && window.CosmosEngine.SolarEngine) || null;
+      if (win) {
+        return win.SolarEngine || (win.CosmosEngine && win.CosmosEngine.SolarEngine) || null;
       }
       return null;
     }
@@ -107,6 +119,135 @@
       }
     }
 
+    /**
+     * Déverrouillage Audio Brave : instancie et préchauffe window.MoctarSpeaker
+     * lors du geste utilisateur initial sur le bouton micro.
+     */
+    function ensureMoctarSpeakerUnlocked(warmup = false) {
+      if (!AudioPlayerClass) return null;
+      let speaker = win.MoctarSpeaker || null;
+      if (!speaker) {
+        try {
+          speaker = new AudioPlayerClass(SILENT_WAV_DATA_URI);
+          speaker.preload = 'auto';
+          win.MoctarSpeaker = speaker;
+        } catch {
+          return null;
+        }
+      }
+      if (warmup) {
+        try {
+          speaker.src = SILENT_WAV_DATA_URI;
+          speaker.volume = 0.01;
+          const p = speaker.play();
+          if (p && typeof p.then === 'function') {
+            p.then(() => {
+              try {
+                speaker.pause?.();
+                speaker.currentTime = 0;
+              } catch {}
+              speaker.volume = 1.0;
+            }).catch(() => {
+              speaker.volume = 1.0;
+            });
+          } else {
+            speaker.volume = 1.0;
+          }
+        } catch {
+          speaker.volume = 1.0;
+        }
+      }
+      return speaker;
+    }
+
+    /**
+     * Fallback vocal de secours via window.speechSynthesis avec voix française masculine
+     * si la lecture MP3 échoue ou est bloquée.
+     */
+    function speakWithNativeSpeechSynthesis(text) {
+      const cleanText = String(text || '').trim();
+      if (!cleanText) return Promise.resolve(false);
+      if (speak) {
+        return Promise.resolve()
+          .then(() => speak(cleanText))
+          .then((ok) => {
+            if (ok !== false) return true;
+            return runBrowserSpeechSynthesis(cleanText);
+          })
+          .catch(() => runBrowserSpeechSynthesis(cleanText));
+      }
+      return runBrowserSpeechSynthesis(cleanText);
+    }
+
+    function runBrowserSpeechSynthesis(cleanText) {
+      const synth = opts.speechSynthesis || win.speechSynthesis || null;
+      const UtteranceClass = opts.SpeechSynthesisUtterance || win.SpeechSynthesisUtterance || (typeof SpeechSynthesisUtterance === 'function' ? SpeechSynthesisUtterance : null);
+      if (!synth || typeof synth.speak !== 'function' || !UtteranceClass) {
+        return Promise.resolve(false);
+      }
+      return new Promise((resolve) => {
+        let settled = false;
+        let safetyTimer = null;
+        const finish = (ok) => {
+          if (settled) return;
+          settled = true;
+          if (safetyTimer !== null) cancel(safetyTimer);
+          resolve(ok);
+        };
+        try {
+          synth.cancel?.();
+          const utterance = new UtteranceClass(cleanText);
+          utterance.lang = 'fr-FR';
+          utterance.rate = 1.02;
+          utterance.pitch = 0.94;
+          const voices = typeof synth.getVoices === 'function' ? (synth.getVoices() || []) : [];
+          const frVoices = voices.filter((v) => /^fr\b/i.test(v.lang || ''));
+          const maleFrVoice = frVoices.find((v) => /henri|remy|paul|thomas|antoine|nicolas|male|homme/i.test(v.name || '')) || frVoices[0];
+          if (maleFrVoice) utterance.voice = maleFrVoice;
+          utterance.onend = () => finish(true);
+          utterance.onerror = () => finish(false);
+          safetyTimer = delay(() => finish(true), 8000);
+          synth.speak(utterance);
+        } catch {
+          finish(false);
+        }
+      });
+    }
+
+    function playAudioUrl(audioUrl) {
+      if (!audioUrl || !AudioPlayerClass) return Promise.resolve(false);
+      return new Promise((resolve) => {
+        let settled = false;
+        const speaker = ensureMoctarSpeakerUnlocked(false);
+        if (!speaker) {
+          resolve(false);
+          return;
+        }
+        const finish = (ok) => {
+          if (settled) return;
+          settled = true;
+          speaker.onended = null;
+          speaker.onerror = null;
+          resolve(ok);
+        };
+        speaker.onended = () => finish(true);
+        speaker.onerror = () => finish(false);
+        try {
+          speaker.pause?.();
+          speaker.volume = 1.0;
+          speaker.src = audioUrl;
+          speaker.url = audioUrl;
+          speaker.load?.();
+          const playPromise = speaker.play();
+          if (playPromise && typeof playPromise.then === 'function') {
+            playPromise.catch(() => finish(false));
+          }
+        } catch {
+          finish(false);
+        }
+      });
+    }
+
     function emit(next, detail) {
       state = next;
       onState(next, detail || {});
@@ -116,6 +257,13 @@
       if (followupTimer !== null) {
         cancel(followupTimer);
         followupTimer = null;
+      }
+    }
+
+    function clearMaxSpeechTimer() {
+      if (maxSpeechTimer !== null) {
+        cancel(maxSpeechTimer);
+        maxSpeechTimer = null;
       }
     }
 
@@ -156,6 +304,7 @@
 
     function cleanupWebAudio() {
       stopRafLoop();
+      clearMaxSpeechTimer();
       isSpeaking = false;
       silenceElapsedMs = 0;
       currentRms = 0;
@@ -176,6 +325,10 @@
       if (sourceNode) {
         try { sourceNode.disconnect?.(); } catch {}
         sourceNode = null;
+      }
+      if (highpassFilter) {
+        try { highpassFilter.disconnect?.(); } catch {}
+        highpassFilter = null;
       }
       analyser = null;
       timeDomainData = null;
@@ -232,38 +385,18 @@
       return 0;
     }
 
-    function playAudioUrl(audioUrl) {
-      if (!audioUrl || !AudioPlayerClass) return Promise.resolve(false);
-      return new Promise((resolve) => {
-        let settled = false;
-        const player = new AudioPlayerClass(audioUrl);
-        activeAudioPlayer = player;
-        const finish = (ok) => {
-          if (settled) return;
-          settled = true;
-          if (activeAudioPlayer === player) activeAudioPlayer = null;
-          try { player.pause?.(); } catch {}
-          resolve(ok);
-        };
-        player.onended = () => finish(true);
-        player.onerror = () => finish(false);
-        try {
-          const playPromise = player.play();
-          if (playPromise && typeof playPromise.then === 'function') {
-            playPromise.catch(() => finish(false));
-          }
-        } catch {
-          finish(false);
-        }
-      });
-    }
-
     function findWake(text) {
       const tokens = words(text);
-      for (const alias of aliases) {
-        if (alias.every((word, offset) => tokens[offset] && tokens[offset].value === word)) {
-          const end = tokens[alias.length - 1].end;
-          return { command: text.slice(end).replace(/^[\s,.:;!?…—–-]+/, '').trim() };
+      for (let startIdx = 0; startIdx < tokens.length; startIdx += 1) {
+        for (const alias of aliases) {
+          if (alias.every((word, offset) => tokens[startIdx + offset] && tokens[startIdx + offset].value === word)) {
+            const matchStart = tokens[startIdx].index;
+            const matchEnd = tokens[startIdx + alias.length - 1].end;
+            const before = text.slice(0, matchStart).replace(/[\s,.:;!?…—–-]+$/, '').trim();
+            const after = text.slice(matchEnd).replace(/^[\s,.:;!?…—–-]+/, '').trim();
+            const combined = `${before} ${after}`.trim();
+            return { command: combined };
+          }
         }
       }
       return null;
@@ -288,11 +421,11 @@
       clearFollowup();
       emit(isGreetingOnly ? 'speaking' : 'processing', {
         transcript: trimmed,
-        message: isGreetingOnly ? GREETING : 'M.O.C.T.A.R prépare la réponse…',
+        message: isGreetingOnly ? `🔊 Moctar : "${GREETING}"` : THINKING_MESSAGE,
       });
       try {
         if (isGreetingOnly) {
-          await speak(GREETING);
+          await speakWithNativeSpeechSynthesis(GREETING);
         } else {
           await onPrompt(commandText);
         }
@@ -318,6 +451,8 @@
       if (!blob || (typeof blob.size === 'number' && blob.size < 64)) return;
 
       processingAudio = true;
+      // Réinitialisation immédiate du niveau RMS du Soleil dès l'envoi pour éviter toute dilatation bloquée
+      currentRms = 0;
       updateSolarActivity(0, false);
 
       try {
@@ -350,7 +485,7 @@
             emit(phase, {
               rms: 0,
               isSpeaking: false,
-              message: phase === 'wake' ? WAKE_READY_MESSAGE : '🟢 Je vous écoute…',
+              message: phase === 'wake' ? WAKE_READY_MESSAGE : WAKE_READY_MESSAGE,
             });
           }
           return;
@@ -361,18 +496,19 @@
         clearFollowup();
         try {
           onInteractResult?.(payload);
+          const replyText = String(payload.reply_text || '').trim();
           emit('speaking', {
             transcript: payload.user_text || '',
-            reply: payload.reply_text || '',
+            reply: replyText,
             audioUrl: payload.audio_url || null,
-            message: '🔊 M.O.C.T.A.R vous répond…',
+            message: `🔊 Moctar : "${replyText}"`,
           });
           let played = false;
           if (payload.audio_url) {
             played = await playAudioUrl(payload.audio_url);
           }
-          if (!played && payload.reply_text) {
-            await speak(payload.reply_text);
+          if (!played && replyText) {
+            await speakWithNativeSpeechSynthesis(replyText);
           }
           if (generation !== current.generation || destroyed || suspended) return;
           openFollowup();
@@ -387,11 +523,35 @@
           emit(phase, {
             rms: 0,
             isSpeaking: false,
-            message: phase === 'wake' ? WAKE_READY_MESSAGE : '🟢 Je vous écoute…',
+            message: WAKE_READY_MESSAGE,
           });
         }
       } finally {
         processingAudio = false;
+      }
+    }
+
+    function stopPhraseAndSend() {
+      clearMaxSpeechTimer();
+      isSpeaking = false;
+      silenceElapsedMs = 0;
+      currentRms = 0;
+      updateSolarActivity(0, false);
+      emit('processing', {
+        rms: 0,
+        isSpeaking: false,
+        message: THINKING_MESSAGE,
+      });
+      if (recorder && recorder.state === 'recording') {
+        try {
+          recorder.stop();
+        } catch {
+          processingAudio = false;
+          reconcile();
+        }
+      } else {
+        processingAudio = false;
+        reconcile();
       }
     }
 
@@ -415,6 +575,7 @@
         }
       };
       recorder.onstop = () => {
+        clearMaxSpeechTimer();
         const captured = recordedChunks.splice(0);
         const type = (recorder && recorder.mimeType) || mimeType;
         recorder = null;
@@ -422,8 +583,16 @@
       };
       try {
         recorder.start();
+        clearMaxSpeechTimer();
+        maxSpeechTimer = delay(() => {
+          maxSpeechTimer = null;
+          if (isSpeaking && recorder && recorder.state === 'recording') {
+            stopPhraseAndSend();
+          }
+        }, maxSpeechMs);
         return true;
       } catch {
+        clearMaxSpeechTimer();
         return false;
       }
     }
@@ -452,20 +621,7 @@
         } else if (isSpeaking) {
           silenceElapsedMs += frameIntervalMs;
           if (silenceElapsedMs >= vadSilenceMs) {
-            isSpeaking = false;
-            silenceElapsedMs = 0;
-            updateSolarActivity(0, false);
-            emit('processing', {
-              rms: 0,
-              isSpeaking: false,
-              message: '⚡ Analyse vocale M.O.C.T.A.R en cours…',
-            });
-            if (recorder && recorder.state === 'recording') {
-              try { recorder.stop(); } catch {}
-            } else {
-              processingAudio = false;
-              reconcile();
-            }
+            stopPhraseAndSend();
           }
         }
       } else {
@@ -476,8 +632,6 @@
         rafId = requestFrame(stepVuMeterFrame);
       }
     }
-
-    let pendingStartPromise = null;
 
     function startWebAudioCapture() {
       if (!wanted() || status !== 'idle') return pendingStartPromise || Promise.resolve();
@@ -516,14 +670,29 @@
             analyser = audioCtx.createAnalyser();
             analyser.fftSize = 512;
             analyser.smoothingTimeConstant = 0.2;
-            sourceNode.connect(analyser);
+
+            // Filtre passe-haut BiquadFilterNode (120 Hz) pour éliminer le souffle basse fréquence du ventilateur HP
+            if (typeof audioCtx.createBiquadFilter === 'function') {
+              highpassFilter = audioCtx.createBiquadFilter();
+              highpassFilter.type = 'highpass';
+              if (highpassFilter.frequency && typeof highpassFilter.frequency.value === 'number') {
+                highpassFilter.frequency.value = highpassFrequencyHz;
+              } else {
+                highpassFilter.frequency = { value: highpassFrequencyHz };
+              }
+              sourceNode.connect(highpassFilter);
+              highpassFilter.connect(analyser);
+            } else {
+              sourceNode.connect(analyser);
+            }
+
             timeDomainData = new Uint8Array(analyser.fftSize || 512);
           }
           status = 'active';
           emit(phase, {
             rms: 0,
             isSpeaking: false,
-            message: phase === 'wake' ? WAKE_READY_MESSAGE : '🟢 Je vous écoute…',
+            message: WAKE_READY_MESSAGE,
           });
           rafId = requestFrame(stepVuMeterFrame);
         })
@@ -570,7 +739,7 @@
         emit(phase, {
           rms: currentRms,
           isSpeaking: false,
-          message: phase === 'wake' ? WAKE_READY_MESSAGE : '🟢 Je vous écoute…',
+          message: WAKE_READY_MESSAGE,
         });
       }
       return pendingStartPromise || Promise.resolve();
@@ -594,6 +763,7 @@
       get isSpeaking() { return isSpeaking; },
       async enable() {
         if (!available()) return false;
+        ensureMoctarSpeakerUnlocked(true);
         generation += 1;
         fault = null;
         enabled = true;
@@ -609,9 +779,8 @@
         manual = false;
         phase = 'wake';
         fault = null;
-        if (activeAudioPlayer) {
-          try { activeAudioPlayer.pause?.(); } catch {}
-          activeAudioPlayer = null;
+        if (win.MoctarSpeaker) {
+          try { win.MoctarSpeaker.pause?.(); } catch {}
         }
         clearFollowup();
         cleanupWebAudio();
@@ -619,6 +788,7 @@
       },
       async startManual() {
         if (!available()) return false;
+        ensureMoctarSpeakerUnlocked(true);
         generation += 1;
         fault = null;
         manual = true;
@@ -660,9 +830,8 @@
         generation += 1;
         enabled = false;
         manual = false;
-        if (activeAudioPlayer) {
-          try { activeAudioPlayer.pause?.(); } catch {}
-          activeAudioPlayer = null;
+        if (win.MoctarSpeaker) {
+          try { win.MoctarSpeaker.pause?.(); } catch {}
         }
         clearFollowup();
         cleanupWebAudio();

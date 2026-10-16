@@ -251,6 +251,67 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertEqual(audio_resp.headers["content-type"], "audio/mpeg")
             self.assertEqual(audio_resp.content, fake_mp3)
 
+    def test_phonetic_wake_words_anywhere_and_wake_only_butler_greeting(self) -> None:
+        """Valide la tolérance phonétique totale (Moktar, Motard, Mouctar, etc.), la réponse majordome immédiate sur prénom seul et la session continue de 45s."""
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 2500, -2500, 2500, -2500))
+        fake_mp3 = b"ID3-BUTLER-MP3"
+        jarvis_mock = AsyncMock(
+            return_value={
+                "status": "success",
+                "reply": "La charge CPU est à 12 pourcent, Moctar.",
+                "tools_used": [],
+                "thought_chain": [],
+            }
+        )
+        self.app.state.runtime.jarvis = SimpleNamespace(execute_prompt_async=jarvis_mock)
+
+        with patch(
+            "main.synthesize_edge_tts",
+            new=AsyncMock(return_value=fake_mp3),
+        ):
+            # 1. Appel avec uniquement le prénom ("Yo Moctar" / "Motard") -> réponse majordome immédiate sans solliciter le LLM
+            self.app.state.runtime.voice_session_until = 0.0
+            with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Motard"):
+                wake_resp = self.client.post(
+                    "/api/voice/interact",
+                    content=wav_bytes,
+                    headers={"Content-Type": "audio/wav"},
+                )
+                self.assertEqual(wake_resp.status_code, 200)
+                wake_data = wake_resp.json()
+                self.assertTrue(wake_data["ok"])
+                self.assertFalse(wake_data["ignored"])
+                self.assertEqual(wake_data["reply_text"], "À vos ordres Moctar, je vous écoute.")
+                self.assertTrue(wake_data["session_active"])
+                self.assertTrue(wake_data["audio_url"].startswith("/api/voice/tts/cache/"))
+                jarvis_mock.assert_not_awaited()
+
+            # 2. Dans la fenêtre de 45 secondes qui suit, toute phrase sans mot-clé est traitée directement comme un ordre
+            with patch("main.voice_transcribe.transcribe_audio", return_value="donne-moi la charge CPU"):
+                followup_resp = self.client.post(
+                    "/api/voice/interact",
+                    content=wav_bytes,
+                    headers={"Content-Type": "audio/wav"},
+                )
+                self.assertEqual(followup_resp.status_code, 200)
+                followup_data = followup_resp.json()
+                self.assertFalse(followup_data["ignored"])
+                self.assertEqual(followup_data["user_text"], "donne-moi la charge CPU")
+                self.assertEqual(followup_data["reply_text"], "La charge CPU est à 12 pourcent, Moctar.")
+                jarvis_mock.assert_awaited_once_with(user_input="donne-moi la charge CPU", source="web_voice")
+
+            # 3. Variantes phonétiques au milieu ou à la fin de la phrase hors session active
+            for variant_phrase, expected_cmd in (
+                ("Quel est le statut réseau Mokhtar ?", "Quel est le statut réseau"),
+                ("Peux-tu vérifier les services Mouctar", "Peux-tu vérifier les services"),
+                ("Allô Moctar ouvre YouTube", "ouvre YouTube"),
+            ):
+                self.app.state.runtime.voice_session_until = 0.0
+                accepted, cmd, detected = main.extract_voice_interact_command(variant_phrase, session_active=False)
+                self.assertTrue(accepted, variant_phrase)
+                self.assertTrue(detected, variant_phrase)
+                self.assertEqual(cmd, expected_cmd, variant_phrase)
+
 
 if __name__ == "__main__":
     unittest.main()

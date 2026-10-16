@@ -137,36 +137,54 @@ async def generate_cached_tts(text: str, voice: str = DEFAULT_TTS_VOICE) -> tupl
     return audio_bytes, cache_hit
 
 
-_VOICE_WAKE_PREFIX_RE = re.compile(
-    r"^\s*(?:(?:yo|hey|ok|bonjour|salut|dis|écoute|ecoute)\s+)?(?:moctar|moktar|mokhtar|elmo)\b[\s,.:;!?-]*",
-    re.IGNORECASE,
+VOICE_SESSION_DURATION_SECONDS = 45.0
+VOICE_BUTLER_GREETINGS = (
+    "À vos ordres Moctar, je vous écoute.",
+    "Oui Moctar, je suis là.",
 )
+_WAKE_ONLY_SENTINEL = "__MOCTAR_WAKE_ONLY__"
+
 _VOICE_WAKE_ANYWHERE_RE = re.compile(
-    r"\b(?:yo\s+moctar|moctar|moktar|mokhtar|yo\s+elmo|elmo)\b[\s,.:;!?-]*",
+    r"\b(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute)\s+)?"
+    r"(yo\s+moctar|moctar|moktar|mokhtar|mouctar|mouktar|motard|jarvis|elmo|yo\s+elmo|allo\s+moctar|dis\s+moctar)\b[\s,.:;!?-]*",
     re.IGNORECASE,
 )
+_VOICE_PURE_GREETING_RE = re.compile(
+    r"^[\s,.:;!?-]*(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|oui)*[\s,.:;!?-]*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_accents_1to1(value: str) -> str:
+    """Supprime les diacritiques en conservant la correspondance d'index 1-pour-1."""
+    import unicodedata
+
+    return "".join(unicodedata.normalize("NFD", ch)[0] for ch in value)
 
 
 def extract_voice_interact_command(transcript: str, session_active: bool = False) -> tuple[bool, str, bool]:
-    """Vérifie le mot-clé ('Moctar', 'Yo Moctar', 'ELMo') ou une session vocale ouverte.
+    """Vérifie le mot-clé (tolérance phonétique totale partout dans la phrase) ou une session vocale ouverte.
 
     Retourne (accepted, command_text, wake_word_detected).
+    Si seul le mot de réveil a été prononcé sans ordre, command_text vaut _WAKE_ONLY_SENTINEL.
     """
     filtered = voice_transcribe.filter_whisper_hallucinations(transcript)
     if not filtered:
         return False, "", False
 
-    prefix_match = _VOICE_WAKE_PREFIX_RE.match(filtered)
-    if prefix_match:
-        remainder = filtered[prefix_match.end():].strip(" ,.:;!?-")
-        command = remainder if remainder else "Dis-moi que tu es à l'écoute en une phrase courte."
-        return True, command, True
-
-    anywhere_match = _VOICE_WAKE_ANYWHERE_RE.search(filtered)
+    normalized = _strip_accents_1to1(filtered)
+    anywhere_match = _VOICE_WAKE_ANYWHERE_RE.search(normalized)
     if anywhere_match:
-        remainder = filtered[anywhere_match.end():].strip(" ,.:;!?-")
-        command = remainder if remainder else filtered
-        return True, command, True
+        before = filtered[:anywhere_match.start()].strip(" ,.:;!?-")
+        after = filtered[anywhere_match.end():].strip(" ,.:;!?-")
+        if _VOICE_PURE_GREETING_RE.match(_strip_accents_1to1(before)):
+            before = ""
+        if _VOICE_PURE_GREETING_RE.match(_strip_accents_1to1(after)):
+            after = ""
+        remainder = f"{before} {after}".strip(" ,.:;!?-")
+        if not remainder:
+            return True, _WAKE_ONLY_SENTINEL, True
+        return True, remainder, True
 
     if session_active:
         return True, filtered, False
@@ -948,7 +966,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 {
                     "ok": True,
                     "ignored": True,
-                    "reason": "empty_audio",
+                    "reason": "empty",
                     "user_text": "",
                     "reply_text": "",
                     "audio_url": None,
@@ -976,12 +994,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             LOGGER.warning("Erreur de transcription faster-whisper sur /api/voice/interact : %s", exc)
             raise HTTPException(500, f"Échec de transcription : {exc}") from None
 
+        LOGGER.info(f"🎙️ [WHISPER BRUT]: '{transcript}'")
+
         if not transcript:
             return JSONResponse(
                 {
                     "ok": True,
                     "ignored": True,
-                    "reason": "silence_or_hallucination",
+                    "reason": "empty",
                     "user_text": "",
                     "reply_text": "",
                     "audio_url": None,
@@ -1012,32 +1032,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             )
 
-        runtime.voice_session_until = time.monotonic() + 60.0
+        runtime.voice_session_until = time.monotonic() + VOICE_SESSION_DURATION_SECONDS
 
         agent_result: dict[str, Any] = {}
-        if runtime.jarvis:
-            try:
-                agent_result = await runtime.jarvis.execute_prompt_async(
-                    user_input=command_text,
-                    source="web_voice",
-                )
-            except Exception as exc:
-                LOGGER.warning("Erreur AgentCore lors de /api/voice/interact : %s", exc)
-                agent_result = {
-                    "status": "error",
-                    "reply": "Je suis à l'écoute Moctar, mais une erreur interne est survenue.",
-                }
-        else:
+        if command_text == _WAKE_ONLY_SENTINEL:
+            display_user_text = transcript
+            reply_text = VOICE_BUTLER_GREETINGS[0]
             agent_result = {
-                "status": "offline",
-                "reply": "Je suis en ligne Moctar, mais le module AgentCore n'est pas initialisé.",
+                "status": "success",
+                "reply": reply_text,
+                "tools_used": [],
+                "thought_chain": [],
             }
-
-        reply_text = str(
-            agent_result.get("reply")
-            or agent_result.get("response")
-            or "Bien reçu, Moctar."
-        ).strip()
+        else:
+            display_user_text = command_text
+            if runtime.jarvis:
+                try:
+                    agent_result = await runtime.jarvis.execute_prompt_async(
+                        user_input=command_text,
+                        source="web_voice",
+                    )
+                except Exception as exc:
+                    LOGGER.warning("Erreur AgentCore lors de /api/voice/interact : %s", exc)
+                    agent_result = {
+                        "status": "error",
+                        "reply": "Je suis à l'écoute Moctar, mais une erreur interne est survenue.",
+                    }
+            else:
+                agent_result = {
+                    "status": "offline",
+                    "reply": "Je suis en ligne Moctar, mais le module AgentCore n'est pas initialisé.",
+                }
+            reply_text = str(
+                agent_result.get("reply")
+                or agent_result.get("response")
+                or "Bien reçu, Moctar."
+            ).strip()
 
         audio_url: str | None = None
         try:
@@ -1050,7 +1080,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {
                 "ok": True,
                 "ignored": False,
-                "user_text": command_text,
+                "user_text": display_user_text,
                 "raw_transcript": transcript,
                 "reply_text": reply_text,
                 "audio_url": audio_url,
