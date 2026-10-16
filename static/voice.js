@@ -12,7 +12,7 @@
     "m'occupe tard", 'moccupe tard', "m'occaque", 'moccaque', 'jarvis',
     'yo elmo', 'hey elmo', 'hey el mo', 'el mo', 'elmo',
   ];
-  const FOLLOWUP_MS = 45000;
+  const FOLLOWUP_MS = 0;
   const GREETING = 'À vos ordres Moctar, je vous écoute.';
   const WAKE_READY_MESSAGE = "🟢 À l'écoute — Dites « Yo Moctar »";
   const VOICE_DETECTED_MESSAGE = '🎙️ Moctar vous écoute...';
@@ -444,6 +444,13 @@
     }
 
     function openFollowup() {
+      if (FOLLOWUP_MS <= 0) {
+        phase = 'wake';
+        manual = false;
+        clearFollowup();
+        reconcile();
+        return;
+      }
       phase = 'listening';
       clearFollowup();
       followupTimer = delay(() => {
@@ -674,11 +681,19 @@
         });
         if (!response || !response.ok) {
           releaseEchoLock();
+          if (FOLLOWUP_MS <= 0) {
+            phase = 'wake';
+            manual = false;
+          }
           return;
         }
         const payload = await response.json();
         if (!payload || destroyed || suspended) {
           releaseEchoLock();
+          if (FOLLOWUP_MS <= 0) {
+            phase = 'wake';
+            manual = false;
+          }
           return;
         }
 
@@ -689,12 +704,16 @@
 
         if (payload.ignored || !payload.reply_text) {
           releaseEchoLock();
+          if (FOLLOWUP_MS <= 0) {
+            phase = 'wake';
+            manual = false;
+          }
           updateSolarVoiceState('idle');
           if (wanted()) {
             emit(phase, {
               rms: 0,
               isSpeaking: false,
-              message: phase === 'wake' ? WAKE_READY_MESSAGE : WAKE_READY_MESSAGE,
+              message: WAKE_READY_MESSAGE,
             });
           }
           return;
@@ -731,6 +750,10 @@
       } catch {
         releaseEchoLock();
         processingAudio = false;
+        if (FOLLOWUP_MS <= 0) {
+          phase = 'wake';
+          manual = false;
+        }
         updateSolarVoiceState('idle');
         if (wanted()) {
           emit(phase, {
@@ -1167,8 +1190,9 @@
         generation += 1;
         fault = null;
         manual = true;
+        phase = 'listening';
         clearFollowup();
-        openFollowup();
+        if (FOLLOWUP_MS > 0) openFollowup();
         await reconcile();
         return manual && !fault;
       },

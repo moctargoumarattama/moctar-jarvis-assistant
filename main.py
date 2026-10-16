@@ -1189,6 +1189,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session_active=session_active,
         )
         if not accepted or not command_text:
+            LOGGER.info("🔇 [VOICE IGNORED]: Mot-clé absent hors session ('%s')", transcript)
             return JSONResponse(
                 {
                     "ok": True,
@@ -1208,6 +1209,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if command_text == _WAKE_ONLY_SENTINEL or _is_pure_filler_or_wake(command_text):
             display_user_text = transcript
             reply_text = VOICE_BUTLER_GREETINGS[0]
+            LOGGER.info("⚡ [VOICE BUTLER (0ms)]: Wake-word pur détecté ('%s') -> '%s'", transcript, reply_text)
             agent_result = {
                 "status": "success",
                 "reply": reply_text,

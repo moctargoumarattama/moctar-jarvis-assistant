@@ -408,10 +408,10 @@ test('60 FPS VU-meter triggers on RMS > 0.035, stops after 850ms silence and min
   assert.equal(f.engine.state, 'speaking');
   assert.equal(f.states.at(-1).detail.message, '🔊 Moctar : "Tous les cœurs CPU sont nominaux, Moctar."');
 
-  // Finish audio playback -> returns to active listening
+  // Finish audio playback -> returns to wake listening (strict wake-word, zero ambient followup window)
   f.finishAudio();
   await f.settle();
-  assert.equal(f.engine.state, 'listening');
+  assert.equal(f.engine.state, 'wake');
 });
 
 test('push-to-talk mode starts recording immediately and sends upon release', async t => {

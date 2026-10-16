@@ -501,6 +501,48 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             acc, _, _ = main.extract_voice_interact_command(short_noise, session_active=True)
             self.assertFalse(acc, f"{short_noise} doit être ignoré")
 
+        # 5. Paroles ambiantes sans mot-clé hors session -> strictement rejetées
+        for ambient in (
+            "Bon, on va dire que c'est bon.",
+            "Non, non, non, mon frère.",
+            "du système",
+            "du pc",
+            "oui",
+            "non",
+        ):
+            acc, cmd, detected = main.extract_voice_interact_command(ambient, session_active=False)
+            self.assertFalse(acc, f"{ambient} sans mot-clé doit être ignoré")
+            self.assertFalse(detected, f"{ambient} ne doit pas détecter de mot-clé")
+            self.assertEqual(cmd, "")
+
+    def test_voice_interact_rejects_ambient_speech_without_wake_word(self) -> None:
+        """Vérifie que les bruits de fond et paroles de la pièce sans mot-clé hors session sont rejetés sans LLM."""
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 2000, -2000, 2000, -2000))
+        jarvis_mock = AsyncMock()
+        self.app.state.runtime.jarvis = SimpleNamespace(execute_prompt_async=jarvis_mock)
+        self.app.state.runtime.voice_session_until = 0.0
+
+        for ambient_phrase in (
+            "Bon, on va dire...",
+            "Non, non, non, mon frère.",
+            "du système",
+            "du pc",
+        ):
+            with patch("main.voice_transcribe.transcribe_audio", return_value=ambient_phrase):
+                resp = self.client.post(
+                    "/api/voice/interact",
+                    content=wav_bytes,
+                    headers={"Content-Type": "audio/wav"},
+                )
+                self.assertEqual(resp.status_code, 200)
+                body = resp.json()
+                self.assertTrue(body["ok"])
+                self.assertTrue(body["ignored"])
+                self.assertEqual(body["reason"], "wake_word_missing")
+                self.assertEqual(body["user_text"], ambient_phrase)
+                self.assertEqual(body["reply_text"], "")
+                jarvis_mock.assert_not_awaited()
+
     def test_voice_fast_llm_reply_groq_llama_call(self) -> None:
         """Vérifie l'appel direct à Groq Llama-3.3-70B avec télémétrie vivante injectée."""
         import ai_brain
