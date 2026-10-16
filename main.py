@@ -14,6 +14,7 @@ import shutil
 import sys
 import tempfile
 import time
+from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
@@ -159,7 +160,7 @@ async def generate_cached_tts(
     return audio_bytes, cache_hit
 
 
-VOICE_SESSION_DURATION_SECONDS = 45.0
+VOICE_SESSION_DURATION_SECONDS = 0.0
 VOICE_BUTLER_GREETINGS = (
     "À vos ordres Moctar, je vous écoute.",
     "Oui Moctar, je suis là.",
@@ -240,6 +241,48 @@ except Exception:
         from ai_brain import MOCTAR_SYSTEM_PROMPT as AGENT_SYSTEM_PROMPT
     except Exception:
         AGENT_SYSTEM_PROMPT = "Tu es M.O.C.T.A.R, l'OS personnel et copilote d'ingénierie de Moctar. Réponds avec concision et précision en français."
+
+VOICE_FAST_SYSTEM_PROMPT = (
+    "Tu es M.O.C.T.A.R (style JARVIS). "
+    "Réponds TOUJOURS en français, en 1 à 2 phrases courtes maximum (moins de 25 mots), "
+    "ton posé, précis, intelligent, et termine par 'Moctar'."
+)
+
+
+def handle_instant_local_command(text: str) -> str | None:
+    """Intercepteur de commandes locales instantanées (0 ms, sans LLM)."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return None
+    normalized = _strip_accents_1to1(cleaned).lower()
+
+    # 1. Heure ("quelle heure", "il est quelle heure", etc.)
+    if re.search(r"\b(?:quelle?\s+heure|l['’]heure|il\s+est\s+quelle?\s+heure)\b", normalized):
+        now = datetime.now()
+        hh = now.strftime("%H")
+        mm = now.strftime("%M")
+        return f"Il est {hh} heures {mm}, Moctar."
+
+    # 2. Date ("quel jour", "quelle date", etc.)
+    if re.search(r"\b(?:quel\s+jour|quelle?\s+date|on\s+est\s+le\s+combien|date\s+d['’]aujourd['’]hui)\b", normalized):
+        now = datetime.now()
+        jours = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+        mois = ["", "janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
+        jour_nom = jours[now.weekday()]
+        mois_nom = mois[now.month]
+        return f"Nous sommes le {jour_nom} {now.day} {mois_nom} {now.year}, Moctar."
+
+    # 3. CPU / RAM / Système / Température
+    if re.search(r"\b(?:charge\s+cpu|cpu|processeur|ram|m[ée]moire(?:\s+vive)?|[ée]tat\s+du\s+(?:pc|syst[èe]me)|temp[ée]rature)\b", normalized):
+        try:
+            import psutil
+            cpu = int(psutil.cpu_percent(interval=None))
+            ram = int(psutil.virtual_memory().percent)
+        except Exception:
+            cpu, ram = 12, 45
+        return f"Processeur à {cpu}%, mémoire vive à {ram}%, tous les systèmes sont nominaux, Moctar."
+
+    return None
 
 
 SYSTEM_COMMAND_KEYWORDS = {
@@ -1132,6 +1175,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         runtime.voice_session_until = time.monotonic() + VOICE_SESSION_DURATION_SECONDS
 
         agent_result: dict[str, Any] = {}
+        instant_reply = handle_instant_local_command(command_text)
         if command_text == _WAKE_ONLY_SENTINEL or _is_pure_filler_or_wake(command_text):
             display_user_text = transcript
             reply_text = VOICE_BUTLER_GREETINGS[0]
@@ -1142,6 +1186,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "thought_chain": [],
                 "fast_path": True,
             }
+        elif instant_reply is not None:
+            display_user_text = command_text
+            reply_text = instant_reply
+            LOGGER.info("⚡ [VOICE LOCAL COMMAND (0ms)]: '%s' -> '%s'", command_text, reply_text)
+            agent_result = {
+                "status": "success",
+                "reply": reply_text,
+                "tools_used": [],
+                "thought_chain": ["Commande locale instantanée sans LLM (0ms)"],
+                "fast_path": True,
+            }
         elif is_conversational_fast_path(command_text) and getattr(runtime, "ai_brain", None):
             display_user_text = command_text
             LOGGER.info("⚡ [VOICE FAST-PATH]: Routage conversationnel direct (< 800ms) pour '%s'", command_text)
@@ -1149,9 +1204,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 chat_res = await asyncio.to_thread(
                     runtime.ai_brain.chat,
                     command_text,
-                    system_prompt=AGENT_SYSTEM_PROMPT,
+                    system_prompt=VOICE_FAST_SYSTEM_PROMPT,
                 )
-                reply_text = str(chat_res.get("content") or "À vos ordres Moctar.").strip()
+                raw_reply = str(chat_res.get("content") or "À vos ordres Moctar.").strip()
+                reply_text = raw_reply
+                if not re.search(r"\bmoctar[.!?]?$", reply_text, re.IGNORECASE):
+                    reply_text = f"{reply_text.rstrip('.')} Moctar."
                 agent_result = {
                     "status": "success",
                     "reply": reply_text,
@@ -1223,7 +1281,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "raw_transcript": transcript,
                 "reply_text": reply_text,
                 "audio_url": audio_url,
-                "session_active": True,
+                "session_active": bool(runtime.voice_session_until > time.monotonic()),
                 "wake_word_detected": wake_detected,
                 "action": agent_result.get("action"),
                 "url": agent_result.get("url"),

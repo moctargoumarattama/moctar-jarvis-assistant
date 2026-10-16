@@ -222,6 +222,12 @@ HALLUCINATION_SUBSTRINGS = (
     "subtitles by",
     "thank you for watching",
     "thanks for watching",
+    "is that you",
+    "assistant vocal",
+    "thank you",
+    "thanks for",
+    "au revoir",
+    "are you there",
 )
 
 HALLUCINATION_EXACT_PHRASES = {
@@ -232,6 +238,18 @@ HALLUCINATION_EXACT_PHRASES = {
     "au revoir",
     "au revoir.",
     "bye",
+    "oui",
+    "oui.",
+    "oui !",
+    "non",
+    "non.",
+    "is that you",
+    "is that you?",
+    "is that you.",
+    "assistant vocal",
+    "assistant vocal.",
+    "thank you",
+    "thank you.",
     "...",
     ".",
 }
@@ -268,6 +286,8 @@ def filter_whisper_hallucinations(text: str) -> str:
     for pattern in HALLUCINATION_SUBSTRINGS:
         if pattern in lowered:
             return ""
+    if re.search(r"\b(?:is\s+that\s+you|thank\s+you|thanks|how\s+are\s+you|what\s+is|you\s+there|are\s+you|can\s+you|hello\s+world|goodbye)\b", lowered):
+        return ""
     if has_repetitive_hallucination(cleaned):
         return ""
     # Rejeter les répétitions dégénérées d'un même mot ou symbole bruité
@@ -313,9 +333,9 @@ def transcribe_groq_api(audio_path: str | os.PathLike[str], api_key: str | None 
 
     start_time = time.perf_counter()
     url = "https://api.groq.com/openai/v1/audio/transcriptions"
-    model = os.environ.get("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
+    model = os.environ.get("GROQ_WHISPER_MODEL", "whisper-large-v3")
 
-    prompt_fr = "Transcription stricte en français. Moctar, Yo Moctar, Jarvis, assistant vocal personnel."
+    prompt_fr = ""
 
     # Essai 1 : SDK groq si présent
     try:
@@ -413,7 +433,7 @@ def transcribe_audio(
         condition_on_previous_text=False,
         compression_ratio_threshold=2.2,
         no_speech_threshold=0.6,
-        initial_prompt="Moctar, Yo Moctar, Jarvis, ELMo, assistant vocal personnel de Moctar.",
+        initial_prompt=None,
     )
     pieces: list[str] = []
     size = 0

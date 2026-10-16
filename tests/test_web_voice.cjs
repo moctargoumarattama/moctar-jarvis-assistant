@@ -539,3 +539,99 @@ test('permission denial (NotAllowedError) reports a clear error and disables ret
   assert.equal(f.engine.state, 'error');
   assert.ok(f.states.some(({ detail }) => /Autorisez le microphone/i.test(detail?.message || '')));
 });
+
+test('continuous 800ms pre-roll buffer encodes to 16kHz mono WAV and sends audio/wav', async t => {
+  let capturedBody = null;
+  let capturedContentType = null;
+  let audioProcessCallback = null;
+
+  class FakeScriptProcessor {
+    constructor() {
+      this._handler = null;
+    }
+    get onaudioprocess() {
+      return this._handler;
+    }
+    set onaudioprocess(fn) {
+      this._handler = fn;
+      audioProcessCallback = fn;
+    }
+    connect() {}
+    disconnect() {}
+  }
+
+  const f = createWebAudioFixture(t, {
+    AudioContext: class {
+      constructor() {
+        this.state = 'running';
+        this.sampleRate = 48000;
+      }
+      resume() { return Promise.resolve(); }
+      createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+      createBiquadFilter() { return { connect() {}, disconnect() {}, frequency: { value: 120 } }; }
+      createAnalyser() {
+        return {
+          fftSize: 512,
+          smoothingTimeConstant: 0.2,
+          get currentRms() { return 0; },
+          getFloatTimeDomainData() {},
+          getByteTimeDomainData() {},
+        };
+      }
+      createScriptProcessor() {
+        return new FakeScriptProcessor();
+      }
+      createGain() { return { gain: { value: 0 }, connect() {}, disconnect() {} }; }
+      close() { return Promise.resolve(); }
+    },
+    fetch: async (url, opts) => {
+      capturedContentType = opts.headers['Content-Type'];
+      capturedBody = opts.body;
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          reply_text: 'Bonjour Moctar.',
+        }),
+      };
+    },
+  });
+
+  await f.engine.enable();
+  await f.settle();
+  assert.ok(typeof audioProcessCallback === 'function', 'audioProcessCallback must be registered');
+
+  // 1. Simuler l'écoute passive (audioProcessCallback avec des échantillons PCM passifs)
+  const passiveBlock = new Float32Array(2048);
+  for (let i = 0; i < passiveBlock.length; i++) passiveBlock[i] = 0.05;
+  audioProcessCallback({
+    inputBuffer: {
+      getChannelData: () => passiveBlock,
+      sampleRate: 48000,
+    },
+  });
+
+  // 2. Déclencher la parole via push-to-talk
+  await f.engine.startPushToTalk();
+  await f.settle();
+
+  // 3. Simuler des échantillons actifs pendant la parole
+  const activeBlock = new Float32Array(2048);
+  for (let i = 0; i < activeBlock.length; i++) activeBlock[i] = 0.2;
+  audioProcessCallback({
+    inputBuffer: {
+      getChannelData: () => activeBlock,
+      sampleRate: 48000,
+    },
+  });
+
+  // 4. Arrêt de push-to-talk -> stopPhraseAndSend()
+  f.engine.stopPushToTalk();
+  await f.settle();
+
+  // 5. Vérifier que l'audio envoyé est bien audio/wav encodé en PCM 16-bit
+  assert.equal(capturedContentType, 'audio/wav');
+  assert.ok(capturedBody, 'capturedBody must not be null');
+  assert.ok(capturedBody.size > 44, 'WAV size must exceed standard header size');
+});
+

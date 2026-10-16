@@ -109,6 +109,92 @@
     let processingAudio = false;
     let pendingStartPromise = null;
 
+    const TARGET_SAMPLE_RATE = 16000;
+    const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.8); // 800 ms = 12800 échantillons à 16 kHz
+    const preRollBuffer = new Float32Array(PRE_ROLL_SAMPLES);
+    let preRollWriteIndex = 0;
+    let preRollCount = 0;
+    let activePcmChunks = [];
+    let scriptNode = null;
+    let silentGainNode = null;
+
+    function downsampleTo16k(input, sourceRate) {
+      if (!input || !input.length) return new Float32Array(0);
+      if (sourceRate === TARGET_SAMPLE_RATE) return new Float32Array(input);
+      const ratio = sourceRate / TARGET_SAMPLE_RATE;
+      const newLength = Math.round(input.length / ratio);
+      const result = new Float32Array(newLength);
+      let offsetResult = 0;
+      let offsetBuffer = 0;
+      while (offsetResult < result.length) {
+        const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+        let accum = 0;
+        let count = 0;
+        for (let i = offsetBuffer; i < nextOffsetBuffer && i < input.length; i++) {
+          accum += input[i];
+          count++;
+        }
+        result[offsetResult] = count > 0 ? accum / count : 0;
+        offsetResult++;
+        offsetBuffer = nextOffsetBuffer;
+      }
+      return result;
+    }
+
+    function encodeWavPcm16(samples, sampleRate) {
+      const buffer = new ArrayBuffer(44 + samples.length * 2);
+      const view = new DataView(buffer);
+
+      function writeString(offset, string) {
+        for (let i = 0; i < string.length; i++) {
+          view.setUint8(offset + i, string.charCodeAt(i));
+        }
+      }
+
+      writeString(0, 'RIFF');
+      view.setUint32(4, 36 + samples.length * 2, true);
+      writeString(8, 'WAVE');
+      writeString(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true); // PCM format = 1
+      view.setUint16(22, 1, true); // mono
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true); // byte rate (sampleRate * 1 * 2)
+      view.setUint16(32, 2, true); // block align (1 * 2)
+      view.setUint16(34, 16, true); // 16-bit
+      writeString(36, 'data');
+      view.setUint32(40, samples.length * 2, true);
+
+      let offset = 44;
+      for (let i = 0; i < samples.length; i++, offset += 2) {
+        const s = Math.max(-1, Math.min(1, samples[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      }
+
+      return (typeof Blob === 'function')
+        ? new Blob([buffer], { type: 'audio/wav' })
+        : { size: buffer.byteLength, type: 'audio/wav', buffer };
+    }
+
+    function handleAudioProcess(event) {
+      if (destroyed || suspended || status !== 'active') return;
+      const input = event.inputBuffer.getChannelData(0);
+      const srcRate = event.inputBuffer.sampleRate || (audioCtx && audioCtx.sampleRate) || 48000;
+      const pcm16k = downsampleTo16k(input, srcRate);
+
+      if (!isSpeaking) {
+        // Écoute passive : enregistre en continu dans le tampon circulaire pré-roll (800 ms)
+        for (let i = 0; i < pcm16k.length; i++) {
+          preRollBuffer[preRollWriteIndex] = pcm16k[i];
+          preRollWriteIndex = (preRollWriteIndex + 1) % PRE_ROLL_SAMPLES;
+          if (preRollCount < PRE_ROLL_SAMPLES) preRollCount++;
+        }
+      } else {
+        // Parole active : accumule les échantillons PCM 16kHz
+        activePcmChunks.push(pcm16k);
+      }
+    }
+
     function getNow() {
       if (clock && typeof clock.now === 'function') return clock.now();
       if (clock && typeof clock.now === 'number') return clock.now;
@@ -378,6 +464,21 @@
       }
       recordedChunks = [];
 
+      if (scriptNode) {
+        try {
+          scriptNode.onaudioprocess = null;
+          scriptNode.disconnect?.();
+        } catch {}
+        scriptNode = null;
+      }
+      if (silentGainNode) {
+        try { silentGainNode.disconnect?.(); } catch {}
+        silentGainNode = null;
+      }
+      preRollWriteIndex = 0;
+      preRollCount = 0;
+      activePcmChunks = [];
+
       if (sourceNode) {
         try { sourceNode.disconnect?.(); } catch {}
         sourceNode = null;
@@ -605,6 +706,32 @@
         isSpeaking: false,
         message: THINKING_MESSAGE,
       });
+
+      if (activePcmChunks.length > 0) {
+        const chunks = activePcmChunks.splice(0);
+        if (recorder && recorder.state === 'recording') {
+          try {
+            recorder.ondataavailable = null;
+            recorder.onstop = null;
+            recorder.stop();
+          } catch {}
+          recorder = null;
+        }
+        let totalLength = 0;
+        for (let i = 0; i < chunks.length; i++) {
+          totalLength += chunks[i].length;
+        }
+        const merged = new Float32Array(totalLength);
+        let offset = 0;
+        for (let i = 0; i < chunks.length; i++) {
+          merged.set(chunks[i], offset);
+          offset += chunks[i].length;
+        }
+        const wavBlob = encodeWavPcm16(merged, TARGET_SAMPLE_RATE);
+        void sendAudioChunkToInteract([wavBlob], 'audio/wav');
+        return;
+      }
+
       if (recorder && recorder.state === 'recording') {
         try {
           recorder.stop();
@@ -619,52 +746,72 @@
     }
 
     function startPhraseRecorder() {
-      if (!stream || !MediaRecorderClass) return false;
+      if (!stream) return false;
       if (recorder && recorder.state === 'recording') return true;
-      recordedChunks = [];
       phraseStartTime = getNow();
       recordingElapsedMs = 0;
+
+      // Capture le tampon circulaire pré-roll de 800 ms dans l'ordre chronologique
+      if (preRollCount > 0) {
+        const preRollChunk = new Float32Array(preRollCount);
+        if (preRollCount < PRE_ROLL_SAMPLES) {
+          preRollChunk.set(preRollBuffer.subarray(0, preRollCount));
+        } else {
+          const part1 = preRollBuffer.subarray(preRollWriteIndex, PRE_ROLL_SAMPLES);
+          const part2 = preRollBuffer.subarray(0, preRollWriteIndex);
+          preRollChunk.set(part1, 0);
+          preRollChunk.set(part2, part1.length);
+        }
+        activePcmChunks = [preRollChunk];
+      } else {
+        activePcmChunks = [];
+      }
+
+      recordedChunks = [];
       const mimeType = pickMimeType();
-      try {
-        recorder = new MediaRecorderClass(stream, { mimeType, audioBitsPerSecond: 128000 });
-      } catch {
+      if (MediaRecorderClass) {
         try {
-          recorder = new MediaRecorderClass(stream, { mimeType });
+          recorder = new MediaRecorderClass(stream, { mimeType, audioBitsPerSecond: 128000 });
         } catch {
           try {
-            recorder = new MediaRecorderClass(stream);
+            recorder = new MediaRecorderClass(stream, { mimeType });
           } catch {
-            return false;
+            try {
+              recorder = new MediaRecorderClass(stream);
+            } catch {
+              recorder = null;
+            }
           }
         }
       }
-      recorder.ondataavailable = (ev) => {
-        if (ev && ev.data && (typeof ev.data.size !== 'number' || ev.data.size > 0)) {
-          recordedChunks.push(ev.data);
-        }
-      };
-      recorder.onstop = () => {
-        clearMaxSpeechTimer();
-        updateSolarVoiceState('thinking');
-        const captured = recordedChunks.splice(0);
-        const type = (recorder && recorder.mimeType) || mimeType;
-        recorder = null;
-        void sendAudioChunkToInteract(captured, type);
-      };
-      try {
-        recorder.start();
-        clearMaxSpeechTimer();
-        maxSpeechTimer = delay(() => {
-          maxSpeechTimer = null;
-          if (isSpeaking && recorder && recorder.state === 'recording') {
-            stopPhraseAndSend();
+      if (recorder) {
+        recorder.ondataavailable = (ev) => {
+          if (ev && ev.data && (typeof ev.data.size !== 'number' || ev.data.size > 0)) {
+            recordedChunks.push(ev.data);
           }
-        }, isPushToTalk ? 15000 : maxSpeechMs);
-        return true;
-      } catch {
-        clearMaxSpeechTimer();
-        return false;
+        };
+        recorder.onstop = () => {
+          clearMaxSpeechTimer();
+          updateSolarVoiceState('thinking');
+          const captured = recordedChunks.splice(0);
+          const type = (recorder && recorder.mimeType) || mimeType;
+          recorder = null;
+          void sendAudioChunkToInteract(captured, type);
+        };
+        try {
+          recorder.start();
+        } catch {
+          recorder = null;
+        }
       }
+      clearMaxSpeechTimer();
+      maxSpeechTimer = delay(() => {
+        maxSpeechTimer = null;
+        if (isSpeaking) {
+          stopPhraseAndSend();
+        }
+      }, isPushToTalk ? 15000 : maxSpeechMs);
+      return Boolean(recorder || scriptNode);
     }
 
     function stepVuMeterFrame(timestamp) {
@@ -777,6 +924,27 @@
             }
 
             timeDomainData = new Uint8Array(analyser.fftSize || 512);
+
+            // ScriptProcessorNode pour le tampon pré-roll 800ms et l'enregistrement WAV 16kHz
+            if (typeof audioCtx.createScriptProcessor === 'function') {
+              try {
+                scriptNode = audioCtx.createScriptProcessor(2048, 1, 1);
+                scriptNode.onaudioprocess = handleAudioProcess;
+                const filterOrSource = highpassFilter || sourceNode;
+                filterOrSource.connect(scriptNode);
+                if (typeof audioCtx.createGain === 'function') {
+                  silentGainNode = audioCtx.createGain();
+                  silentGainNode.gain.value = 0.0;
+                  scriptNode.connect(silentGainNode);
+                  silentGainNode.connect(audioCtx.destination);
+                } else if (audioCtx.destination) {
+                  scriptNode.connect(audioCtx.destination);
+                }
+              } catch {
+                scriptNode = null;
+                silentGainNode = null;
+              }
+            }
           }
           status = 'active';
           emit(phase, {
@@ -888,6 +1056,9 @@
           recorder = null;
         }
         recordedChunks = [];
+        activePcmChunks = [];
+        preRollCount = 0;
+        preRollWriteIndex = 0;
         isSpeaking = false;
         silenceElapsedMs = 0;
         recordingElapsedMs = 0;

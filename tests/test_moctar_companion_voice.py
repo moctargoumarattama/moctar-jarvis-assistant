@@ -234,7 +234,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertEqual(data["reply_text"], "Tous les services du Dell Precision sont actifs, Moctar.")
             self.assertTrue(data["audio_url"].startswith("/api/voice/tts/cache/"))
             self.assertTrue(data["audio_url"].endswith(".mp3"))
-            self.assertTrue(data["session_active"])
+            self.assertFalse(data["session_active"])
             whisper_mock.assert_called_once()
             jarvis_mock.assert_awaited_once_with(
                 user_input="donne-moi l'état des services",
@@ -252,7 +252,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertEqual(audio_resp.content, fake_mp3)
 
     def test_phonetic_wake_words_anywhere_and_wake_only_butler_greeting(self) -> None:
-        """Valide la tolérance phonétique totale (Moktar, Motard, Mouctar, etc.), la réponse majordome immédiate sur prénom seul et la session continue de 45s."""
+        """Valide la tolérance phonétique totale (Moktar, Motard, Mouctar, etc.), la réponse majordome immédiate sur prénom seul et la gestion de session."""
         wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 2500, -2500, 2500, -2500))
         fake_mp3 = b"ID3-BUTLER-MP3"
         jarvis_mock = AsyncMock(
@@ -282,23 +282,23 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
                 self.assertTrue(wake_data["ok"])
                 self.assertFalse(wake_data["ignored"])
                 self.assertEqual(wake_data["reply_text"], "À vos ordres Moctar, je vous écoute.")
-                self.assertTrue(wake_data["session_active"])
+                self.assertFalse(wake_data["session_active"])
                 self.assertTrue(wake_data["audio_url"].startswith("/api/voice/tts/cache/"))
                 jarvis_mock.assert_not_awaited()
 
-            # 2. Dans la fenêtre de 45 secondes qui suit, toute phrase sans mot-clé est traitée directement comme un ordre
-            with patch("main.voice_transcribe.transcribe_audio", return_value="donne-moi la charge CPU"):
+            # 2. Avec le header de session active (fourni par le dashboard ou PTT), toute phrase sans mot-clé est traitée directement
+            with patch("main.voice_transcribe.transcribe_audio", return_value="vérifie les disques durs"):
                 followup_resp = self.client.post(
                     "/api/voice/interact",
                     content=wav_bytes,
-                    headers={"Content-Type": "audio/wav"},
+                    headers={"Content-Type": "audio/wav", "X-Voice-Session-Active": "true"},
                 )
                 self.assertEqual(followup_resp.status_code, 200)
                 followup_data = followup_resp.json()
                 self.assertFalse(followup_data["ignored"])
-                self.assertEqual(followup_data["user_text"], "donne-moi la charge CPU")
+                self.assertEqual(followup_data["user_text"], "vérifie les disques durs")
                 self.assertEqual(followup_data["reply_text"], "La charge CPU est à 12 pourcent, Moctar.")
-                jarvis_mock.assert_awaited_once_with(user_input="donne-moi la charge CPU", source="web_voice")
+                jarvis_mock.assert_awaited_once_with(user_input="vérifie les disques durs", source="web_voice")
 
             # 3. Variantes phonétiques au milieu ou à la fin de la phrase hors session active
             for variant_phrase, expected_cmd in (
@@ -349,11 +349,11 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
                 self.assertFalse(data["ignored"])
                 self.assertTrue(data["fast_path"])
                 self.assertEqual(data["user_text"], "comment tu t'appelles")
-                self.assertEqual(data["reply_text"], "Je m'appelle M.O.C.T.A.R, votre copilote vocal.")
+                self.assertEqual(data["reply_text"], "Je m'appelle M.O.C.T.A.R, votre copilote vocal Moctar.")
                 self.assertTrue(data["audio_url"].startswith("/api/voice/tts/cache/"))
                 chat_mock.assert_called_once_with(
                     "comment tu t'appelles",
-                    system_prompt=main.AGENT_SYSTEM_PROMPT,
+                    system_prompt=main.VOICE_FAST_SYSTEM_PROMPT,
                 )
                 jarvis_mock.assert_not_awaited()
 
@@ -411,12 +411,12 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
                 )
                 chat_mock.assert_called_once_with(
                     "raconte-moi une découverte fascinante sur l'astrophysique et les trous noirs",
-                    system_prompt=main.AGENT_SYSTEM_PROMPT,
+                    system_prompt=main.VOICE_FAST_SYSTEM_PROMPT,
                 )
                 jarvis_mock.assert_not_awaited()
 
-    def test_transcribe_audio_passes_initial_prompt_to_bias_moctar(self) -> None:
-        """Vérifie que transcribe_audio injecte initial_prompt pour biaiser le décodeur de Whisper vers 'Moctar' avec décodage greedy rapide."""
+    def test_transcribe_audio_removes_hallucinatory_prompt(self) -> None:
+        """Vérifie que transcribe_audio ne passe aucun initial_prompt hallucinatoire à Whisper avec décodage greedy rapide."""
         local_model(self.temp_dir / "models" / "whisper")
         loud_wav = encode_pcm16_wav(struct.pack("<hhhh", 0, 10000, -10000, 0))
         loud_path = self.temp_dir / "speech.wav"
@@ -435,8 +435,31 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertEqual(kwargs["beam_size"], 1)
             self.assertEqual(kwargs["best_of"], 1)
             self.assertEqual(kwargs["temperature"], 0.0)
-            self.assertIn("initial_prompt", kwargs)
-            self.assertIn("Moctar", kwargs["initial_prompt"])
+            self.assertIsNone(kwargs.get("initial_prompt"))
+
+    def test_instant_local_commands_without_llm(self) -> None:
+        """Vérifie les commandes instantanées locales (0 ms, sans LLM) : heure, date, statut système."""
+        # Heure
+        res_heure = main.handle_instant_local_command("quelle heure est-il")
+        self.assertIsNotNone(res_heure)
+        self.assertIn("Il est", res_heure)
+        self.assertTrue(res_heure.endswith(", Moctar."))
+
+        # Date
+        res_date = main.handle_instant_local_command("on est quel jour")
+        self.assertIsNotNone(res_date)
+        self.assertIn("Nous sommes le", res_date)
+        self.assertTrue(res_date.endswith(", Moctar."))
+
+        # CPU / RAM
+        res_sys = main.handle_instant_local_command("donne-moi l'état de la mémoire et du processeur")
+        self.assertIsNotNone(res_sys)
+        self.assertIn("Processeur", res_sys)
+        self.assertIn("mémoire vive", res_sys)
+        self.assertTrue(res_sys.endswith(", Moctar."))
+
+        # Non local
+        self.assertIsNone(main.handle_instant_local_command("qui a peint la Joconde"))
 
     def test_whisper_defaults_to_base_model(self) -> None:
         """Vérifie que le modèle par défaut est 'base' dans config et voice_transcribe."""
@@ -516,11 +539,24 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             post_mock.assert_called_once()
             call_kwargs = post_mock.call_args.kwargs
             self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer gsk_12345")
-            self.assertEqual(call_kwargs["data"]["model"], "whisper-large-v3-turbo")
+            self.assertEqual(call_kwargs["data"]["model"], "whisper-large-v3")
             self.assertEqual(call_kwargs["data"]["language"], "fr")
             self.assertEqual(call_kwargs["data"]["temperature"], "0.0")
-            self.assertIn("prompt", call_kwargs["data"])
-            self.assertIn("Transcription stricte en français", call_kwargs["data"]["prompt"])
+            self.assertEqual(call_kwargs["data"]["prompt"], "")
+
+    def test_filter_whisper_hallucinations_rejects_hallucinatory_patterns(self) -> None:
+        """Vérifie le rejet systématique des hallucinations (oui, is that you, assistant vocal, anglais)."""
+        self.assertEqual(voice_transcribe.filter_whisper_hallucinations("Oui."), "")
+        self.assertEqual(voice_transcribe.filter_whisper_hallucinations("oui"), "")
+        self.assertEqual(voice_transcribe.filter_whisper_hallucinations("Is that you?"), "")
+        self.assertEqual(voice_transcribe.filter_whisper_hallucinations("assistant vocal"), "")
+        self.assertEqual(voice_transcribe.filter_whisper_hallucinations("Thank you."), "")
+        self.assertEqual(voice_transcribe.filter_whisper_hallucinations("au revoir"), "")
+        self.assertEqual(voice_transcribe.filter_whisper_hallucinations("Hello world how are you"), "")
+        self.assertEqual(
+            voice_transcribe.filter_whisper_hallucinations("Bonjour Moctar quelle heure est-il"),
+            "Bonjour Moctar quelle heure est-il",
+        )
 
 
 if __name__ == "__main__":
