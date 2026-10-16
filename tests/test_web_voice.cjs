@@ -253,12 +253,104 @@ test('browser recognition ending naturally restarts the wake listener', async t 
   const f = fixture(t);
   await f.engine.enable();
   await f.settle();
-  f.rec.end();
-  f.time.advance(300);
+  for (let cycle = 0; cycle < 12; cycle++) {
+    const starts = f.rec.starts;
+    f.rec.end();
+    f.time.advance(249);
+    await f.settle();
+    assert.equal(f.rec.starts, starts, 'natural endings are debounced');
+    assert.equal(f.engine.listeningDesired, true);
+    f.time.advance(1);
+    await f.settle();
+    assert.equal(f.engine.state, 'wake');
+    assert.equal(f.active.length, 1);
+    assert.equal(f.rec.starts, starts + 1);
+  }
+  assert.equal(f.instances.length, 1, 'all restarts reuse the same recognizer');
+});
+
+for (const error of ['no-speech', 'aborted', 'audio-capture']) {
+  test(`repeated ${error} events preserve listening and restart without an error budget`, async t => {
+    const f = fixture(t);
+    await f.engine.enable();
+    await f.settle();
+    for (let cycle = 0; cycle < 12; cycle++) {
+      const starts = f.rec.starts;
+      f.rec.fail(error);
+      await f.settle();
+      assert.equal(f.engine.listeningDesired, true);
+      assert.equal(f.active.length, 0);
+      f.time.advance(249);
+      await f.settle();
+      assert.equal(f.rec.starts, starts);
+      f.time.advance(1);
+      await f.settle();
+      assert.equal(f.active.length, 1);
+      assert.equal(f.engine.state, 'wake');
+    }
+    assert.equal(f.states.some(({ state }) => state === 'error'), false);
+    f.rec.emit('elmo donne le statut');
+    await f.settle();
+    assert.deepEqual(f.prompts, ['donne le statut']);
+  });
+}
+
+test('network interruptions retry after 1500 ms indefinitely without disabling listening', async t => {
+  const f = fixture(t);
+  await f.engine.enable();
   await f.settle();
-  assert.equal(f.engine.state, 'wake');
-  assert.equal(f.active.length, 1);
-  assert.equal(f.instances.reduce((sum, item) => sum + item.starts, 0), 2);
+  for (let cycle = 0; cycle < 12; cycle++) {
+    const starts = f.rec.starts;
+    f.rec.fail('network');
+    await f.settle();
+    assert.equal(f.engine.listeningDesired, true);
+    f.time.advance(1499);
+    await f.settle();
+    assert.equal(f.rec.starts, starts);
+    f.time.advance(1);
+    await f.settle();
+    assert.equal(f.rec.starts, starts + 1);
+    assert.equal(f.active.length, 1);
+  }
+  assert.equal(f.states.some(({ state }) => state === 'error'), false);
+});
+
+test('a service restriction preserves listening intent and explains browser permissions', async t => {
+  const f = fixture(t);
+  await f.engine.enable();
+  await f.settle();
+  for (let cycle = 0; cycle < 6; cycle++) {
+    const starts = f.rec.starts;
+    f.rec.fail('service-not-allowed');
+    await f.settle();
+    assert.equal(f.engine.listeningDesired, true);
+    f.time.advance(1499);
+    await f.settle();
+    assert.equal(f.rec.starts, starts);
+    f.time.advance(1);
+    await f.settle();
+    assert.equal(f.rec.starts, starts + 1);
+  }
+  assert.ok(f.states.some(({ detail }) => detail.error === 'service-not-allowed' && /autorisations/.test(detail.message)));
+  assert.equal(f.states.some(({ state }) => state === 'error'), false);
+});
+
+test('explicit disabling cancels delayed network and natural-end restarts', async t => {
+  for (const error of ['network', 'no-speech', 'aborted', 'audio-capture']) {
+    const f = fixture(t);
+    await f.engine.enable();
+    await f.settle();
+    f.rec.fail(error);
+    await f.settle();
+    f.engine.disable();
+    f.time.advance(60000);
+    await f.settle();
+    assert.equal(f.engine.listeningDesired, false, error);
+    assert.equal(f.engine.state, 'off', error);
+    assert.equal(f.rec.starts, 1, error);
+    assert.equal(f.active.length, 0, error);
+    f.engine.destroy();
+  }
 });
 
 test('disabling during pending greeting prevents automatic microphone reactivation', async t => {
@@ -300,7 +392,7 @@ test('suspending during a pending request keeps the microphone paused until visi
 });
 
 test('permission denial produces an error and never loops microphone retries', async t => {
-  for (const error of ['not-allowed', 'service-not-allowed', 'audio-capture']) {
+  for (const error of ['not-allowed']) {
     const f = fixture(t);
     await f.engine.enable();
     await f.settle();
@@ -353,7 +445,7 @@ test('external speech or a typed request pauses listening until busy is cleared'
   assert.equal(f.active.length, 1);
 });
 
-test('a missing microphone stop confirmation becomes an error without concurrent restarts', async t => {
+test('a missing microphone stop confirmation preserves intent without concurrent restarts until confirmed', async t => {
   const f = fixture(t);
   await f.engine.enable();
   await f.settle();
@@ -369,7 +461,7 @@ test('a missing microphone stop confirmation becomes an error without concurrent
   f.time.advance(2500);
   await f.settle();
   assert.equal(f.engine.state, 'error');
-  assert.equal(f.engine.enabled, false);
+  assert.equal(f.engine.enabled, true, 'a browser stop timeout must not revoke listening intent');
   assert.equal(await f.engine.enable(), false, 'an unconfirmed stop must prevent another start');
   assert.equal(rec.starts, 1);
   assert.deepEqual(f.speech, []);
@@ -377,8 +469,8 @@ test('a missing microphone stop confirmation becomes an error without concurrent
   assert.ok(f.states.some(({ detail }) => detail && detail.error === 'stop-timeout'));
   rec.end();
   await f.settle();
-  assert.equal(rec.starts, 1, 'a late onend requires explicit reactivation after the error');
-  assert.equal(await f.engine.enable(), true);
+  assert.equal(rec.starts, 1, 'a confirmed late onend still respects restart debounce');
+  f.time.advance(250);
   await f.settle();
   assert.equal(rec.starts, 2);
   assert.equal(f.engine.state, 'wake');

@@ -998,8 +998,10 @@
       const homeVpsSub = document.getElementById('home-vps-sub');
       if (homeVps) homeVps.textContent = `${vpsList.length}`;
       if (homeVpsSub) {
-        const activeCount = vpsList.filter((v) => v && !v.stale).length;
-        homeVpsSub.textContent = vpsList.length === 0 ? 'Aucun serveur distant' : `${activeCount} actif(s) en ligne`;
+        const activeCount = vpsList.filter((v) => v && !v.stale && !v.restored && !v.archived).length;
+        const archivedCount = vpsList.filter((v) => v && v.archived).length;
+        homeVpsSub.textContent = vpsList.length === 0 ? 'Aucun serveur distant' : `${activeCount} actif(s) en ligne` +
+          (archivedCount ? ` · ${archivedCount} archivé(s)` : '');
       }
 
       // Cyberdéfense (Sentinel)

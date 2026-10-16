@@ -43,14 +43,11 @@
     let job = null;
     let status = 'idle';
     let intentionalStop = false;
-    let retries = 0;
     let pendingRetry = null;
     let restartTimer = null;
     let followupTimer = null;
-    let stableTimer = null;
     let stopTimer = null;
     let stuck = false;
-    let stable = false;
     const finalResults = new Set();
     const stoppedWaiters = [];
 
@@ -68,10 +65,6 @@
         cancel(restartTimer);
         restartTimer = null;
       }
-      if (name === 'stable' && stableTimer !== null) {
-        cancel(stableTimer);
-        stableTimer = null;
-      }
       if (name === 'stop' && stopTimer !== null) {
         cancel(stopTimer);
         stopTimer = null;
@@ -79,7 +72,7 @@
     }
 
     function clearTimers() {
-      ['followup', 'restart', 'stable'].forEach(clearTimer);
+      ['followup', 'restart'].forEach(clearTimer);
       pendingRetry = null;
     }
 
@@ -91,10 +84,12 @@
       return !destroyed && !suspended && !fault && !busy && !job && (enabled || manual);
     }
 
-    function fail(error, message) {
-      fault = { error, message };
-      enabled = false;
-      manual = false;
+    function fail(error, message, disableListening = true) {
+      fault = { error, message, recoverOnEnd: !disableListening };
+      if (disableListening) {
+        enabled = false;
+        manual = false;
+      }
       generation += 1;
       clearTimers();
       emit('error', fault);
@@ -105,14 +100,13 @@
       if (!recognition || status === 'idle' || status === 'stopping') return;
       intentionalStop = true;
       status = 'stopping';
-      clearTimer('stable');
-      // Some mobile recognizers never emit onend after abort. Fail closed rather
-      // than hang a command forever or start a second microphone session.
+      // A missing onend must never start a second microphone session. Preserve
+      // the user's listening preference and resume if the browser confirms it later.
       stopTimer = delay(() => {
         stopTimer = null;
         if (destroyed || status !== 'stopping') return;
         stuck = true;
-        fail('stop-timeout', 'Le navigateur ne libère pas le microphone. Rechargez la page pour réactiver l’écoute.');
+        fail('stop-timeout', 'Le navigateur ne libère pas le microphone. En attente de sa libération ; rechargez la page si le problème persiste.', false);
         settleStopped();
       }, STOP_TIMEOUT_MS);
       try {
@@ -124,7 +118,7 @@
         stuck = true;
         clearTimer('stop');
         settleStopped();
-        fail(error, 'Impossible d’arrêter le microphone. Rechargez la page avant de réactiver l’écoute.');
+        fail(error, 'Impossible d’arrêter le microphone. En attente de sa libération ; rechargez la page si le problème persiste.', false);
       }
     }
 
@@ -137,20 +131,19 @@
     }
 
     function retry(error) {
-      retries += 1;
-      if (retries > 4) {
-        fail(error, 'L’écoute a été interrompue plusieurs fois. Vérifiez le réseau et réactivez le microphone.');
-        return;
-      }
-      pendingRetry = Math.min(250 * (2 ** (retries - 1)), 2000);
-      emit('starting', { error, message: 'Connexion au service de reconnaissance vocale…' });
+      pendingRetry = 1500;
+      emit('starting', {
+        error,
+        message: error === 'service-not-allowed'
+          ? 'La reconnaissance vocale est bloquée par le navigateur. Vérifiez ses autorisations ; l’écoute reste activée.'
+          : 'Connexion au service de reconnaissance vocale…',
+      });
     }
 
     function startRecognition() {
       if (!wanted() || status !== 'idle' || restartTimer !== null) return;
       status = 'starting';
       intentionalStop = false;
-      stable = false;
       finalResults.clear();
       emit('starting', { message: 'Activation du microphone…' });
       try {
@@ -253,7 +246,6 @@
         finalResults.add(index);
         const text = String(result[0] && result[0].transcript || '').trim();
         if (!text) continue;
-        retries = 0;
         if (STOP_PHRASES.has(phrase(text))) {
           phase = 'wake';
           manual = false;
@@ -279,7 +271,6 @@
           if (destroyed) return;
           if (status === 'stopping') { requestStop(); return; }
           status = 'active';
-          stableTimer = delay(() => { stable = true; retries = 0; }, 5000);
           reconcile();
         };
         recognition.onresult = handleResult;
@@ -289,28 +280,24 @@
         recognition.onerror = (event) => {
           if (destroyed || status === 'idle' || (status === 'stopping' && intentionalStop)) return;
           const error = event.error || 'unknown';
-          if (['not-allowed', 'service-not-allowed', 'audio-capture'].includes(error)) {
-            fail(error, error === 'audio-capture'
-              ? 'Aucun microphone disponible. Vérifiez sa connexion et réactivez l’écoute.'
-              : 'Autorisez le microphone et la reconnaissance vocale dans le navigateur, puis réactivez l’écoute.');
-          } else {
-            if (error === 'no-speech') pendingRetry = 250;
-            else retry(error);
-            requestStop();
+          if (error === 'not-allowed') {
+            fail(error, 'Autorisez le microphone et la reconnaissance vocale dans le navigateur, puis réactivez l’écoute.');
+          } else if (!['no-speech', 'aborted', 'audio-capture'].includes(error)) {
+            retry(error);
           }
+          // SpeechRecognition follows these recoverable errors with onend.
+          // Silence, an aborted session or an audio-device transition must not
+          // revoke listening intent or consume an artificial retry budget.
         };
         recognition.onend = () => {
           if (destroyed) return;
-          const stopped = intentionalStop;
+          intentionalStop = false;
           status = 'idle';
-          clearTimer('stable');
           clearTimer('stop');
           stuck = false;
+          if (fault && fault.recoverOnEnd) fault = null;
           settleStopped();
-          if (!stopped && wanted()) {
-            if (stable) pendingRetry = 250;
-            else retry('interrupted');
-          }
+          if (wanted() && pendingRetry === null) pendingRetry = 250;
           reconcile();
         };
       } catch (error) {
@@ -335,12 +322,12 @@
 
     return {
       get enabled() { return enabled; },
+      get listeningDesired() { return enabled; },
       get state() { return state; },
       async enable() {
         if (!available()) return false;
         generation += 1;
         fault = null;
-        retries = 0;
         enabled = true;
         manual = false;
         phase = 'wake';
@@ -362,7 +349,6 @@
         if (!available()) return false;
         generation += 1;
         fault = null;
-        retries = 0;
         manual = true;
         clearTimers();
         openFollowup();

@@ -68,31 +68,56 @@ class VPSRegistry:
         return result
 
     async def persist(self, servers: dict[str, dict[str, Any]]) -> None:
-        if self.path is None:
-            return
         async with self._persist_lock:
-            # Copie sous verrou avant le passage au thread : deux rapports
-            # simultanés ne peuvent pas réécrire un état plus ancien en dernier.
-            payload = {"version": 1, "servers": [
-                {"report": item["report"], "last_seen": item["last_seen"]}
-                for item in list(servers.values())[:self.settings.max_vps]
-            ]}
-            writer = asyncio.create_task(asyncio.to_thread(self._write, payload))
-            cancelled = False
-            while True:
-                try:
-                    await asyncio.shield(writer)
-                    break
-                except asyncio.CancelledError:
-                    if writer.cancelled():
-                        raise
-                    # Même plusieurs annulations attendent le thread avant
-                    # libération du verrou et écriture d'un rapport plus récent.
-                    cancelled = True
+            _, cancelled = await self._persist_locked(servers)
             if cancelled:
                 raise asyncio.CancelledError
 
-    def _write(self, payload: dict[str, Any]) -> None:
+    async def upsert(self, servers: dict[str, dict[str, Any]], hostname: str, entry: dict[str, Any]) -> bool:
+        """Reports and removals share a lock, including their in-memory mutation."""
+        async with self._persist_lock:
+            if hostname not in servers and len(servers) >= self.settings.max_vps:
+                return False
+            servers[hostname] = entry
+            _, cancelled = await self._persist_locked(servers)
+            if cancelled:
+                raise asyncio.CancelledError
+            return True
+
+    async def remove(self, servers: dict[str, dict[str, Any]], hostname: str) -> bool:
+        async with self._persist_lock:
+            if hostname not in servers:
+                return False
+            remaining = {name: entry for name, entry in servers.items() if name != hostname}
+            saved, cancelled = await self._persist_locked(remaining)
+            if saved:
+                servers.pop(hostname, None)
+            if cancelled:
+                raise asyncio.CancelledError
+            if not saved:
+                raise OSError("Suppression VPS non enregistrée")
+            return True
+
+    async def _persist_locked(self, servers: dict[str, dict[str, Any]]) -> tuple[bool, bool]:
+        if self.path is None:
+            return True, False
+        # Snapshot and mutation stay under the same lock until the writer ends.
+        payload = {"version": 1, "servers": [
+            {"report": item["report"], "last_seen": item["last_seen"]}
+            for item in list(servers.values())[:self.settings.max_vps]
+        ]}
+        writer = asyncio.create_task(asyncio.to_thread(self._write, payload))
+        cancelled = False
+        while True:
+            try:
+                return await asyncio.shield(writer), cancelled
+            except asyncio.CancelledError:
+                if writer.cancelled():
+                    raise
+                # Cancellation cannot release the lock while a write is running.
+                cancelled = True
+
+    def _write(self, payload: dict[str, Any]) -> bool:
         temporary: str | None = None
         try:
             content = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
@@ -106,8 +131,10 @@ class VPSRegistry:
                 os.fsync(handle.fileno())
             os.replace(temporary, self.path)
             temporary = None
+            return True
         except (OSError, ValueError, TypeError):
             LOGGER.warning("Persistance VPS indisponible ; les rapports restent visibles en mémoire")
+            return False
         finally:
             if temporary is not None:
                 try:

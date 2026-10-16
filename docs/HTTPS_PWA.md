@@ -37,6 +37,25 @@ Le mode vise un dashboard ouvert et actif : il se met en pause quand la page est
 masquee et reprend au retour. Il ne garantit pas l'ecoute ecran verrouille.
 Un navigateur sans Web Speech peut continuer a utiliser le chat texte.
 
+Le silence, les fins de session automatiques et les transitions de peripherique
+audio conservent l'activation : reprise apres 250 ms, ou 1,5 s si le service de
+reconnaissance signale un probleme reseau. Retour sur l'onglet ou retour du focus
+relancent l'ecoute demandee sans interrompre une reponse vocale en cours.
+
+## Retirer un VPS obsolete
+
+Dans **VPS distants**, un noeud deconnecte propose **Retirer du suivi**.
+Confirmer avec le token VPS ou le secret passerelle ; la cle n'est pas memorisee.
+Le retrait met a jour le registre JSON et la liste en memoire. En cas d'erreur
+de sauvegarde, le noeud est conserve et l'interface permet de reessayer.
+Le noeud reapparait s'il emet un nouveau rapport authentifie.
+
+L'API equivalente est `DELETE /api/vps/{hostname}` avec `x-vps-token`
+(`NOC_VPS_TOKEN`, ou ses alias) ou `x-gateway-secret` (`NOC_GATEWAY_SECRET`).
+Un noeud absent depuis plus de 24 h ne declenche plus l'incident global :
+il est archive/deconnecte si sa retention le conserve, sinon expire du registre.
+Les incidents de l'hote principal et des VPS recents restent pris en compte.
+
 ## Passerelle et autres clients
 
 Dans l'environnement du service `klasora-whatsapp.service`, configurer :

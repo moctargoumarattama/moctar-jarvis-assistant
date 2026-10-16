@@ -113,3 +113,70 @@ class VPSRegistryTests(unittest.IsolatedAsyncioTestCase):
         await disabled.persist({"second": self.entry("second")})
         self.assertEqual(await disabled.load(), {})
         self.assertEqual(set(await self.registry.load()), {"first"})
+
+    async def test_delete_failure_preserves_memory_and_success_survives_reload(self):
+        servers = {"first": self.entry("first"), "second": self.entry("second")}
+        await self.registry.persist(servers)
+        with patch("vps_registry.os.replace", side_effect=OSError("disk unavailable")):
+            with self.assertRaises(OSError):
+                await self.registry.remove(servers, "first")
+        self.assertEqual(set(servers), {"first", "second"})
+        self.assertEqual(set(await self.registry.load()), {"first", "second"})
+        self.assertTrue(await self.registry.remove(servers, "first"))
+        self.assertEqual(set(servers), {"second"})
+        self.assertEqual(set(await self.registry.load()), {"second"})
+        self.assertFalse(await self.registry.remove(servers, "missing"))
+
+    async def test_delete_and_concurrent_reports_are_serialized_without_losing_updates(self):
+        servers = {"first": self.entry("first"), "second": self.entry("second")}
+        await self.registry.persist(servers)
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
+        release = threading.Event()
+        original_write = self.registry._write
+
+        def slow_write(payload):
+            if len(payload["servers"]) == 1:
+                loop.call_soon_threadsafe(started.set)
+                release.wait(3)
+            return original_write(payload)
+
+        with patch.object(self.registry, "_write", side_effect=slow_write):
+            removal = asyncio.create_task(self.registry.remove(servers, "first"))
+            await asyncio.wait_for(started.wait(), 3)
+            # A fresh report for the removed node must be applied after deletion,
+            # along with updates from unrelated hosts, rather than silently lost.
+            refresh = asyncio.create_task(self.registry.upsert(servers, "first", self.entry("first")))
+            other = asyncio.create_task(self.registry.upsert(servers, "third", self.entry("third")))
+            await asyncio.sleep(0)
+            self.assertFalse(refresh.done())
+            self.assertFalse(other.done())
+            release.set()
+            self.assertEqual([True, True, True], await asyncio.gather(removal, refresh, other))
+        self.assertEqual(set(servers), {"first", "second", "third"})
+        self.assertEqual(set(await self.registry.load()), set(servers))
+
+    async def test_cancelled_delete_keeps_memory_in_sync_with_completed_disk_write(self):
+        servers = {"first": self.entry("first"), "second": self.entry("second")}
+        await self.registry.persist(servers)
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
+        release = threading.Event()
+        original_write = self.registry._write
+
+        def slow_write(payload):
+            loop.call_soon_threadsafe(started.set)
+            release.wait(3)
+            return original_write(payload)
+
+        with patch.object(self.registry, "_write", side_effect=slow_write):
+            removal = asyncio.create_task(self.registry.remove(servers, "first"))
+            await asyncio.wait_for(started.wait(), 3)
+            removal.cancel()
+            await asyncio.sleep(0)
+            self.assertIn("first", servers)
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await removal
+        self.assertEqual(set(servers), {"second"})
+        self.assertEqual(set(await self.registry.load()), {"second"})

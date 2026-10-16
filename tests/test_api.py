@@ -157,6 +157,86 @@ class APITests(unittest.TestCase):
         self.assertEqual(published[0]["hostname"], "vps-one")
         self.assertFalse(published[0]["restored"])
 
+    def test_vps_delete_accepts_either_token_and_persists_only_requested_removal(self) -> None:
+        for headers in ({"x-vps-token": VPS_TOKEN}, {"x-gateway-secret": "gateway-test-secret"}):
+            with self.subTest(header=next(iter(headers))):
+                directory = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+                settings = replace(self.settings, vps_state_path=str(directory / "vps.json"),
+                                   gateway_secret="gateway-test-secret")
+                client, runtime = self.open_client(settings)
+                for hostname in ("temporary", "production"):
+                    self.assertEqual(200, client.post("/api/vps/report", json=remote_report(hostname),
+                                                     headers={"x-vps-token": VPS_TOKEN}).status_code)
+                runtime.vps["temporary"]["seen"] = time.monotonic() - 60
+                client.portal.call(runtime.publish, local_snapshot())
+                self.assertEqual("incident", runtime.latest["global_status"])
+                response = client.delete("/api/vps/temporary", headers=headers)
+                self.assertEqual(200, response.status_code)
+                self.assertTrue(response.json()["removed"])
+                self.assertEqual({"production"}, set(runtime.vps))
+                self.assertEqual("operational", runtime.latest["global_status"])
+                self.assertEqual(["production"], [item["report"]["hostname"]
+                                                for item in json.loads((directory / "vps.json").read_text())["servers"]])
+                restarted, _ = self.open_client(settings)
+                self.assertEqual(["production"], [item["hostname"]
+                                                 for item in restarted.get("/api/snapshot").json()["vps"]])
+
+    def test_vps_delete_fails_closed_for_invalid_auth_origin_and_hostname(self) -> None:
+        self.assertEqual(200, self.report().status_code)
+        for headers in ({}, {"x-vps-token": "wrong"}, {"x-gateway-secret": ADMIN_TOKEN},
+                        {"x-vps-token": ADMIN_TOKEN}):
+            with self.subTest(headers=headers):
+                self.assertEqual(401, self.client.delete("/api/vps/vps-one", headers=headers).status_code)
+        headers = {"x-vps-token": VPS_TOKEN}
+        self.assertEqual(403, self.client.delete("/api/vps/vps-one", headers={
+            **headers, "Origin": "https://attacker.invalid"}).status_code)
+        self.assertEqual(422, self.client.delete("/api/vps/_invalid", headers=headers).status_code)
+        self.assertEqual(404, self.client.delete("/api/vps/unknown", headers=headers).status_code)
+        self.assertIn("vps-one", self.runtime.vps)
+        disabled, _ = self.open_client(replace(self.settings, vps_token="", gateway_secret=""))
+        self.assertEqual(503, disabled.delete("/api/vps/vps-one", headers=headers).status_code)
+
+    def test_vps_delete_persistence_failure_keeps_memory_disk_and_local_incidents(self) -> None:
+        directory = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+        client, runtime = self.open_client(replace(self.settings, vps_state_path=str(directory / "vps.json")))
+        self.assertEqual(200, client.post("/api/vps/report", json=remote_report(),
+                                         headers={"x-vps-token": VPS_TOKEN}).status_code)
+        original = (directory / "vps.json").read_bytes()
+        with patch("vps_registry.os.replace", side_effect=OSError("disk unavailable")):
+            self.assertEqual(503, client.delete("/api/vps/vps-one", headers={"x-vps-token": VPS_TOKEN}).status_code)
+        self.assertIn("vps-one", runtime.vps)
+        self.assertEqual(original, (directory / "vps.json").read_bytes())
+        local = local_snapshot()
+        local["global_status"] = "incident"
+        client.portal.call(runtime.publish, local)
+        self.assertEqual(200, client.delete("/api/vps/vps-one", headers={"x-vps-token": VPS_TOKEN}).status_code)
+        self.assertEqual("incident", runtime.latest["global_status"])
+
+    def test_vps_older_than_24_hours_is_archived_without_hiding_local_incidents(self) -> None:
+        client, runtime = self.open_client(replace(self.settings, vps_retention_seconds=172800))
+        self.assertEqual(200, client.post("/api/vps/report", json=remote_report(),
+                                         headers={"x-vps-token": VPS_TOKEN}).status_code)
+        now = time.monotonic()
+        with patch("main.time.monotonic", return_value=now):
+            for age, archived in ((86399.99, False), (86400, False), (86400.01, True)):
+                with self.subTest(age=age):
+                    runtime.vps["vps-one"]["seen"] = now - age
+                    client.portal.call(runtime.publish, local_snapshot())
+                    remote = runtime.latest["vps"][0]
+                    self.assertEqual(archived, remote["archived"])
+                    self.assertTrue(remote["stale"])
+                    self.assertFalse(remote["healthy"])
+                    self.assertEqual("operational" if archived else "incident", runtime.latest["global_status"])
+            self.assertEqual("disconnected", runtime.latest["vps"][0]["status"])
+            local = local_snapshot()
+            local["global_status"] = "incident"
+            client.portal.call(runtime.publish, local)
+            self.assertEqual("incident", runtime.latest["global_status"])
+        self.assertEqual(200, client.post("/api/vps/report", json=remote_report(),
+                                         headers={"x-vps-token": VPS_TOKEN}).status_code)
+        self.assertFalse(runtime.latest["vps"][0]["archived"])
+        self.assertTrue(runtime.latest["vps"][0]["healthy"])
+
     def test_vps_survives_dashboard_restart_until_fresh_authenticated_report(self) -> None:
         directory = self.stack.enter_context(tempfile.TemporaryDirectory())
         settings = replace(self.settings, vps_state_path=str(Path(directory) / "vps.json"))

@@ -205,7 +205,7 @@ def main() -> int:
         'config.py', 'collector.py', 'main.py', 'cyberdefense.py', 'whatsapp.py', 'system_manager.py',
         'ai_brain.py', 'headless_bridge.py',
         'vps_registry.py', 'static/index.html', 'static/live_metrics.js', 'static/live_metrics.css',
-        'static/voice.js', 'static/cosmos.css',
+        'static/voice.js', 'static/cosmos.js', 'static/cosmos.css',
         'integrations/baileys-send-alias.cjs', 'integrations/baileys-noc.cjs',
         'vps_agent.py', 'vps-agent.service', 'tools/deploy_dashboard_update.py', 'tools/repair_whatsapp_contract.py')]
     changes += [Change(server, changed_server), Change(MODULE, checked_file(source / 'integrations/baileys-send-alias.cjs')),

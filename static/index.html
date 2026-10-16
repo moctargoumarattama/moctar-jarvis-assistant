@@ -713,6 +713,18 @@
       </div>
     </footer>
   </dialog>
+  <dialog id="vps-remove-dialog" aria-labelledby="vps-remove-title">
+    <form id="vps-remove-form">
+      <h2 id="vps-remove-title">Retirer ce VPS du suivi</h2>
+      <p>Le nœud <strong id="vps-remove-host"></strong> sera retiré du registre. S’il envoie un nouveau rapport, il réapparaîtra.</p>
+      <label class="dialog-label" for="vps-remove-auth">Clé de gestion à utiliser</label>
+      <select class="button" id="vps-remove-auth"><option value="x-vps-token">Token VPS</option><option value="x-gateway-secret">Secret passerelle</option></select>
+      <label class="dialog-label" for="vps-remove-token">Clé de gestion</label>
+      <input id="vps-remove-token" type="password" required maxlength="512" autocomplete="off" spellcheck="false">
+      <p id="vps-remove-error" class="dialog-error" role="alert"></p>
+      <div class="dialog-actions"><button class="button" id="vps-remove-cancel" type="button">Annuler</button><button class="button danger" id="vps-remove-submit" type="submit">Retirer du suivi</button></div>
+    </form>
+  </dialog>
   <dialog id="events-dialog" aria-labelledby="events-dialog-title" aria-describedby="events-dialog-description">
     <div class="events-dialog-header"><div class="events-dialog-heading"><div class="eyebrow">SUPERVISION · FLUX SSE</div><h2 id="events-dialog-title">Journal d’événements</h2><p id="events-dialog-description">Messages complets et horodatages détaillés, actualisés en direct.</p></div><button class="button" id="events-close" type="button" autofocus>Fermer</button></div>
     <div class="events-dialog-toolbar"><span id="events-dialog-count">0 ÉVÉNEMENT</span><button class="console-button" id="events-dialog-autoscroll" type="button" aria-pressed="true">Défilement auto</button></div>
@@ -841,8 +853,8 @@
     <footer class="live-metrics-footer"><span>Historique de session · 1 h maximum · Les coupures de mesure restent visibles. Aucun point simulé.</span><span>Échap pour fermer</span></footer>
   </dialog>
   <div class="toast" id="toast" role="status" hidden></div>
-  <script src="/static/voice.js?v=1"></script>
-  <script src="/static/cosmos.js?v=1"></script>
+  <script src="/static/voice.js?v=2"></script>
+  <script src="/static/cosmos.js?v=2"></script>
   <script src="/static/live_metrics.js?v=1"></script>
   <script>
     'use strict';
@@ -1041,9 +1053,9 @@
           const item = document.createElement('article'); item.className = 'vps-item';
           const row = document.createElement('div'); row.className = 'vps-row';
           const hostname = document.createElement('h3'); hostname.className = 'vps-host'; hostname.textContent = server.hostname || 'VPS sans nom';
-          const badge = document.createElement('span'); badge.className = 'badge'; badge.dataset.tone = server.stale ? 'warning' : server.healthy === false ? 'error' : 'success';
+          const badge = document.createElement('span'); badge.className = 'badge'; badge.dataset.tone = server.archived ? 'neutral' : server.stale ? 'warning' : server.healthy === false ? 'error' : 'success';
           const led = document.createElement('span'); led.className = 'led';
-          const label = document.createElement('span'); label.textContent = server.restored ? 'RECONNEXION EN ATTENTE' : server.stale ? 'RAPPORT ANCIEN' : server.healthy === false ? 'INCIDENT' : 'CONNECTÉ'; badge.append(led,label); row.append(hostname,badge);
+          const label = document.createElement('span'); label.textContent = server.archived ? 'ARCHIVÉ · DÉCONNECTÉ' : server.restored ? 'RECONNEXION EN ATTENTE' : server.stale ? 'RAPPORT ANCIEN' : server.healthy === false ? 'INCIDENT' : 'CONNECTÉ'; badge.append(led,label); row.append(hostname,badge);
           const stats = document.createElement('div'); stats.className = 'vps-stats';
           [['CPU',server.cpu_percent,varColor('cyan')],['RAM',server.memory?.percent,varColor('green')],['DISQUE',server.disk?.percent,'#9d96eb']].forEach(([name, percent, color]) => {
             const stat = document.createElement('div'); stat.className = 'vps-stat';
@@ -1066,6 +1078,11 @@
           }
           const age = document.createElement('div'); age.className = 'vps-age';
           age.textContent = 'Dernier rapport : ' + time(server.last_seen) + ' · il y a ' + ageLabel(server.age_seconds); item.append(age); fragment.append(item);
+          if (server.stale || server.restored || server.archived) {
+            const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'button';
+            remove.textContent = 'Retirer du suivi'; remove.setAttribute('aria-label', 'Retirer ' + server.hostname + ' du suivi');
+            remove.addEventListener('click', () => openVpsRemoval(server.hostname)); item.append(remove);
+          }
         });
         container.replaceChildren(fragment);
       }
@@ -1073,9 +1090,10 @@
       function renderRemoteAgentStatus() {
         if (state.remoteTab !== 'vps') return;
         const servers = Array.isArray(state.snapshot?.vps) ? state.snapshot.vps : [];
-        const fresh = servers.filter(server => server && !server.stale && !server.restored);
-        set('sentinel-agent-text', !servers.length ? 'VPS EN ATTENTE' : state.stale ? 'FLUX INTERROMPU' : fresh.length ? fresh.length + ' VPS EN LIGNE' : 'RAPPORTS ANCIENS');
-        $('sentinel-agent').dataset.tone = !servers.length ? 'neutral' : state.stale || fresh.length < servers.length ? 'warning' : 'success';
+        const monitored = servers.filter(server => server && !server.archived);
+        const fresh = monitored.filter(server => !server.stale && !server.restored);
+        set('sentinel-agent-text', !servers.length ? 'VPS EN ATTENTE' : state.stale ? 'FLUX INTERROMPU' : !monitored.length ? 'VPS ARCHIVÉS' : fresh.length ? fresh.length + ' VPS EN LIGNE' : 'RAPPORTS ANCIENS');
+        $('sentinel-agent').dataset.tone = !monitored.length ? 'neutral' : state.stale || fresh.length < monitored.length ? 'warning' : 'success';
         $('sentinel-agent').title = 'Télémétrie VPS : ' + fresh.length + ' rapport(s) récent(s) sur ' + servers.length + '. Le statut de Sentinel est affiché dans son onglet.';
       }
       function selectRemoteTab(name, focus = false) {
@@ -1411,6 +1429,47 @@
           return false;
         }
       }
+      function openVpsRemoval(hostname) {
+        const server = state.snapshot?.vps?.find(item => item.hostname === hostname);
+        if (state.vpsRemovalPending || !server || !(server.stale || server.restored || server.archived)) return;
+        state.vpsRemovalHost = hostname;
+        set('vps-remove-host', hostname);
+        set('vps-remove-error', '');
+        $('vps-remove-token').value = '';
+        $('vps-remove-auth').value = 'x-vps-token';
+        $('vps-remove-dialog').showModal();
+      }
+      async function removeVpsFromDashboard(event) {
+        event.preventDefault();
+        if (state.vpsRemovalPending) return;
+        const hostname = state.vpsRemovalHost;
+        const secret = $('vps-remove-token').value.trim();
+        $('vps-remove-token').value = '';
+        if (!hostname || !secret) {
+          set('vps-remove-error', 'Saisissez une clé de gestion valide.');
+          return;
+        }
+        const header = $('vps-remove-auth').value === 'x-gateway-secret' ? 'x-gateway-secret' : 'x-vps-token';
+        state.vpsRemovalPending = true;
+        $('vps-remove-submit').disabled = true;
+        set('vps-remove-error', '');
+        try {
+          const response = await apiFetch('/api/vps/' + encodeURIComponent(hostname), {
+            method: 'DELETE', headers: {[header]: secret}
+          });
+          const body = await readResponse(response);
+          if (!response.ok || body.ok !== true) throw new Error(typeof body.detail === 'string' ? body.detail : 'Retrait refusé (HTTP ' + response.status + ').');
+          state.vpsRemovalHost = null;
+          $('vps-remove-dialog').close();
+          await loadSnapshot();
+          toast('VPS ' + hostname + ' retiré du suivi.', 'success');
+        } catch (error) {
+          set('vps-remove-error', error.name === 'AbortError' ? 'Délai dépassé. Vérifiez la liste avant de réessayer.' : error.message || 'Impossible de retirer ce VPS.');
+        } finally {
+          state.vpsRemovalPending = false;
+          $('vps-remove-submit').disabled = false;
+        }
+      }
       function startStream() {
         if (state.stream) state.stream.close();
         const stream = new EventSource('/api/stream'); state.stream = stream;
@@ -1434,6 +1493,13 @@
         }
         finally { state.probePending = false; }
       }
+      $('vps-remove-form').addEventListener('submit', removeVpsFromDashboard);
+      $('vps-remove-cancel').addEventListener('click', () => $('vps-remove-dialog').close());
+      $('vps-remove-dialog').addEventListener('close', () => {
+        $('vps-remove-token').value = '';
+        state.vpsRemovalHost = null;
+      });
+
       async function openRestart(name, label) {
         if (!state.snapshot?.actions?.restart_enabled || state.stale || !serviceNodes.has(name) || state.restartPending.has(name) || (state.restartCooldown.get(name) || 0) > Date.now()) return;
         const startedAt = Date.now();
@@ -1934,7 +2000,7 @@
       }
 
       function renderBrowserVoice(phase, detail = {}) {
-        const active = window.jarvisVoice?.enabled === true;
+        const active = (window.jarvisVoice?.listeningDesired ?? window.jarvisVoice?.enabled) === true;
         const messages = {
           off: 'Mains libres sur cet appareil',
           starting: 'Connexion au micro…',
@@ -1973,7 +2039,7 @@
         if (reactor && !jarvisState.busy) {
           reactor.dataset.reactorState = phase === 'listening' ? 'listening' : phase === 'speaking' ? 'speaking' : 'idle';
         }
-        if (['error', 'unsupported'].includes(phase)) {
+        if (['error', 'unsupported'].includes(phase) && !active) {
           try { localStorage.setItem('jarvis_wakeword_active', 'false'); } catch {}
         }
       }
@@ -2011,6 +2077,10 @@
         window.jarvisVoice?.stopManual();
       }
 
+      function resumeBrowserVoice() {
+        if (!document.hidden && window.jarvisVoice?.listeningDesired) window.jarvisVoice.resume();
+      }
+
       function initialiseBrowserVoice() {
         if (!window.MoctarVoice) return renderBrowserVoice('unsupported');
         window.jarvisVoice = window.MoctarVoice.create({
@@ -2032,15 +2102,14 @@
           if (document.hidden) {
             window.jarvisVoice.suspend();
             cancelJarvisSpeech();
-          } else window.jarvisVoice.resume();
+          } else resumeBrowserVoice();
         });
         window.addEventListener('pagehide', () => {
           window.jarvisVoice.suspend();
           cancelJarvisSpeech();
         });
-        window.addEventListener('pageshow', () => {
-          if (!document.hidden) window.jarvisVoice.resume();
-        });
+        window.addEventListener('pageshow', resumeBrowserVoice);
+        window.addEventListener('focus', resumeBrowserVoice);
       }
 
       $('jarvis-open-btn')?.addEventListener('click', openJarvisModal);

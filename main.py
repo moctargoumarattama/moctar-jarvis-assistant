@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Path as APIPath, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sse_starlette.sse import EventSourceResponse
@@ -146,6 +146,7 @@ class Runtime:
         self.settings = settings
         self.collector = collector.Collector(settings)
         self.latest: dict[str, Any] | None = None
+        self.local_status = "operational"
         self.serialized = "{}"
         self.revision = 0
         self.last_published = 0.0
@@ -178,15 +179,20 @@ class Runtime:
                 continue
             restored = item.get("restored", False)
             stale = restored or age > self.settings.vps_stale_seconds
+            archived = stale and age > 86400
             healthy = not stale and item["report"]["cpu_percent"] < 95 and item["report"]["memory"]["percent"] < 90 and item["report"]["disk"]["percent"] < 90 and all(service["status"] == "active" for service in item["report"]["services"])
-            self.collector.transition("vps:" + hostname, (stale, healthy), f"VPS {hostname} · {'rapport expiré' if stale else ('opérationnel' if healthy else 'incident détecté')}", healthy)
+            self.collector.transition("vps:" + hostname, (stale, healthy, archived), f"VPS {hostname} · {'déconnecté · archivé' if archived else ('rapport expiré' if stale else ('opérationnel' if healthy else 'incident détecté'))}", healthy or archived)
             item["stale"] = stale
-            result.append({**item["report"], "last_seen": item["last_seen"], "age_seconds": round(age, 1), "stale": stale, "healthy": healthy, "restored": restored})
+            result.append({**item["report"], "last_seen": item["last_seen"], "age_seconds": round(age, 1), "stale": stale, "healthy": healthy, "restored": restored, "archived": archived, "status": "disconnected" if archived else ("stale" if stale else "online")})
         return sorted(result, key=lambda entry: entry["hostname"])
 
     async def publish(self, snapshot: dict[str, Any], *, collected: bool = True) -> None:
+        if collected:
+            self.local_status = snapshot["global_status"]
+        else:
+            snapshot["global_status"] = self.local_status
         snapshot["vps"] = self.vps_snapshot()
-        if any(not item["healthy"] for item in snapshot["vps"]):
+        if any(not item["healthy"] and not item["archived"] for item in snapshot["vps"]):
             snapshot["global_status"] = "incident"
         snapshot["events"] = list(self.collector.events)
         snapshot["sentinel"] = self.sentinel.snapshot()
@@ -450,12 +456,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         report: VPSReport = validate_payload(VPSReport, await limited_json(request, 32768))
         runtime: Runtime = application.state.runtime
         runtime.vps_snapshot()
-        if report.hostname not in runtime.vps and len(runtime.vps) >= settings.max_vps:
+        entry = {"report": report.model_dump(), "seen": time.monotonic(), "last_seen": collector.utc_now(), "stale": False, "restored": False}
+        if not await runtime.vps_registry.upsert(runtime.vps, report.hostname, entry):
             raise HTTPException(429, "Limite de serveurs VPS atteinte")
-        runtime.vps[report.hostname] = {"report": report.model_dump(), "seen": time.monotonic(), "last_seen": collector.utc_now(), "stale": False, "restored": False}
-        await runtime.vps_registry.persist(runtime.vps)
         await runtime.publish_module_update()
         return {"ok": True, "hostname": report.hostname}
+
+    @application.delete("/api/vps/{hostname}")
+    async def delete_vps(hostname: Annotated[str, APIPath(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")], request: Request):
+        same_origin(request)
+        if not settings.vps_token and not settings.gateway_secret:
+            raise HTTPException(503, "Gestion VPS désactivée : jeton non configuré")
+        if not (token_matches(request.headers.get("x-vps-token"), settings.vps_token)
+                or token_matches(request.headers.get("x-gateway-secret"), settings.gateway_secret)):
+            raise HTTPException(401, "Jeton VPS ou passerelle incorrect")
+        runtime: Runtime = application.state.runtime
+        try:
+            removed = await runtime.vps_registry.remove(runtime.vps, hostname)
+        except OSError:
+            LOGGER.exception("Suppression VPS non persistée · %s", hostname)
+            raise HTTPException(503, "Registre VPS indisponible ; nœud conservé") from None
+        if not removed:
+            raise HTTPException(404, "Serveur VPS inconnu")
+        runtime.collector._states.pop("vps:" + hostname, None)
+        runtime.collector.add_event("info", f"VPS {hostname} · supprimé du registre")
+        await runtime.publish_module_update()
+        return {"ok": True, "hostname": hostname, "removed": True}
 
     @application.post("/api/service/{name}/restart")
     async def restart(name: str, request: Request):
