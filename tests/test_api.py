@@ -185,6 +185,7 @@ class APITests(unittest.TestCase):
             ("live_metrics.js", "application/javascript"),
             ("live_metrics.css", "text/css"),
             ("cosmos.js", "application/javascript"),
+            ("voice.js", "application/javascript"),
             ("cosmos.css", "text/css"),
         ):
             (directory / "static" / filename).write_text("/* asset */")

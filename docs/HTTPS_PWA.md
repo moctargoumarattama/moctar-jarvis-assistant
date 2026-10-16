@@ -19,6 +19,24 @@ appareil : un simple contournement de l'avertissement TLS ne garantit pas le mic
 Le navigateur doit indiquer une connexion fiable ; autoriser ensuite le microphone.
 La reconnaissance vocale depend aussi du support Web Speech du navigateur.
 
+## Conversation mains libres sur chaque appareil
+
+Sur le telephone ou le PC, ouvrir le dashboard en HTTPS, toucher **Activer le micro**
+sur l'accueil ou dans le chat, puis autoriser le microphone dans le navigateur.
+Cette activation et sa preference sont propres a chaque appareil/navigateur.
+Dire **Yo Moctar** ou **ELMo** : M.O.C.T.A.R demande ce que vous souhaitez,
+ecoute la commande et repond oralement si la synthese vocale est activee.
+Apres chaque reponse, une fenetre de 15 secondes permet de continuer sans
+repeter le mot de reveil. **Fin de conversation** revient a l'attente du mot-cle.
+**Couper le micro** arrete l'ecoute.
+
+Une seule reconnaissance gere reveil et commande; elle s'arrete pendant la
+reponse pour ne pas entendre la voix de l'assistant. Le statut affiche les erreurs
+de permission, de microphone et de compatibilite du navigateur.
+Le mode vise un dashboard ouvert et actif : il se met en pause quand la page est
+masquee et reprend au retour. Il ne garantit pas l'ecoute ecran verrouille.
+Un navigateur sans Web Speech peut continuer a utiliser le chat texte.
+
 ## Passerelle et autres clients
 
 Dans l'environnement du service `klasora-whatsapp.service`, configurer :

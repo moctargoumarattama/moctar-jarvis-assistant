@@ -328,6 +328,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def cosmos_script():
         return FileResponse(BASE_DIR / "static" / "cosmos.js", media_type="application/javascript")
 
+    @application.get("/static/voice.js", include_in_schema=False)
+    async def browser_voice_script():
+        return FileResponse(BASE_DIR / "static" / "voice.js", media_type="application/javascript")
+
     @application.get("/static/cosmos.css")
     async def cosmos_styles():
         return FileResponse(BASE_DIR / "static" / "cosmos.css", media_type="text/css")

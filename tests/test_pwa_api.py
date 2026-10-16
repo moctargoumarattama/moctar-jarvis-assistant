@@ -68,6 +68,7 @@ def test_pwa_icon_route_cannot_serve_other_files(client):
 @pytest.mark.parametrize("name,media_type", [
     ("mobile.css", "text/css"),
     ("mobile.js", "application/javascript"),
+    ("voice.js", "application/javascript"),
 ])
 def test_dashboard_mobile_resources_are_served_with_version_query(client, name, media_type):
     page = client.get("/")

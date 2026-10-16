@@ -535,7 +535,7 @@
     }
   </style>
   <link rel="stylesheet" href="/static/live_metrics.css?v=1">
-  <link rel="stylesheet" href="/static/cosmos.css?v=3">
+  <link rel="stylesheet" href="/static/cosmos.css?v=4">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/moctar-logo-v2-192.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/moctar-logo-v2-180.png">
@@ -573,6 +573,10 @@
       <button class="orb-tile" type="button" data-open="journal-modal" data-planet="7" data-key="8" aria-haspopup="dialog" aria-controls="journal-modal"><span class="orb-tile-head"><span class="orb-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></span><span class="orb-title">Journal</span><kbd>8</kbd></span><span class="orb-events" id="home-events"><span class="orb-event" data-level="info">En attente du flux…</span></span></button>
     </nav>
     <footer class="cosmos-dock">
+      <div class="browser-voice-controls home-voice-controls">
+        <button type="button" class="browser-voice-toggle" id="home-voice-toggle" aria-pressed="false">Activer le micro</button>
+        <span id="home-voice-status" class="browser-voice-status" role="status" aria-live="polite">Mains libres sur cet appareil</span>
+      </div>
       <form class="cosmos-ask" id="home-ask-form" autocomplete="off"><span class="ask-prompt" aria-hidden="true">›</span><input id="home-ask-input" type="text" maxlength="2000" placeholder="Demandez à MOCTAR : état du système, relance un service, programme un message…" aria-label="Question pour MOCTAR"><button type="submit" class="ask-send" aria-label="Envoyer à MOCTAR"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z"/></svg></button></form>
       <div class="cosmos-foot"><span class="footer-status" id="footer-status"><span class="led"></span><span id="collector-label">Collecteur en attente</span></span><span>Processus <span class="mono" id="process-memory">—</span></span></div>
     </footer>
@@ -661,10 +665,10 @@
             </button>
             <div class="jarvis-mic-hint" id="jarvis-mic-hint">Microphone (Web Speech API)</div>
 
-            <label class="jarvis-tts-switch jarvis-wakeword-switch" title="Écoute continue avec mot-clé de réveil 'Yo Moctar'">
+            <label class="jarvis-tts-switch jarvis-wakeword-switch" title="Écoute avec les mots-clés Yo Moctar ou ELMo">
               <input type="checkbox" id="jarvis-wakeword-toggle">
               <span class="jarvis-slider"></span>
-              <span>Écoute active : &quot;Yo Moctar&quot;</span>
+              <span>Écoute active : Yo Moctar / ELMo</span>
             </label>
             <div id="jarvis-wakeword-badge" class="jarvis-wakeword-badge" hidden>
               <span class="led-blink"></span> <span id="jarvis-wakeword-badge-text">EN VEILLE ÉCOUTE</span>
@@ -690,6 +694,10 @@
       </aside>
     </div>
     <footer class="jarvis-footer">
+      <div class="browser-voice-controls">
+        <button type="button" class="browser-voice-toggle" id="jarvis-voice-toggle" aria-pressed="false">Activer le micro</button>
+        <span id="jarvis-voice-status" class="browser-voice-status" role="status" aria-live="polite">Dites « Yo Moctar » ou « ELMo » après activation.</span>
+      </div>
       <form id="jarvis-form" class="jarvis-form">
         <div class="jarvis-input-wrap">
           <span class="jarvis-input-prefix">&gt;</span>
@@ -833,6 +841,7 @@
     <footer class="live-metrics-footer"><span>Historique de session · 1 h maximum · Les coupures de mesure restent visibles. Aucun point simulé.</span><span>Échap pour fermer</span></footer>
   </dialog>
   <div class="toast" id="toast" role="status" hidden></div>
+  <script src="/static/voice.js?v=1"></script>
   <script src="/static/cosmos.js?v=1"></script>
   <script src="/static/live_metrics.js?v=1"></script>
   <script>
@@ -1636,7 +1645,7 @@
           modal.close();
         }
         stopJarvisListening();
-        window.speechSynthesis?.cancel();
+        cancelJarvisSpeech();
         $('jarvis-open-btn')?.focus({preventScroll: true});
       }
 
@@ -1740,6 +1749,7 @@
         const text = promptText.trim();
         if (!text || jarvisState.busy) return;
         jarvisState.busy = true;
+        window.jarvisVoice?.setBusy(true);
 
         $('jarvis-input').value = '';
         $('jarvis-send-btn').disabled = true;
@@ -1823,318 +1833,223 @@
             if (data.session_id && $('jarvis-session-id')) {
               set('jarvis-session-id', 'Session: ' + data.session_id.slice(-12));
             }
-            speakJarvisText(data.reply || '');
+            await speakJarvisText(data.reply || '');
 
           } else {
             const errReply = (typeof data.reply === 'string' && data.reply) ? data.reply : (typeof data.detail === 'string' ? data.detail : 'Erreur lors de l’exécution.');
             appendChatMessage('assistant', '⚠️ ' + errReply, data.thought_chain, data.tools_used);
-            speakJarvisText(errReply);
+            await speakJarvisText(errReply);
           }
         } catch (err) {
           const errMsg = err.name === 'AbortError' ? 'Délai d’attente dépassé pour la réponse du modèle IA.' : (err.message || 'Erreur réseau vers le moteur Moctar.');
           appendChatMessage('assistant', '⚠️ ' + errMsg);
           // Une erreur de transport ne prouve pas que Gemini est indisponible.
           await fetchJarvisStatus();
+          await speakJarvisText(errMsg);
         } finally {
           clearInterval(typingInterval);
           $('jarvis-typing-bubble')?.remove();
           jarvisState.busy = false;
+          window.jarvisVoice?.setBusy(false);
           $('jarvis-send-btn').disabled = false;
           $('jarvis-input').disabled = false;
-          $('jarvis-input').focus();
+          if (source !== 'web_voice') $('jarvis-input').focus();
           if (reactor) reactor.dataset.reactorState = 'idle';
           set('jarvis-reactor-status', 'PRÊT');
         }
       }
 
+      let currentSpeechCancel = null;
+      let speechPlaybackBlocked = false;
+
+      function cancelJarvisSpeech() {
+        if (currentSpeechCancel) currentSpeechCancel();
+        else window.speechSynthesis?.cancel();
+      }
+
       function speakJarvisText(text) {
-        if (!('speechSynthesis' in window) || !$('jarvis-tts-toggle')?.checked) return;
-        try {
-          window.speechSynthesis.cancel();
-          const clean = text
-            .replace(/```[\s\S]*?```/g, '')
-            .replace(/`([^`]+)`/g, '$1')
-            .replace(/[*_#>[\]()]/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-          if (!clean) return;
-
-          const utterance = new SpeechSynthesisUtterance(clean);
-          utterance.lang = 'fr-FR';
-          utterance.rate = 1.05;
-          utterance.pitch = 1.0;
-          const voices = window.speechSynthesis.getVoices();
-          const frVoice = voices.find(v => v.lang.startsWith('fr') && (v.name.includes('Thomas') || v.name.includes('Google') || v.name.includes('France') || v.name.includes('Hortense')));
-          if (frVoice) utterance.voice = frVoice;
-
-          utterance.onstart = () => {
-            const reactor = $('jarvis-reactor');
-            if (reactor && reactor.dataset.reactorState === 'idle') {
-              reactor.dataset.reactorState = 'speaking';
-              set('jarvis-reactor-status', 'SYNTHÈSE VOCALE');
+        if (!('speechSynthesis' in window) || !$('jarvis-tts-toggle')?.checked || document.hidden) return Promise.resolve(false);
+        const clean = String(text || '')
+          .replace(/```[\s\S]*?```/g, '')
+          .replace(/`([^`]+)`/g, '$1')
+          .replace(/[*_#>[\]()]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (!clean) return Promise.resolve(false);
+        cancelJarvisSpeech();
+        return new Promise(resolve => {
+          let finished = false;
+          let watchdog = null;
+          let startWatchdog = null;
+          const finish = success => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(watchdog);
+            clearTimeout(startWatchdog);
+            if (currentSpeechCancel === cancel) {
+              currentSpeechCancel = null;
+              const reactor = $('jarvis-reactor');
+              if (reactor?.dataset.reactorState === 'speaking') {
+                reactor.dataset.reactorState = 'idle';
+                set('jarvis-reactor-status', 'PRÊT');
+              }
             }
+            resolve(success);
           };
-          utterance.onend = () => {
-            const reactor = $('jarvis-reactor');
-            if (reactor && reactor.dataset.reactorState === 'speaking') {
-              reactor.dataset.reactorState = 'idle';
-              set('jarvis-reactor-status', 'PRÊT');
-            }
+          const cancel = () => {
+            finish(false);
+            window.speechSynthesis.cancel();
           };
-          window.speechSynthesis.speak(utterance);
-        } catch (e) {
-          console.warn('TTS error:', e);
+          currentSpeechCancel = cancel;
+          try {
+            const utterance = new SpeechSynthesisUtterance(clean);
+            utterance.lang = 'fr-FR';
+            utterance.rate = 1.05;
+            const voice = window.speechSynthesis.getVoices().find(v => v.lang.startsWith('fr'));
+            if (voice) utterance.voice = voice;
+            utterance.onstart = () => {
+              clearTimeout(startWatchdog);
+              speechPlaybackBlocked = false;
+              const reactor = $('jarvis-reactor');
+              if (reactor) reactor.dataset.reactorState = 'speaking';
+              set('jarvis-reactor-status', 'RÉPONSE VOCALE');
+            };
+            utterance.onend = () => finish(true);
+            utterance.onerror = event => {
+              console.warn('Synthèse vocale interrompue:', event.error);
+              if (!['interrupted', 'canceled'].includes(event.error)) speechPlaybackBlocked = true;
+              finish(false);
+            };
+            startWatchdog = setTimeout(() => {
+              speechPlaybackBlocked = true;
+              cancel();
+            }, 5000);
+            watchdog = setTimeout(cancel, Math.min(90000, Math.max(10000, clean.length * 100)));
+            window.speechSynthesis.speak(utterance);
+          } catch (error) {
+            console.warn('Synthèse vocale indisponible:', error);
+            finish(false);
+          }
+        });
+      }
+
+      function renderBrowserVoice(phase, detail = {}) {
+        const active = window.jarvisVoice?.enabled === true;
+        const messages = {
+          off: 'Mains libres sur cet appareil',
+          starting: 'Connexion au micro…',
+          wake: 'Dites « Yo Moctar » ou « ELMo ».',
+          listening: 'Je vous écoute…',
+          processing: 'M.O.C.T.A.R prépare la réponse…',
+          speaking: 'M.O.C.T.A.R vous parle…',
+          paused: 'Écoute suspendue : revenez sur le dashboard.',
+          error: 'Écoute interrompue. Réactivez le micro.',
+          unsupported: 'Reconnaissance vocale indisponible sur ce navigateur.'
+        };
+        const label = (detail.message || messages[phase] || messages.off) +
+          (speechPlaybackBlocked ? ' Son bloqué : autorisez la lecture audio dans le navigateur.' : '');
+        ['home-voice-toggle', 'jarvis-voice-toggle'].forEach(id => {
+          const button = $(id);
+          if (!button) return;
+          button.setAttribute('aria-pressed', String(active));
+          button.textContent = active ? 'Couper le micro' : 'Activer le micro';
+        });
+        ['home-voice-status', 'jarvis-voice-status'].forEach(id => {
+          const node = $(id);
+          if (!node) return;
+          node.textContent = label;
+          node.dataset.tone = ['error', 'unsupported'].includes(phase) ? 'error' :
+            ['wake', 'listening'].includes(phase) ? 'success' : 'warning';
+        });
+        const toggle = $('jarvis-wakeword-toggle');
+        if (toggle) toggle.checked = active;
+        const badge = $('jarvis-wakeword-badge');
+        if (badge) badge.hidden = !active;
+        set('jarvis-wakeword-badge-text', label);
+        set('jarvis-mic-hint', label);
+        jarvisState.isListening = ['starting', 'wake', 'listening'].includes(phase);
+        $('jarvis-mic-btn')?.classList.toggle('listening', jarvisState.isListening);
+        const reactor = $('jarvis-reactor');
+        if (reactor && !jarvisState.busy) {
+          reactor.dataset.reactorState = phase === 'listening' ? 'listening' : phase === 'speaking' ? 'speaking' : 'idle';
+        }
+        if (['error', 'unsupported'].includes(phase)) {
+          try { localStorage.setItem('jarvis_wakeword_active', 'false'); } catch {}
         }
       }
 
-      // Moteur Wake Word continu "Yo Moctar" (100% Web Speech API local)
-      const WakeWordEngine = {
-        recognition: null,
-        isActive: false,
-        isAwake: false,
-        awaitingTimer: null,
-        wakeKeywords: ['yo moctar', 'hey moctar', 'moctar', 'ok moctar', 'salut moctar', 'dis moctar'],
-        audioCtx: null,
-
-        playChime() {
-          try {
-            const AudioCtx = window.AudioContext || window.webkitAudioContext;
-            if (!AudioCtx) return;
-            const ctx = this.audioCtx || new AudioCtx();
-            this.audioCtx = ctx;
-            if (ctx.state === 'suspended') ctx.resume();
-
-            const now = ctx.currentTime;
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-
-            osc.type = 'sine';
-            // Chime harmonique 2 tons : Ré5 (587.33 Hz) puis La5 (880.00 Hz)
-            osc.frequency.setValueAtTime(587.33, now);
-            osc.frequency.exponentialRampToValueAtTime(880.00, now + 0.08);
-
-            gain.gain.setValueAtTime(0.001, now);
-            gain.gain.linearRampToValueAtTime(0.18, now + 0.03);
-            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
-
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(now);
-            osc.stop(now + 0.35);
-          } catch (e) {
-            console.warn('Erreur son de réveil:', e);
-          }
-        },
-
-        pulseSunAndReactor() {
-          const reactor = $('jarvis-reactor');
-          if (reactor) reactor.dataset.reactorState = 'listening';
-          set('jarvis-reactor-status', 'ÉCOUTE MOCTAR...');
-
-          if (window.CosmosEngine?.SolarEngine) {
-            window.CosmosEngine.SolarEngine.sunPulse = 1.35;
-          }
-        },
-
-        init() {
-          const toggle = $('jarvis-wakeword-toggle');
-          if (!toggle) return;
-
-          const saved = localStorage.getItem('jarvis_wakeword_active');
-          if (saved === 'true') {
-            toggle.checked = true;
-          }
-
-          toggle.addEventListener('change', () => {
-            const active = toggle.checked;
-            localStorage.setItem('jarvis_wakeword_active', active ? 'true' : 'false');
-            if (active) {
-              this.start();
-            } else {
-              this.stop();
-            }
-          });
-
-          if (toggle.checked) {
-            this.start();
-          }
-        },
-
-        start() {
-          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-          if (!SpeechRecognition) {
-            console.warn('SpeechRecognition non disponible sur ce navigateur.');
+      async function setBrowserVoiceEnabled(active) {
+        if (!window.jarvisVoice) {
+          renderBrowserVoice('unsupported');
+          return;
+        }
+        if (!active) {
+          window.jarvisVoice.disable();
+          cancelJarvisSpeech();
+        } else {
+          if (window.isSecureContext === false) {
+            renderBrowserVoice('error', {message: 'Ouvrez le dashboard en HTTPS pour autoriser le microphone.'});
             return;
           }
-
-          this.isActive = true;
-          const badge = $('jarvis-wakeword-badge');
-          if (badge) badge.hidden = false;
-          set('jarvis-wakeword-badge-text', 'EN VEILLE ÉCOUTE');
-
-          if (!this.recognition) {
-            this.recognition = new SpeechRecognition();
-            this.recognition.lang = 'fr-FR';
-            this.recognition.continuous = true;
-            this.recognition.interimResults = true;
-
-            this.recognition.onresult = (e) => this.handleResult(e);
-            this.recognition.onerror = (e) => {
-              if (e.error !== 'no-speech') {
-                console.warn('Erreur WakeWord:', e.error);
-              }
-            };
-            this.recognition.onend = () => {
-              if (this.isActive) {
-                setTimeout(() => {
-                  if (this.isActive) {
-                    try { this.recognition.start(); } catch (err) {}
-                  }
-                }, 300);
-              }
-            };
-          }
-
-          try {
-            this.recognition.start();
-          } catch (err) {
-            // Déjà démarré
-          }
-        },
-
-        stop() {
-          this.isActive = false;
-          this.isAwake = false;
-          clearTimeout(this.awaitingTimer);
-          const badge = $('jarvis-wakeword-badge');
-          if (badge) badge.hidden = true;
-          try { this.recognition?.stop(); } catch (err) {}
-        },
-
-        handleResult(e) {
-          if (!this.isActive) return;
-
-          for (let i = e.resultIndex; i < e.results.length; i++) {
-            const transcript = e.results[i][0].transcript.trim().toLowerCase();
-            const isFinal = e.results[i].isFinal;
-
-            if (this.isAwake) {
-              if (transcript && isFinal) {
-                clearTimeout(this.awaitingTimer);
-                this.isAwake = false;
-                set('jarvis-wakeword-badge-text', 'EN VEILLE ÉCOUTE');
-                sendJarvisPrompt(transcript, 'web_voice');
-                return;
-              }
-              continue;
-            }
-
-            for (const kw of this.wakeKeywords) {
-              const kwIdx = transcript.indexOf(kw);
-              if (kwIdx !== -1) {
-                this.playChime();
-                this.pulseSunAndReactor();
-
-                const remainder = transcript.slice(kwIdx + kw.length).trim();
-                const cleanRemainder = remainder.replace(/^[,;:\-\s]+/, '');
-
-                if (cleanRemainder.length > 2 && isFinal) {
-                  this.isAwake = false;
-                  sendJarvisPrompt(cleanRemainder, 'web_voice');
-                  return;
-                } else {
-                  this.isAwake = true;
-                  set('jarvis-wakeword-badge-text', 'PARLEZ MAINTENANT...');
-                  clearTimeout(this.awaitingTimer);
-                  this.awaitingTimer = setTimeout(() => {
-                    this.isAwake = false;
-                    set('jarvis-wakeword-badge-text', 'EN VEILLE ÉCOUTE');
-                    const reactor = $('jarvis-reactor');
-                    if (reactor && reactor.dataset.reactorState === 'listening') {
-                      reactor.dataset.reactorState = 'idle';
-                      set('jarvis-reactor-status', 'PRÊT');
-                    }
-                  }, 6000);
-                  return;
-                }
-              }
-            }
-          }
+          try { window.speechSynthesis?.resume(); } catch {}
+          await window.jarvisVoice.enable();
         }
-      };
-
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        jarvisState.recognition = new SpeechRecognition();
-        jarvisState.recognition.lang = 'fr-FR';
-        jarvisState.recognition.continuous = false;
-        jarvisState.recognition.interimResults = true;
-
-        jarvisState.recognition.onstart = () => {
-          jarvisState.isListening = true;
-          $('jarvis-mic-btn')?.classList.add('listening');
-          const reactor = $('jarvis-reactor');
-          if (reactor) reactor.dataset.reactorState = 'listening';
-          set('jarvis-reactor-status', 'ÉCOUTE VOCALE...');
-          set('jarvis-mic-hint', 'Parlez maintenant... (Français)');
-        };
-
-        jarvisState.recognition.onresult = (e) => {
-          let transcript = '';
-          for (let i = 0; i < e.results.length; i++) {
-            transcript += e.results[i][0].transcript;
-          }
-          if ($('jarvis-input')) $('jarvis-input').value = transcript;
-        };
-
-        jarvisState.recognition.onerror = (e) => {
-          console.warn('Reconnaissance vocale erreur:', e);
-          stopJarvisListening();
-          set('jarvis-mic-hint', 'Erreur micro: ' + (e.error || 'inconnue'));
-        };
-
-        jarvisState.recognition.onend = () => {
-          const finalPrompt = $('jarvis-input')?.value.trim();
-          stopJarvisListening();
-          if (finalPrompt) {
-            sendJarvisPrompt(finalPrompt, 'web_voice');
-          }
-        };
+        try { localStorage.setItem('jarvis_wakeword_active', String(window.jarvisVoice.enabled)); } catch {}
       }
 
       function toggleJarvisListening() {
-        if (!jarvisState.recognition) {
-          alert('La reconnaissance vocale Web Speech API n’est pas supportée par ce navigateur (utilisez Chrome, Edge ou Brave).');
+        if (!window.jarvisVoice) return renderBrowserVoice('unsupported');
+        if (window.isSecureContext === false) {
+          renderBrowserVoice('error', {message: 'Ouvrez le dashboard en HTTPS pour autoriser le microphone.'});
           return;
         }
-        if (jarvisState.isListening) {
-          stopJarvisListening();
-        } else {
-          try {
-            jarvisState.recognition.start();
-          } catch (e) {
-            console.warn('Erreur start speech recognition:', e);
-            stopJarvisListening();
-          }
-        }
+        if (window.jarvisVoice.state === 'listening') window.jarvisVoice.stopManual();
+        else window.jarvisVoice.startManual();
       }
 
       function stopJarvisListening() {
-        jarvisState.isListening = false;
-        $('jarvis-mic-btn')?.classList.remove('listening');
-        const reactor = $('jarvis-reactor');
-        if (reactor && reactor.dataset.reactorState === 'listening') {
-          reactor.dataset.reactorState = 'idle';
-          set('jarvis-reactor-status', 'PRÊT');
-        }
-        set('jarvis-mic-hint', 'Microphone (Web Speech API)');
-        try { jarvisState.recognition?.stop(); } catch { }
+        window.jarvisVoice?.stopManual();
+      }
+
+      function initialiseBrowserVoice() {
+        if (!window.MoctarVoice) return renderBrowserVoice('unsupported');
+        window.jarvisVoice = window.MoctarVoice.create({
+          Recognition: window.SpeechRecognition || window.webkitSpeechRecognition,
+          onState: renderBrowserVoice,
+          onPrompt: text => sendJarvisPrompt(text, 'web_voice'),
+          speak: speakJarvisText,
+          language: 'fr-FR'
+        });
+        ['home-voice-toggle', 'jarvis-voice-toggle'].forEach(id => {
+          $(id)?.addEventListener('click', () => setBrowserVoiceEnabled(!window.jarvisVoice.enabled));
+        });
+        $('jarvis-wakeword-toggle')?.addEventListener('change', event => setBrowserVoiceEnabled(event.target.checked));
+        renderBrowserVoice(window.jarvisVoice.state);
+        let saved = false;
+        try { saved = localStorage.getItem('jarvis_wakeword_active') === 'true'; } catch {}
+        if (saved && !document.hidden) setBrowserVoiceEnabled(true);
+        document.addEventListener('visibilitychange', () => {
+          if (document.hidden) {
+            window.jarvisVoice.suspend();
+            cancelJarvisSpeech();
+          } else window.jarvisVoice.resume();
+        });
+        window.addEventListener('pagehide', () => {
+          window.jarvisVoice.suspend();
+          cancelJarvisSpeech();
+        });
+        window.addEventListener('pageshow', () => {
+          if (!document.hidden) window.jarvisVoice.resume();
+        });
       }
 
       $('jarvis-open-btn')?.addEventListener('click', openJarvisModal);
       $('jarvis-close-btn')?.addEventListener('click', closeJarvisModal);
       $('jarvis-mic-btn')?.addEventListener('click', toggleJarvisListening);
-      WakeWordEngine.init();
+      initialiseBrowserVoice();
+      $('jarvis-tts-toggle')?.addEventListener('change', event => {
+        if (!event.target.checked) cancelJarvisSpeech();
+      });
 
       // Fermeture douce et intuitive des modales au clic en dehors (backdrop)
       ['jarvis-modal', 'events-dialog', 'voice-dialog'].forEach(id => {

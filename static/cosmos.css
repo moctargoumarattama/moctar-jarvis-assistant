@@ -263,6 +263,15 @@ main.cosmos-home > .connection-banner {
 .ai-runtime-badge[data-tone="warning"] { color: var(--amber); border-color: rgba(243, 189, 101, .3); }
 
 /* ------------------------------------------------------------------ Dock / commande */
+.browser-voice-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.home-voice-controls { grid-column: 2; }
+.browser-voice-toggle { min-height: 44px; padding: 8px 12px; flex-shrink: 0; border: 1px solid #345767; border-radius: 10px; background: #102431; color: var(--cyan); font: 12px var(--sans); }
+.browser-voice-toggle[aria-pressed="true"] { color: var(--green); border-color: #39725c; background: #102a24; }
+.browser-voice-status { flex: 1 1 140px; min-width: 0; color: #91a5c1; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.browser-voice-status[data-tone="error"] { color: var(--red); }
+.browser-voice-status[data-tone="success"] { color: var(--green); }
+@media (max-width: 900px) { .home-voice-controls { grid-column: 1; } }
+
 .cosmos-dock {
   grid-area: dock;
   display: grid; grid-template-columns: 1fr minmax(0, 780px) 1fr; align-items: center; gap: 16px;

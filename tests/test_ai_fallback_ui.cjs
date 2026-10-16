@@ -63,6 +63,43 @@ test('a direct Gemini answer displays its model on the home page and in chat', a
   assert.equal(ui.requests[0].timeout, 60000);
 });
 
+test('a voice command stays busy until speech ends and never opens the mobile keyboard', async () => {
+  const ui = frontend({query: {status: 'success', reply: 'Mesures disponibles.', online: true}});
+  const busy = [];
+  let finishSpeech;
+  let focused = false;
+  ui.context.window.jarvisVoice = {setBusy(value) {busy.push(value);}};
+  ui.context.speakJarvisText = () => new Promise(resolve => {finishSpeech = resolve;});
+  ui.$('jarvis-input').focus = () => {focused = true;};
+  const pending = ui.context.sendJarvisPrompt('statut', 'web_voice');
+  await new Promise(setImmediate);
+  assert.equal(ui.context.jarvisState.busy, true);
+  assert.deepEqual(busy, [true]);
+  finishSpeech(true);
+  await pending;
+  assert.equal(ui.context.jarvisState.busy, false);
+  assert.deepEqual(busy, [true, false]);
+  assert.equal(focused, false);
+});
+
+test('blocked browser speech releases the conversation after five seconds', async () => {
+  const ui = frontend();
+  let cancellations = 0;
+  ui.context.clearTimeout = () => {};
+  ui.context.SpeechSynthesisUtterance = class {constructor(text) {this.text = text;}};
+  ui.context.window.speechSynthesis = {
+    cancel() {cancellations++;}, getVoices() {return [];}, speak() {}
+  };
+  ui.$('jarvis-tts-toggle').checked = true;
+  vm.runInContext(section('      function cancelJarvisSpeech(', '      function renderBrowserVoice('), ui.context);
+  const speaking = ui.context.speakJarvisText('Je vous écoute.');
+  const startWatchdog = ui.timeouts.find(timer => timer.delay === 5000);
+  assert.ok(startWatchdog);
+  startWatchdog.fn();
+  assert.equal(await speaking, false);
+  assert.ok(cancellations > 0);
+});
+
 test('an autonomous action remains available when Gemini is unavailable without a blocking modal', async () => {
   const ui = frontend({query: {status: 'success', reply: 'Tâche locale exécutée',
     online: false, model_offline: true, gemini_online: false}});
