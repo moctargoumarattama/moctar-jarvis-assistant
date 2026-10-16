@@ -1,17 +1,32 @@
 'use strict';
 
-// Installation metadata only: pages, telemetry and API responses are never cached.
+const SW_VERSION = 'v3.1';
+
+// Installation metadata only: pages, scripts, telemetry and API responses are never cached.
 self.addEventListener('install', event => {
   event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
-    // Delete only caches reserved for this dashboard, never other applications.
-    const ownedPrefixes = ['moctar-noc-', 'jarvis-noc-'];
+    // Delete dashboard caches and purge any stale .js entries from CacheStorage (v3.1).
+    const ownedPrefixes = ['moctar-noc-', 'jarvis-noc-', 'moctar-', 'jarvis-'];
     const names = await caches.keys();
-    await Promise.all(names.filter(name => ownedPrefixes.some(prefix => name.startsWith(prefix)))
-      .map(name => caches.delete(name)));
+    for (const name of names) {
+      if (ownedPrefixes.some(prefix => name.startsWith(prefix))) {
+        await caches.delete(name);
+      } else {
+        try {
+          const cache = await caches.open(name);
+          const requests = await cache.keys();
+          await Promise.all(
+            requests
+              .filter(req => new URL(req.url).pathname.endsWith('.js'))
+              .map(req => cache.delete(req))
+          );
+        } catch {}
+      }
+    }
     await self.clients.claim();
   })());
 });

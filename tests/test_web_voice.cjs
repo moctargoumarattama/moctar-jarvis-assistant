@@ -2,14 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { create } = require('../static/voice.js');
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
-  return { promise, resolve, reject };
-}
 
 function clock() {
   let now = 0;
@@ -21,657 +16,398 @@ function clock() {
       pending.set(id, { at: now + delay, callback });
       return id;
     },
-    clearTimeout(id) { pending.delete(id); }
+    clearTimeout(id) {
+      pending.delete(id);
+    },
+  };
+  const rafQueue = new Map();
+  let nextRafId = 1;
+  const requestAnimationFrame = callback => {
+    const id = nextRafId++;
+    rafQueue.set(id, callback);
+    return id;
+  };
+  const cancelAnimationFrame = id => {
+    rafQueue.delete(id);
   };
   return {
     timers,
+    requestAnimationFrame,
+    cancelAnimationFrame,
+    stepFrame(ms = 16) {
+      this.advance(ms);
+      const callbacks = [...rafQueue.entries()];
+      rafQueue.clear();
+      for (const [, cb] of callbacks) {
+        cb(now);
+      }
+    },
     advance(milliseconds) {
       const target = now + milliseconds;
       let iterations = 0;
       while (true) {
-        const next = [...pending.entries()].filter(([, item]) => item.at <= target)
+        const next = [...pending.entries()]
+          .filter(([, item]) => item.at <= target)
           .sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
         if (!next) break;
-        assert.ok(++iterations < 100, 'recognition must not retry in a tight loop');
+        assert.ok(++iterations < 500, 'timers must not loop infinitely');
         now = next[1].at;
         pending.delete(next[0]);
         next[1].callback();
       }
       now = target;
     },
-    get pending() { return pending.size; }
+    get now() {
+      return now;
+    },
   };
 }
 
-function result(text, isFinal = true, resultIndex = 0) {
-  const item = [{ transcript: text, confidence: 0.95 }];
-  item.isFinal = isFinal;
-  const results = Array.from({ length: resultIndex }, () => {
-    const previous = [{ transcript: 'déjà entendu', confidence: 0.95 }];
-    previous.isFinal = true;
-    return previous;
-  });
-  results.push(item);
-  return { resultIndex, results };
-}
-
-function fixture(t, overrides = {}) {
-  const instances = [];
+function createWebAudioFixture(t, overrides = {}) {
+  let currentRms = 0;
+  let getUserMediaCalls = [];
+  let activeRecorders = [];
+  let audioPlayedUrls = [];
+  let finishAudioPlayback = null;
   const states = [];
   const prompts = [];
   const speech = [];
-  const time = clock();
-  class Recognition {
-    constructor() { this.active = false; this.starts = 0; instances.push(this); }
-    start() {
-      assert.equal(this.active, false, 'only one recognition start may be active');
-      this.active = true;
-      this.starts++;
-      queueMicrotask(() => { if (this.active) this.onstart?.({}); });
-    }
-    abort() {
-      if (!this.active) return;
-      this.active = false;
-      queueMicrotask(() => this.onend?.({}));
-    }
-    stop() { this.abort(); }
-    emit(text, isFinal = true, resultIndex = 0) { this.onresult?.(result(text, isFinal, resultIndex)); }
-    end() {
-      this.active = false;
-      this.onend?.({});
-    }
-    fail(error) {
-      this.onerror?.({ error });
-      this.end();
-    }
-  }
-  const engine = create({
-    Recognition,
-    timers: time.timers,
-    storage: { getItem: () => null, setItem() {}, removeItem() {} },
-    onState: (state, detail) => states.push({ state, detail }),
-    speak: async text => { speech.push(text); return true; },
-    onPrompt: async text => { prompts.push(text); },
-    ...overrides
-  });
-  t.after(() => engine.destroy());
-  return {
-    engine, instances, states, prompts, speech, time,
-    get rec() { return instances.at(-1); },
-    async settle() {
-      for (let i = 0; i < 20; i++) { await Promise.resolve(); time.advance(0); }
-    },
-    get active() { return instances.filter(item => item.active); }
-  };
-}
-
-test('enabling starts microphone recognition and disabling stops it', async t => {
-  const f = fixture(t);
-  assert.equal(f.engine.enabled, false);
-  await f.engine.enable();
-  await f.settle();
-  assert.equal(f.engine.enabled, true);
-  assert.equal(f.engine.state, 'wake');
-  assert.equal(f.active.length, 1);
-  f.engine.disable();
-  await f.settle();
-  f.time.advance(30000);
-  await f.settle();
-  assert.equal(f.engine.state, 'off');
-  assert.equal(f.engine.enabled, false);
-  assert.equal(f.active.length, 0);
-});
-
-test('interim and final wake results invite a command without sending the wake phrase', async t => {
-  const f = fixture(t);
-  await f.engine.enable();
-  await f.settle();
-  f.rec.emit('yo moctar', false);
-  await f.settle();
-  assert.deepEqual(f.speech, []);
-  f.rec.emit('yo moctar');
-  await f.settle();
-  assert.equal(f.speech.length, 1);
-  assert.match(f.speech[0], /je t.écoute/i);
-  assert.deepEqual(f.prompts, []);
-  assert.equal(f.engine.state, 'listening');
-  f.rec.emit('donne le statut du système');
-  await f.settle();
-  assert.deepEqual(f.prompts, ['donne le statut du système']);
-});
-
-test('ELMo, el mo, hey elmo and French Moctar wake aliases work', async t => {
-  for (const alias of ['ELMo', 'el mo', 'hey elmo', 'hey moctar', 'yo moctar']) {
-    const f = fixture(t);
-    await f.engine.enable();
-    await f.settle();
-    f.rec.emit(alias);
-    await f.settle();
-    assert.equal(f.engine.state, 'listening', alias);
-    assert.equal(f.speech.length, 1, alias);
-    assert.deepEqual(f.prompts, [], alias);
-    f.engine.destroy();
-  }
-});
-
-test('wake plus command in a single final result sends only the command', async t => {
-  const f = fixture(t);
-  await f.engine.enable();
-  await f.settle();
-  f.rec.emit('ELMo donne le statut');
-  await f.settle();
-  assert.deepEqual(f.prompts, ['donne le statut']);
-  assert.equal(f.engine.state, 'listening');
-});
-
-test('standby ignores ordinary speech without a wake phrase', async t => {
-  const f = fixture(t);
-  await f.engine.enable();
-  await f.settle();
-  for (const [index, text] of ['ouvre le navigateur', 'un exemple de modèle', 'le nom de ce film est elmore', 'je parle de Moctar'].entries()) {
-    f.rec.emit(text, true, index);
-    await f.settle();
-  }
-  assert.deepEqual(f.prompts, []);
-  assert.deepEqual(f.speech, []);
-  assert.equal(f.engine.state, 'wake');
-});
-
-test('recognition is suspended during the spoken invitation and ignores its echo', async t => {
-  const greeting = deferred();
-  const f = fixture(t, { speak: () => greeting.promise });
-  await f.engine.enable();
-  await f.settle();
-  const previous = f.rec;
-  previous.emit('yo moctar');
-  await f.settle();
-  assert.equal(f.active.length, 0);
-  previous.emit('oui moctar je t’écoute que souhaites-tu', true, 1);
-  await f.settle();
-  assert.deepEqual(f.prompts, []);
-  greeting.resolve(true);
-  await f.settle();
-  assert.equal(f.engine.state, 'listening');
-  assert.equal(f.active.length, 1);
-});
-
-test('a final command and late duplicate trigger one request while its answer is speaking', async t => {
-  const request = deferred();
-  const prompts = [];
-  const f = fixture(t, { onPrompt: text => { prompts.push(text); return request.promise; } });
-  await f.engine.enable();
-  await f.settle();
-  const previous = f.rec;
-  previous.emit('yo moctar état système', false);
-  previous.emit('yo moctar état système');
-  previous.emit('yo moctar état système');
-  await f.settle();
-  assert.deepEqual(prompts, ['état système']);
-  assert.equal(f.active.length, 0);
-  previous.emit('texte provenant de la réponse', true, 1);
-  assert.deepEqual(prompts, ['état système']);
-  request.resolve();
-  await f.settle();
-  assert.equal(f.engine.state, 'listening');
-  assert.equal(f.active.length, 1);
-});
-
-test('followup commands need no wake word and expire after fifteen seconds', async t => {
-  const f = fixture(t);
-  await f.engine.enable();
-  await f.settle();
-  f.rec.emit('yo moctar état système');
-  await f.settle();
-  f.rec.emit('et la mémoire disponible');
-  await f.settle();
-  assert.deepEqual(f.prompts, ['état système', 'et la mémoire disponible']);
-  f.time.advance(14999);
-  await f.settle();
-  assert.equal(f.engine.state, 'listening');
-  f.time.advance(1);
-  await f.settle();
-  assert.equal(f.engine.state, 'wake');
-  f.rec.emit('autre conversation');
-  await f.settle();
-  assert.equal(f.prompts.length, 2);
-});
-
-test('a followup command mentioning Moctar stays intact and does not trigger another invitation', async t => {
-  const f = fixture(t);
-  await f.engine.enable();
-  await f.settle();
-  f.rec.emit('yo moctar état système');
-  await f.settle();
-  f.rec.emit('quelle est la température Moctar');
-  await f.settle();
-  assert.deepEqual(f.prompts, ['état système', 'quelle est la température Moctar']);
-  assert.deepEqual(f.speech, []);
-  assert.equal(f.engine.state, 'listening');
-});
-
-test('browser recognition ending naturally restarts the wake listener', async t => {
-  const f = fixture(t);
-  await f.engine.enable();
-  await f.settle();
-  for (let cycle = 0; cycle < 12; cycle++) {
-    const starts = f.rec.starts;
-    f.rec.end();
-    f.time.advance(249);
-    await f.settle();
-    assert.equal(f.rec.starts, starts, 'natural endings are debounced');
-    assert.equal(f.engine.listeningDesired, true);
-    f.time.advance(1);
-    await f.settle();
-    assert.equal(f.engine.state, 'wake');
-    assert.equal(f.active.length, 1);
-    assert.equal(f.rec.starts, starts + 1);
-  }
-  assert.equal(f.instances.length, 1, 'all restarts reuse the same recognizer');
-});
-
-for (const error of ['no-speech', 'aborted', 'audio-capture']) {
-  test(`repeated ${error} events preserve listening and restart without an error budget`, async t => {
-    const f = fixture(t);
-    await f.engine.enable();
-    await f.settle();
-    for (let cycle = 0; cycle < 12; cycle++) {
-      const starts = f.rec.starts;
-      f.rec.fail(error);
-      await f.settle();
-      assert.equal(f.engine.listeningDesired, true);
-      assert.equal(f.active.length, 0);
-      f.time.advance(249);
-      await f.settle();
-      assert.equal(f.rec.starts, starts);
-      f.time.advance(1);
-      await f.settle();
-      assert.equal(f.active.length, 1);
-      assert.equal(f.engine.state, 'wake');
-    }
-    assert.equal(f.states.some(({ state }) => state === 'error'), false);
-    f.rec.emit('elmo donne le statut');
-    await f.settle();
-    assert.deepEqual(f.prompts, ['donne le statut']);
-  });
-}
-
-test('network interruptions retry after 1500 ms indefinitely without disabling listening', async t => {
-  const f = fixture(t);
-  await f.engine.enable();
-  await f.settle();
-  for (let cycle = 0; cycle < 12; cycle++) {
-    const starts = f.rec.starts;
-    f.rec.fail('network');
-    await f.settle();
-    assert.equal(f.engine.listeningDesired, true);
-    f.time.advance(1499);
-    await f.settle();
-    assert.equal(f.rec.starts, starts);
-    f.time.advance(1);
-    await f.settle();
-    assert.equal(f.rec.starts, starts + 1);
-    assert.equal(f.active.length, 1);
-  }
-  assert.equal(f.states.some(({ state }) => state === 'error'), false);
-});
-
-test('a service restriction preserves listening intent and explains browser permissions', async t => {
-  const f = fixture(t);
-  await f.engine.enable();
-  await f.settle();
-  for (let cycle = 0; cycle < 6; cycle++) {
-    const starts = f.rec.starts;
-    f.rec.fail('service-not-allowed');
-    await f.settle();
-    assert.equal(f.engine.listeningDesired, true);
-    f.time.advance(1499);
-    await f.settle();
-    assert.equal(f.rec.starts, starts);
-    f.time.advance(1);
-    await f.settle();
-    assert.equal(f.rec.starts, starts + 1);
-  }
-  assert.ok(f.states.some(({ detail }) => detail.error === 'service-not-allowed' && /autorisations/.test(detail.message)));
-  assert.equal(f.states.some(({ state }) => state === 'error'), false);
-});
-
-test('explicit disabling cancels delayed network and natural-end restarts', async t => {
-  for (const error of ['network', 'no-speech', 'aborted', 'audio-capture']) {
-    const f = fixture(t);
-    await f.engine.enable();
-    await f.settle();
-    f.rec.fail(error);
-    await f.settle();
-    f.engine.disable();
-    f.time.advance(60000);
-    await f.settle();
-    assert.equal(f.engine.listeningDesired, false, error);
-    assert.equal(f.engine.state, 'off', error);
-    assert.equal(f.rec.starts, 1, error);
-    assert.equal(f.active.length, 0, error);
-    f.engine.destroy();
-  }
-});
-
-test('disabling during pending greeting prevents automatic microphone reactivation', async t => {
-  const greeting = deferred();
-  const f = fixture(t, { speak: () => greeting.promise });
-  await f.engine.enable();
-  await f.settle();
-  f.rec.emit('elmo');
-  await f.settle();
-  f.engine.disable();
-  greeting.resolve(true);
-  await f.settle();
-  f.time.advance(30000);
-  await f.settle();
-  assert.equal(f.engine.enabled, false);
-  assert.equal(f.engine.state, 'off');
-  assert.equal(f.active.length, 0);
-});
-
-test('suspending during a pending request keeps the microphone paused until visible again', async t => {
-  const request = deferred();
-  const f = fixture(t, { onPrompt: () => request.promise });
-  await f.engine.enable();
-  await f.settle();
-  f.rec.emit('yo moctar état système');
-  await f.settle();
-  f.engine.suspend();
-  request.resolve();
-  await f.settle();
-  f.time.advance(30000);
-  await f.settle();
-  assert.equal(f.active.length, 0);
-  assert.equal(f.engine.state, 'paused');
-  assert.equal(f.engine.enabled, true);
-  f.engine.resume();
-  await f.settle();
-  assert.equal(f.engine.state, 'wake');
-  assert.equal(f.active.length, 1);
-});
-
-test('permission denial produces an error and never loops microphone retries', async t => {
-  for (const error of ['not-allowed']) {
-    const f = fixture(t);
-    await f.engine.enable();
-    await f.settle();
-    f.rec.fail(error);
-    await f.settle();
-    f.time.advance(60000);
-    await f.settle();
-    assert.equal(f.engine.state, 'error', error);
-    assert.equal(f.active.length, 0, error);
-    assert.equal(f.instances.reduce((sum, item) => sum + item.starts, 0), 1, error);
-    assert.ok(f.states.some(({ detail }) => detail && /micro|autoris|permission/i.test(detail.message || detail.error || '')), error);
-    f.engine.destroy();
-  }
-});
-
-test('manual microphone enters the same listener without requiring a wake phrase', async t => {
-  const f = fixture(t);
-  await f.engine.startManual();
-  await f.settle();
-  assert.equal(f.engine.state, 'listening');
-  assert.equal(f.active.length, 1);
-  f.rec.emit('donne le statut');
-  await f.settle();
-  assert.deepEqual(f.prompts, ['donne le statut']);
-});
-
-test('storage being unavailable does not prevent explicit listening', async t => {
-  const unavailable = () => { throw new Error('SecurityError: storage denied'); };
-  const f = fixture(t, { storage: { getItem: unavailable, setItem: unavailable, removeItem: unavailable } });
-  await f.engine.enable();
-  await f.settle();
-  assert.equal(f.engine.state, 'wake');
-  f.engine.disable();
-  await f.settle();
-  assert.equal(f.engine.state, 'off');
-});
-
-test('external speech or a typed request pauses listening until busy is cleared', async t => {
-  const f = fixture(t);
-  await f.engine.enable();
-  await f.settle();
-  const previous = f.rec;
-  f.engine.setBusy(true);
-  await f.settle();
-  assert.equal(f.active.length, 0);
-  previous.emit('yo moctar echo');
-  assert.deepEqual(f.prompts, []);
-  f.engine.setBusy(false);
-  await f.settle();
-  assert.equal(f.active.length, 1);
-});
-
-test('a missing microphone stop confirmation preserves intent without concurrent restarts until confirmed', async t => {
-  const f = fixture(t);
-  await f.engine.enable();
-  await f.settle();
-  const rec = f.rec;
-  rec.abort = () => { rec.active = false; };
-  rec.emit('elmo');
-  await f.settle();
-  assert.deepEqual(f.speech, [], 'do not speak before microphone stop is confirmed');
-  f.engine.disable();
-  await f.engine.enable();
-  await f.settle();
-  assert.equal(rec.starts, 1, 'rapid reactivation must wait for the previous onend');
-  f.time.advance(2500);
-  await f.settle();
-  assert.equal(f.engine.state, 'error');
-  assert.equal(f.engine.enabled, true, 'a browser stop timeout must not revoke listening intent');
-  assert.equal(await f.engine.enable(), false, 'an unconfirmed stop must prevent another start');
-  assert.equal(rec.starts, 1);
-  assert.deepEqual(f.speech, []);
-  assert.deepEqual(f.prompts, []);
-  assert.ok(f.states.some(({ detail }) => detail && detail.error === 'stop-timeout'));
-  rec.end();
-  await f.settle();
-  assert.equal(rec.starts, 1, 'a confirmed late onend still respects restart debounce');
-  f.time.advance(250);
-  await f.settle();
-  assert.equal(rec.starts, 2);
-  assert.equal(f.engine.state, 'wake');
-});
-
-test('a phrase begun near followup expiry keeps its final command after the original deadline', async t => {
-  const f = fixture(t);
-  await f.engine.enable();
-  await f.settle();
-  f.rec.emit('yo moctar état système');
-  await f.settle();
-  f.time.advance(14900);
-  f.rec.emit('et la mémoire', false);
-  await f.settle();
-  assert.deepEqual(f.prompts, ['état système'], 'interim words are never sent as commands');
-  f.time.advance(1100);
-  await f.settle();
-  assert.equal(f.engine.state, 'listening');
-  f.rec.emit('et la mémoire disponible');
-  await f.settle();
-  assert.deepEqual(f.prompts, ['état système', 'et la mémoire disponible']);
-});
-
-test('manual dictation shares the enabled wake listener and stopping it restores wake mode', async t => {
-  const f = fixture(t);
-  await f.engine.enable();
-  await f.settle();
-  const rec = f.rec;
-  await f.engine.startManual();
-  await f.settle();
-  assert.equal(f.engine.state, 'listening');
-  assert.equal(f.rec, rec);
-  assert.equal(rec.starts, 1, 'manual dictation must reuse active recognition');
-  f.engine.stopManual();
-  await f.settle();
-  assert.equal(f.engine.enabled, true);
-  assert.equal(f.engine.state, 'wake');
-  assert.equal(f.active.length, 1);
-  rec.emit('elmo');
-  await f.settle();
-  assert.equal(f.speech.length, 1);
-  assert.equal(f.engine.state, 'listening');
-});
-
-test('Brave network block or >3s starting stall switches automatically to MediaRecorder + /api/voice/transcribe', async t => {
-  let activeRecorder = null;
-  class FakeMediaRecorder {
-    static isTypeSupported() { return true; }
-    constructor(stream, opts = {}) {
-      this.stream = stream;
-      this.mimeType = opts.mimeType || 'audio/webm';
-      this.state = 'inactive';
-      activeRecorder = this;
-    }
-    start() { this.state = 'recording'; }
-    stop() {
-      if (this.state === 'inactive') return;
-      this.state = 'inactive';
-      this.ondataavailable?.({ data: { size: 1024, type: this.mimeType } });
-      this.onstop?.();
-    }
-  }
-  class StalledRecognition {
-    constructor() {}
-    start() {
-      // Simule Brave bloqué sur "Connexion au service de reconnaissance vocale..." sans onstart
-    }
-    abort() {}
-    stop() {}
-  }
-
-  const f = fixture(t, {
-    Recognition: StalledRecognition,
-    mediaDevices: {
-      getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }),
-    },
-    MediaRecorder: FakeMediaRecorder,
-    recorderSliceMs: 1000,
-    transcribe: async () => 'Yo Moctar quel est le statut CPU',
-  });
-
-  await f.engine.enable();
-  await f.settle();
-  assert.equal(f.engine.usingFallback, false);
-  assert.equal(f.engine.state, 'starting');
-
-  // Avance de 3000 ms -> le watchdog Brave déclenche la bascule MediaRecorder
-  f.time.advance(3000);
-  await f.settle();
-  assert.equal(f.engine.usingFallback, true);
-  assert.equal(f.engine.state, 'wake');
-  assert.ok(activeRecorder, 'MediaRecorder fallback must be active');
-
-  // Fin du segment audio -> envoi à transcribe -> exécution de la commande après "Yo Moctar"
-  f.time.advance(1000);
-  await f.settle();
-  assert.deepEqual(f.prompts, ['quel est le statut CPU']);
-});
-
-test('WebAudio VAD starts MediaRecorder on speech, stops after 800ms silence, calls /api/voice/interact and plays Audio', async t => {
-  let currentRms = 0;
-  let recorderState = 'inactive';
-  let interactCalls = 0;
-  let audioPlayedUrl = null;
-  let finishAudioPlayback = null;
+  const solarActivityCalls = [];
+  const solarStateCalls = [];
   const interactResults = [];
+  const time = clock();
 
   class FakeAnalyser {
-    constructor() { this.fftSize = 512; }
-    get currentRms() { return currentRms; }
+    constructor() {
+      this.fftSize = 512;
+      this.smoothingTimeConstant = 0.25;
+    }
+    get currentRms() {
+      return currentRms;
+    }
+    getFloatTimeDomainData(buf) {
+      buf.fill(currentRms);
+    }
   }
+
   class FakeAudioContext {
-    constructor() { this.state = 'running'; }
-    createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
-    createAnalyser() { return new FakeAnalyser(); }
-    close() {}
+    constructor() {
+      this.state = 'running';
+      this.closed = false;
+    }
+    resume() {
+      this.state = 'running';
+      return Promise.resolve();
+    }
+    createMediaStreamSource() {
+      return { connect() {}, disconnect() {} };
+    }
+    createAnalyser() {
+      return new FakeAnalyser();
+    }
+    close() {
+      this.closed = true;
+      this.state = 'closed';
+      return Promise.resolve();
+    }
   }
+
   class FakeMediaRecorder {
-    static isTypeSupported() { return true; }
+    static isTypeSupported() {
+      return true;
+    }
     constructor(stream, opts = {}) {
       this.stream = stream;
       this.mimeType = opts.mimeType || 'audio/webm';
       this.state = 'inactive';
+      activeRecorders.push(this);
     }
     start() {
       this.state = 'recording';
-      recorderState = 'recording';
     }
     stop() {
       if (this.state === 'inactive') return;
       this.state = 'inactive';
-      recorderState = 'inactive';
       this.ondataavailable?.({ data: { size: 2048, type: this.mimeType } });
       this.onstop?.();
     }
   }
+
   class FakeAudio {
     constructor(url) {
       this.url = url;
-      audioPlayedUrl = url;
+      audioPlayedUrls.push(url);
       finishAudioPlayback = () => this.onended?.();
     }
-    play() { return Promise.resolve(); }
+    play() {
+      return Promise.resolve();
+    }
     pause() {}
   }
 
-  const f = fixture(t, {
-    preferWebAudio: true,
+  const fakeSolarEngine = {
+    setVoiceActivity(volume, isSpeaking) {
+      solarActivityCalls.push({ volume, isSpeaking });
+    },
+    setVoiceState(state) {
+      solarStateCalls.push(state);
+    },
+  };
+
+  let nextInteractResponse = {
+    ok: true,
+    ignored: false,
+    user_text: 'Yo Moctar quel est le statut CPU',
+    reply_text: 'Tous les cœurs CPU sont nominaux, Moctar.',
+    audio_url: '/api/voice/tts/cache/abcdef0123456789abcdef.mp3',
+    session_active: true,
+  };
+  let interactCalls = 0;
+
+  const engine = create({
     mediaDevices: {
-      getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }),
+      getUserMedia: async constraints => {
+        getUserMediaCalls.push(constraints);
+        return { getTracks: () => [{ stop() {} }] };
+      },
     },
     MediaRecorder: FakeMediaRecorder,
     AudioContext: FakeAudioContext,
     Audio: FakeAudio,
-    vadPollMs: 50,
+    SolarEngine: fakeSolarEngine,
+    timers: time.timers,
+    requestAnimationFrame: time.requestAnimationFrame,
+    cancelAnimationFrame: time.cancelAnimationFrame,
     vadSilenceMs: 800,
     vadThreshold: 0.02,
-    onInteractResult: (payload) => interactResults.push(payload),
-    fetch: async (url) => {
+    storage: { getItem: () => null, setItem() {}, removeItem() {} },
+    onState: (state, detail) => states.push({ state, detail }),
+    onInteractResult: payload => interactResults.push(payload),
+    speak: async text => {
+      speech.push(text);
+      return true;
+    },
+    onPrompt: async text => {
+      prompts.push(text);
+    },
+    fetch: async url => {
       assert.equal(url, '/api/voice/interact');
       interactCalls += 1;
+      const body = typeof nextInteractResponse === 'function' ? await nextInteractResponse() : nextInteractResponse;
       return {
         ok: true,
-        json: async () => ({
-          ok: true,
-          ignored: false,
-          user_text: 'quel est le statut CPU',
-          reply_text: 'Tous les cœurs CPU sont nominaux, Moctar.',
-          audio_url: '/api/voice/tts/cache/abcdef0123456789abcdef.mp3',
-          session_active: true,
-        }),
+        json: async () => body,
       };
+    },
+    ...overrides,
+  });
+
+  t.after(() => engine.destroy());
+
+  return {
+    engine,
+    time,
+    states,
+    prompts,
+    speech,
+    solarActivityCalls,
+    solarStateCalls,
+    interactResults,
+    getUserMediaCalls,
+    audioPlayedUrls,
+    get activeRecorders() {
+      return activeRecorders;
+    },
+    get latestRecorder() {
+      return activeRecorders.at(-1);
+    },
+    get interactCalls() {
+      return interactCalls;
+    },
+    set rms(value) {
+      currentRms = value;
+    },
+    set interactResponse(value) {
+      nextInteractResponse = value;
+    },
+    finishAudio() {
+      finishAudioPlayback?.();
+    },
+    async settle() {
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+        time.advance(0);
+      }
+    },
+  };
+}
+
+test('zero references to webkitSpeechRecognition or SpeechRecognition exist in static/voice.js and static/index.html', () => {
+  const voiceSource = fs.readFileSync(path.join(__dirname, '../static/voice.js'), 'utf8');
+  const indexSource = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
+  assert.equal(/webkitSpeechRecognition|SpeechRecognition/.test(voiceSource), false, 'voice.js must not reference SpeechRecognition');
+  assert.equal(/webkitSpeechRecognition|SpeechRecognition/.test(indexSource), false, 'index.html must not reference SpeechRecognition');
+});
+
+test('cache-busting ?v=3.1 and Service Worker skipWaiting are configured', () => {
+  const indexSource = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
+  const swSource = fs.readFileSync(path.join(__dirname, '../static/service-worker.js'), 'utf8');
+  assert.ok(indexSource.includes('/static/voice.js?v=3.1'), 'index.html must load /static/voice.js?v=3.1');
+  assert.ok(indexSource.includes('/static/cosmos.js?v=3.1'), 'index.html must load /static/cosmos.js?v=3.1');
+  assert.ok(swSource.includes('self.skipWaiting()'), 'service-worker.js must call self.skipWaiting()');
+  assert.ok(swSource.includes('.endsWith(\'.js\')'), 'service-worker.js must invalidate cached .js files');
+});
+
+test('enabling immediately initializes getUserMedia with echoCancellation & noiseSuppression and displays green listening message', async t => {
+  const f = createWebAudioFixture(t);
+  assert.equal(f.engine.enabled, false);
+
+  await f.engine.enable();
+  await f.settle();
+
+  assert.equal(f.engine.enabled, true);
+  assert.equal(f.engine.usingWebAudio, true);
+  assert.equal(f.getUserMediaCalls.length, 1);
+  assert.deepEqual(f.getUserMediaCalls[0], {
+    audio: { echoCancellation: true, noiseSuppression: true },
+  });
+  assert.equal(f.engine.state, 'wake');
+  const wakeStates = f.states.filter(s => s.state === 'wake');
+  assert.ok(wakeStates.length >= 1);
+  assert.equal(wakeStates.at(-1).detail.message, '🟢 À l\'écoute — Dites « Yo Moctar »');
+});
+
+test('60 FPS VU-meter updates SolarEngine.setVoiceActivity on every frame, starts MediaRecorder on RMS > 0.02, and posts after 800ms silence', async t => {
+  const f = createWebAudioFixture(t);
+  await f.engine.enable();
+  await f.settle();
+
+  // Frame 1: silence (RMS = 0.005)
+  f.rms = 0.005;
+  f.time.stepFrame(16);
+  await f.settle();
+  assert.ok(f.solarActivityCalls.length >= 1);
+  assert.equal(f.solarActivityCalls.at(-1).volume, 0.005);
+  assert.equal(f.solarActivityCalls.at(-1).isSpeaking, false);
+
+  // Frame 2: user speaks (RMS = 0.12 > 0.02)
+  f.rms = 0.12;
+  f.time.stepFrame(16);
+  await f.settle();
+
+  assert.equal(f.engine.state, 'listening');
+  assert.equal(f.states.at(-1).detail.message, '🎙️ Voix détectée...');
+  assert.equal(f.latestRecorder.state, 'recording');
+  assert.equal(f.solarActivityCalls.at(-1).volume, 0.12);
+  assert.equal(f.solarActivityCalls.at(-1).isSpeaking, true);
+
+  // Silence begins: 30 frames at 60 FPS (500ms < 800ms) -> still recording
+  f.rms = 0.001;
+  for (let frame = 0; frame < 30; frame += 1) {
+    f.time.stepFrame(16);
+  }
+  await f.settle();
+  assert.equal(f.latestRecorder.state, 'recording');
+  assert.equal(f.interactCalls, 0);
+
+  // Advance remaining 20 frames (> 800ms total silence at 60 FPS) -> MediaRecorder stops and posts to /api/voice/interact
+  for (let frame = 0; frame < 20; frame += 1) {
+    f.time.stepFrame(16);
+  }
+  await f.settle();
+
+  assert.equal(f.latestRecorder.state, 'inactive');
+  assert.equal(f.interactCalls, 1);
+  assert.equal(f.interactResults.length, 1);
+  assert.equal(f.audioPlayedUrls[0], '/api/voice/tts/cache/abcdef0123456789abcdef.mp3');
+  assert.equal(f.engine.state, 'speaking');
+
+  // Finish audio playback -> returns to active listening
+  f.finishAudio();
+  await f.settle();
+  assert.equal(f.engine.state, 'listening');
+});
+
+test('disabling stops microphone tracks, resets SolarEngine voice activity to 0, and sets state to off', async t => {
+  let trackStopped = false;
+  const f = createWebAudioFixture(t, {
+    mediaDevices: {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop() { trackStopped = true; } }],
+      }),
     },
   });
 
   await f.engine.enable();
   await f.settle();
-  assert.equal(f.engine.usingFallback, true);
-  assert.equal(f.engine.state, 'wake');
+  assert.equal(f.engine.enabled, true);
 
-  // 1. L'utilisateur commence à parler (RMS > 0.02) -> Soleil passe en 'listening' et MediaRecorder démarre
-  currentRms = 0.15;
-  f.time.advance(50);
+  f.engine.disable();
   await f.settle();
-  assert.equal(recorderState, 'recording');
-  assert.equal(f.engine.state, 'listening');
 
-  // 2. Silence de 800 ms après la parole -> arrêt de MediaRecorder et envoi à /api/voice/interact
-  currentRms = 0.001;
-  f.time.advance(800);
-  await f.settle();
-  assert.equal(recorderState, 'inactive');
-  assert.equal(interactCalls, 1);
-  assert.equal(interactResults.length, 1);
-  assert.equal(audioPlayedUrl, '/api/voice/tts/cache/abcdef0123456789abcdef.mp3');
-  assert.equal(f.engine.state, 'speaking');
-
-  // 3. Fin de la lecture Audio -> retour automatique en attente de la prochaine phrase
-  finishAudioPlayback();
-  await f.settle();
-  assert.equal(f.engine.state, 'listening');
+  assert.equal(f.engine.enabled, false);
+  assert.equal(f.engine.state, 'off');
+  assert.equal(trackStopped, true);
+  assert.deepEqual(f.solarActivityCalls.at(-1), { volume: 0, isSpeaking: false });
 });
 
+test('permission denial (NotAllowedError) reports a clear error and disables retry loops', async t => {
+  let attempts = 0;
+  const f = createWebAudioFixture(t, {
+    mediaDevices: {
+      getUserMedia: async () => {
+        attempts += 1;
+        const err = new Error('Permission denied');
+        err.name = 'NotAllowedError';
+        throw err;
+      },
+    },
+  });
 
+  const ok = await f.engine.enable();
+  await f.settle();
+  f.time.advance(60000);
+  await f.settle();
+
+  assert.equal(ok, false);
+  assert.equal(attempts, 1);
+  assert.equal(f.engine.enabled, false);
+  assert.equal(f.engine.state, 'error');
+  assert.ok(f.states.some(({ detail }) => /Autorisez le microphone/i.test(detail?.message || '')));
+});
+
+test('suspend and resume pause and restore the WebAudio pipeline cleanly', async t => {
+  const f = createWebAudioFixture(t);
+  await f.engine.enable();
+  await f.settle();
+  assert.equal(f.engine.state, 'wake');
+
+  f.engine.suspend();
+  await f.settle();
+  assert.equal(f.engine.state, 'paused');
+  assert.equal(f.engine.enabled, true);
+
+  f.engine.resume();
+  await f.settle();
+  assert.equal(f.engine.state, 'wake');
+  assert.equal(f.getUserMediaCalls.length, 2);
+});
+
+test('setBusy pauses capture while busy and restores listening when cleared', async t => {
+  const f = createWebAudioFixture(t);
+  await f.engine.enable();
+  await f.settle();
+
+  f.rms = 0.1;
+  f.time.stepFrame(16);
+  await f.settle();
+  assert.equal(f.latestRecorder.state, 'recording');
+
+  f.engine.setBusy(true);
+  await f.settle();
+  assert.equal(f.latestRecorder.state, 'inactive');
+
+  f.engine.setBusy(false);
+  await f.settle();
+  assert.equal(f.engine.state, 'wake');
+});

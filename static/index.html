@@ -853,8 +853,8 @@
     <footer class="live-metrics-footer"><span>Historique de session · 1 h maximum · Les coupures de mesure restent visibles. Aucun point simulé.</span><span>Échap pour fermer</span></footer>
   </dialog>
   <div class="toast" id="toast" role="status" hidden></div>
-  <script src="/static/voice.js?v=2"></script>
-  <script src="/static/cosmos.js?v=2"></script>
+  <script src="/static/voice.js?v=3.1"></script>
+  <script src="/static/cosmos.js?v=3.1"></script>
   <script src="/static/live_metrics.js?v=1"></script>
   <script>
     'use strict';
@@ -2099,9 +2099,9 @@
         const active = (window.jarvisVoice?.listeningDesired ?? window.jarvisVoice?.enabled) === true;
         const messages = {
           off: 'Mains libres sur cet appareil',
-          starting: 'Connexion au micro…',
-          wake: 'Dites « Yo Moctar » ou « ELMo ».',
-          listening: 'Je vous écoute…',
+          starting: '🟢 À l\'écoute — Dites « Yo Moctar »',
+          wake: '🟢 À l\'écoute — Dites « Yo Moctar »',
+          listening: '🎙️ Voix détectée...',
           processing: 'M.O.C.T.A.R prépare la réponse…',
           speaking: 'M.O.C.T.A.R vous parle…',
           paused: 'Écoute suspendue : revenez sur le dashboard.',
@@ -2182,14 +2182,12 @@
       function initialiseBrowserVoice() {
         if (!window.MoctarVoice) return renderBrowserVoice('unsupported');
         window.jarvisVoice = window.MoctarVoice.create({
-          Recognition: window.SpeechRecognition || window.webkitSpeechRecognition,
           mediaDevices: window.navigator?.mediaDevices,
           MediaRecorder: window.MediaRecorder,
           AudioContext: window.AudioContext || window.webkitAudioContext,
           Audio: window.Audio,
-          preferWebAudio: Boolean(window.navigator?.brave || (window.navigator?.mediaDevices && window.MediaRecorder)),
+          SolarEngine: window.SolarEngine || window.CosmosEngine?.SolarEngine,
           interactUrl: '/api/voice/interact',
-          transcribeUrl: '/api/voice/transcribe',
           onInteractResult: window.handleVoiceInteractResult,
           onState: renderBrowserVoice,
           onPrompt: text => sendJarvisPrompt(text, 'web_voice'),

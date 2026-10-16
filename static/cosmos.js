@@ -277,6 +277,8 @@
     sunPulse: 1.0,
     sunPulseDir: 1,
     voiceState: 'idle',
+    voiceVolume: 0,
+    isUserSpeaking: false,
     shockwaves: [],
     lastShockwaveTime: 0,
     orbitTiltAngle: 0.32,   // Inclinaison de vue perspective (cosinus d'orbite)
@@ -286,9 +288,28 @@
     lastFrameTime: performance.now(),
     fps: 60,
 
+    setVoiceActivity(volume = 0, isSpeaking = false) {
+      const clamped = Number.isFinite(volume) ? Math.max(0, Math.min(1, Number(volume))) : 0;
+      // Attaque rapide et relâchement fluide (style réacteur Iron Man vivant)
+      this.voiceVolume = clamped > this.voiceVolume
+        ? this.voiceVolume * 0.32 + clamped * 0.68
+        : this.voiceVolume * 0.80 + clamped * 0.20;
+      this.isUserSpeaking = Boolean(isSpeaking || clamped > 0.02);
+      if (this.isUserSpeaking && this.voiceState !== 'speaking') {
+        this.voiceState = 'listening';
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.dataset.voiceState = 'listening';
+        }
+      }
+    },
+
     setVoiceState(nextState) {
       const normalized = ['idle', 'listening', 'speaking'].includes(nextState) ? nextState : 'idle';
       this.voiceState = normalized;
+      if (normalized === 'idle') {
+        this.isUserSpeaking = false;
+        this.voiceVolume = 0;
+      }
       if (typeof document !== 'undefined' && document.body) {
         document.body.dataset.voiceState = normalized;
       }
@@ -640,24 +661,35 @@
       const cy = this.centerY;
       const now = typeof time === 'number' ? time : performance.now();
       const state = this.getVoiceState();
+      const vol = Math.max(0, Math.min(1, this.voiceVolume || 0));
+      const userTalking = Boolean(this.isUserSpeaking || vol > 0.02);
+      const voiceBoost = Math.min(0.65, vol * 2.8);
 
-      // Modulation dynamique selon l'état vocal ('idle' | 'listening' | 'speaking')
+      // Modulation dynamique selon l'état vocal ('idle' | 'listening' | 'speaking') + VU-mètre temps réel
       if (state === 'speaking') {
-        // Ondulation cinétique rapide au rythme de la parole (style sphère Jarvis)
-        this.sunPulse = 1.04 + Math.sin(now * 0.018) * 0.13 + Math.abs(Math.cos(now * 0.031)) * 0.08;
-        if (now - this.lastShockwaveTime > 220) {
+        // Quand MOCTAR répond : ondes de choc radiales synchronisées avec la lecture audio edge-tts
+        this.sunPulse = 1.04 + Math.sin(now * 0.018) * 0.13 + Math.abs(Math.cos(now * 0.031)) * 0.08 + voiceBoost * 0.35;
+        if (now - this.lastShockwaveTime > 200) {
           this.lastShockwaveTime = now;
           this.shockwaves.push({
             radius: 1.05,
-            alpha: 0.85,
+            alpha: 0.88,
             color: this.shockwaves.length % 2 === 0 ? 'rgba(94, 217, 236,' : 'rgba(255, 209, 102,'
           });
         }
-      } else if (state === 'listening') {
-        // Pulsation dynamique cyan/or d'écoute active
-        this.sunPulse = 1.02 + Math.sin(now * 0.008) * 0.11 + Math.cos(now * 0.016) * 0.04;
+      } else if (userTalking || state === 'listening') {
+        // Quand l'utilisateur parle : dilatation proportionnelle au volume RMS en temps réel (effet réacteur Iron Man)
+        this.sunPulse = 1.0 + voiceBoost + Math.sin(now * 0.01) * 0.04;
+        if (userTalking && vol > 0.05 && now - this.lastShockwaveTime > 170) {
+          this.lastShockwaveTime = now;
+          this.shockwaves.push({
+            radius: 1.02,
+            alpha: Math.min(0.92, 0.38 + vol * 2.2),
+            color: 'rgba(255, 209, 102,'
+          });
+        }
       } else {
-        // Respiration lente normale ('idle')
+        // En veille : pulsation calme et fluide
         this.sunPulse += 0.003 * this.sunPulseDir;
         if (this.sunPulse > 1.08) this.sunPulseDir = -1;
         if (this.sunPulse < 0.95) this.sunPulseDir = 1;
@@ -667,8 +699,8 @@
 
       // 1. Rayons coronaux tournants
       this.ctx.save();
-      const raySpeedMult = state === 'speaking' ? 3.8 : state === 'listening' ? 2.4 : 1.0;
-      const rayBoost = state === 'speaking' ? 1.45 : state === 'listening' ? 1.25 : 1.0;
+      const raySpeedMult = state === 'speaking' ? 3.8 : (userTalking || state === 'listening') ? (2.2 + vol * 5.0) : 1.0;
+      const rayBoost = state === 'speaking' ? 1.45 : (userTalking || state === 'listening') ? (1.2 + voiceBoost * 1.1) : 1.0;
       for (let i = 0; i < this.sunRays.length; i++) {
         const ray = this.sunRays[i];
         ray.angle += ray.speed * raySpeedMult;
@@ -676,14 +708,14 @@
         const rx = cx + Math.cos(ray.angle) * rLen;
         const ry = cy + Math.sin(ray.angle) * rLen;
 
-        if (state === 'listening' && i % 2 === 0) {
-          this.ctx.strokeStyle = `rgba(94, 217, 236, ${Math.min(0.9, ray.opacity * 0.65)})`;
+        if ((userTalking || state === 'listening') && i % 2 === 0) {
+          this.ctx.strokeStyle = `rgba(255, 215, 110, ${Math.min(0.95, ray.opacity * (0.65 + vol))})`;
         } else if (state === 'speaking' && i % 3 === 0) {
           this.ctx.strokeStyle = `rgba(94, 217, 236, ${Math.min(0.95, ray.opacity * 0.75)})`;
         } else {
           this.ctx.strokeStyle = `rgba(255, 200, 100, ${ray.opacity * (state === 'idle' ? 0.35 : 0.6)})`;
         }
-        this.ctx.lineWidth = state === 'speaking' ? 2.6 : state === 'listening' ? 2.2 : 2;
+        this.ctx.lineWidth = state === 'speaking' ? 2.6 : (userTalking || state === 'listening') ? (2.1 + vol * 2.5) : 2;
         this.ctx.beginPath();
         this.ctx.moveTo(cx + Math.cos(ray.angle) * baseR, cy + Math.sin(ray.angle) * baseR);
         this.ctx.lineTo(rx, ry);
@@ -691,13 +723,19 @@
       }
       this.ctx.restore();
 
-      // 2. Halo extérieur réactif
-      const haloRadius = baseR * (state === 'speaking' ? 4.2 : state === 'listening' ? 3.9 : 3.4);
-      const haloGrad = this.ctx.createRadialGradient(cx, cy, baseR * 0.4, cx, cy, haloRadius);
-      if (state === 'listening') {
-        haloGrad.addColorStop(0, 'rgba(94, 217, 236, 0.58)');
-        haloGrad.addColorStop(0.32, 'rgba(255, 205, 85, 0.36)');
-        haloGrad.addColorStop(0.68, 'rgba(94, 217, 236, 0.14)');
+      // 2. Halo doré extérieur réactif au volume RMS de la voix
+      const haloScale = state === 'speaking'
+        ? 4.2
+        : (userTalking || state === 'listening')
+          ? (3.6 + voiceBoost * 2.4)
+          : 3.4;
+      const haloRadius = baseR * haloScale;
+      const haloAlphaBoost = Math.min(0.38, vol * 1.4);
+      const haloGrad = this.ctx.createRadialGradient(cx, cy, baseR * 0.35, cx, cy, haloRadius);
+      if (userTalking || state === 'listening') {
+        haloGrad.addColorStop(0, `rgba(255, 218, 110, ${(0.55 + haloAlphaBoost).toFixed(3)})`);
+        haloGrad.addColorStop(0.32, `rgba(94, 217, 236, ${(0.34 + haloAlphaBoost * 0.7).toFixed(3)})`);
+        haloGrad.addColorStop(0.68, `rgba(255, 155, 45, ${(0.14 + haloAlphaBoost * 0.4).toFixed(3)})`);
         haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
       } else if (state === 'speaking') {
         haloGrad.addColorStop(0, 'rgba(255, 225, 130, 0.65)');
@@ -715,7 +753,7 @@
       this.ctx.arc(cx, cy, haloRadius, 0, Math.PI * 2);
       this.ctx.fill();
 
-      // 2b. Ondes de choc radiales (shockwaves) pendant la parole ('speaking')
+      // 2b. Ondes de choc radiales (shockwaves)
       if (this.shockwaves.length > 0) {
         for (let i = this.shockwaves.length - 1; i >= 0; i--) {
           const wave = this.shockwaves[i];
@@ -740,14 +778,14 @@
         cx - baseR * 0.25, cy - baseR * 0.25, baseR * 0.1,
         cx, cy, baseR
       );
-      if (state === 'listening') {
+      if (userTalking || state === 'listening') {
         sunGrad.addColorStop(0, '#ffffff');
-        sunGrad.addColorStop(0.25, '#bff6ff');
-        sunGrad.addColorStop(0.6, '#ffd166');
-        sunGrad.addColorStop(0.88, '#1ca3de');
-        sunGrad.addColorStop(1, '#0b5278');
-        this.ctx.shadowColor = '#5ed9ec';
-        this.ctx.shadowBlur = 42;
+        sunGrad.addColorStop(0.25, '#fff4b8');
+        sunGrad.addColorStop(0.58, '#ffd166');
+        sunGrad.addColorStop(0.86, '#5ed9ec');
+        sunGrad.addColorStop(1, '#d96b00');
+        this.ctx.shadowColor = userTalking ? '#ffd166' : '#5ed9ec';
+        this.ctx.shadowBlur = 42 + Math.round(vol * 55);
       } else if (state === 'speaking') {
         sunGrad.addColorStop(0, '#ffffff');
         sunGrad.addColorStop(0.22, '#fff6bf');
@@ -772,26 +810,26 @@
       this.ctx.fill();
       this.ctx.shadowBlur = 0;
 
-      // 4. Anneaux holographiques autour du soleil MOCTAR
-      this.ctx.strokeStyle = state === 'listening'
-        ? 'rgba(94, 217, 236, 0.85)'
+      // 4. Anneaux holographiques et VU-mètre autour du soleil MOCTAR
+      this.ctx.strokeStyle = (userTalking || state === 'listening')
+        ? 'rgba(255, 209, 102, 0.92)'
         : state === 'speaking'
-          ? 'rgba(255, 209, 102, 0.9)'
+          ? 'rgba(94, 217, 236, 0.92)'
           : 'rgba(94, 217, 236, 0.4)';
-      this.ctx.lineWidth = state === 'idle' ? 1.4 : 2.0;
+      this.ctx.lineWidth = state === 'idle' && !userTalking ? 1.4 : (2.0 + vol * 2.5);
       this.ctx.setLineDash([4, 8]);
       this.ctx.beginPath();
-      this.ctx.arc(cx, cy, baseR * 1.35, 0, Math.PI * 2);
+      this.ctx.arc(cx, cy, baseR * (1.35 + voiceBoost * 0.35), 0, Math.PI * 2);
       this.ctx.stroke();
 
-      if (state === 'listening' || state === 'speaking') {
+      if (userTalking || state === 'listening' || state === 'speaking') {
         this.ctx.strokeStyle = state === 'speaking'
           ? 'rgba(94, 217, 236, 0.78)'
-          : 'rgba(255, 209, 102, 0.72)';
-        this.ctx.lineWidth = 1.5;
+          : 'rgba(255, 209, 102, 0.82)';
+        this.ctx.lineWidth = 1.6 + vol * 2.0;
         this.ctx.setLineDash([8, 6]);
         this.ctx.beginPath();
-        this.ctx.arc(cx, cy, baseR * (1.62 + Math.sin(now * 0.012) * 0.08), 0, Math.PI * 2);
+        this.ctx.arc(cx, cy, baseR * (1.62 + voiceBoost * 0.55 + Math.sin(now * 0.012) * 0.08), 0, Math.PI * 2);
         this.ctx.stroke();
       }
       this.ctx.setLineDash([]);
@@ -1829,6 +1867,7 @@
     QuantumNexus.lastTime = now;
   });
 
+  window.SolarEngine = SolarEngine;
   window.CosmosEngine = {
     ModalManager,
     SolarEngine,

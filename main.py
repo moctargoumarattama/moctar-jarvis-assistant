@@ -620,6 +620,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(BASE_DIR / "static" / "manifest.webmanifest", media_type="application/manifest+json")
 
     @application.get("/service-worker.js", include_in_schema=False)
+    @application.get("/sw.js", include_in_schema=False)
     async def pwa_worker():
         return FileResponse(BASE_DIR / "static" / "service-worker.js", media_type="application/javascript",
                             headers={"Service-Worker-Allowed": "/"})
