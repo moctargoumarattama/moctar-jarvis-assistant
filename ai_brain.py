@@ -1900,15 +1900,21 @@ def build_live_system_context(runtime: Any = None) -> str:
     )
 
 
+_FAST_VOICE_SESSION_TURNS: dict[str, list[dict[str, str]]] = {}
+
+
 def voice_fast_llm_reply(
     prompt: str,
     system_prompt: str | None = None,
     runtime: Any = None,
+    session_id: str | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> str:
     """Cerveau vocal ultra-rapide (< 200 ms) via Groq llama-3.3-70b-versatile.
 
-    Injecte en temps réel le contexte vivant du Dell M4800 et bascule
-    sur runtime.ai_brain.chat en fallback automatique si GROQ_API_KEY est absente ou en échec.
+    Injecte en temps réel le contexte vivant du Dell M4800, la mémoire multi-tours
+    (derniers échanges), les préférences permanentes et le savoir web factuel.
+    Bascule sur runtime.ai_brain.chat en fallback automatique si GROQ_API_KEY est absente ou en échec.
     """
     groq_api_key = (
         os.environ.get("GROQ_API_KEY", "")
@@ -1918,17 +1924,81 @@ def voice_fast_llm_reply(
         or ""
     ).strip()
     telemetry = build_live_system_context(runtime)
+
+    # 1. Extraction de la mémoire multi-tours (3 à 4 derniers échanges)
+    sess_key = session_id or getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
+    turn_messages: list[dict[str, str]] = []
+    if history is not None:
+        for item in history:
+            role = item.get("role")
+            content = str(item.get("content") or "").strip()
+            if role in ("user", "assistant") and content:
+                turn_messages.append({"role": role, "content": content})
+    elif runtime and getattr(runtime, "jarvis", None) and getattr(runtime.jarvis, "memory", None):
+        try:
+            raw_history = runtime.jarvis.memory.get_context_window(sess_key, max_turns=4)
+            for item in raw_history:
+                role = item.get("role")
+                content = str(item.get("content") or "").strip()
+                if role in ("user", "assistant") and content:
+                    if role == "user" and content == prompt:
+                        continue
+                    turn_messages.append({"role": role, "content": content})
+            turn_messages = turn_messages[-6:]
+        except Exception as hist_err:
+            logger.debug("Historique SQLite indisponible: %s", hist_err)
+
+    if not turn_messages and sess_key in _FAST_VOICE_SESSION_TURNS:
+        turn_messages = _FAST_VOICE_SESSION_TURNS[sess_key][-6:]
+
+    # 2. Récupération des préférences ou faits mémorisés de Moctar
+    memory_facts = ""
+    if runtime and getattr(runtime, "jarvis", None) and getattr(runtime.jarvis, "memory", None):
+        try:
+            memory_facts = runtime.jarvis.memory.get_system_context_snippet(prompt)
+        except Exception:
+            memory_facts = ""
+
+    # 3. Enrichissement Web en direct pour les questions factuelles / savoir
+    web_context = ""
+    try:
+        import web_search_service
+        if web_search_service.is_live_web_query(prompt):
+            web_context = web_search_service.fetch_live_web_context(prompt)
+    except Exception:
+        web_context = ""
+
     base_prompt = system_prompt or (
-        "Tu es M.O.C.T.A.R, l'intelligence artificielle avancée, OS personnel et copilote d'ingénierie de Moctar (style JARVIS suprême). "
-        "Tu t'exprimes toujours en français avec assurance, intelligence, culture et respect. "
+        "Tu es M.O.C.T.A.R, l'intelligence artificielle avancée, ami fidèle et copilote d'ingénierie de Moctar (style JARVIS suprême). "
+        "Tu t'exprimes toujours en français avec assurance, intelligence, culture, complicité et respect. "
+        "Tu dialogues naturellement comme avec un ami proche en tenant compte des derniers échanges pour ne pas te répéter. "
         "Pour une salutation simple, sois cordial, direct et bref (1 phrase). "
-        "Pour une question de savoir, recherche, culture, géographie ou sciences (par exemple des informations sur le Maroc, le Niger, ou la physique), "
+        "Pour une question de savoir, recherche, culture, actualité, géographie ou sciences, "
         "fournis une synthèse intelligente, structurée et captivante en 2 à 4 phrases fluides (environ 40 à 60 mots), "
         "en donnant directement les faits essentiels et pertinents. "
         "Ne dis jamais que tu es un simple assistant ou que tu n'as pas accès à internet. "
         "Termine naturellement par 'Moctar'."
     )
-    full_system_prompt = f"{base_prompt}\n\n{telemetry}"
+
+    prompt_sections = [base_prompt]
+    if memory_facts:
+        prompt_sections.append(memory_facts)
+    if web_context:
+        prompt_sections.append(web_context)
+    prompt_sections.append(telemetry)
+    full_system_prompt = "\n\n".join(s for s in prompt_sections if s)
+
+    # Construction ordonnée des messages avec historique multi-tours
+    messages: list[dict[str, str]] = [{"role": "system", "content": full_system_prompt}]
+    messages.extend(turn_messages)
+    messages.append({"role": "user", "content": prompt})
+
+    def _save_session_turn(assistant_reply: str) -> None:
+        if sess_key not in _FAST_VOICE_SESSION_TURNS:
+            _FAST_VOICE_SESSION_TURNS[sess_key] = []
+        _FAST_VOICE_SESSION_TURNS[sess_key].append({"role": "user", "content": prompt})
+        _FAST_VOICE_SESSION_TURNS[sess_key].append({"role": "assistant", "content": assistant_reply})
+        _FAST_VOICE_SESSION_TURNS[sess_key] = _FAST_VOICE_SESSION_TURNS[sess_key][-8:]
 
     if groq_api_key:
         # Essai 1 : SDK Groq officiel (utilisé si le package groq est installé)
@@ -1941,10 +2011,7 @@ def voice_fast_llm_reply(
                     start_t = time.perf_counter()
                     completion = client.chat.completions.create(
                         model=model_candidate,
-                        messages=[
-                            {"role": "system", "content": full_system_prompt},
-                            {"role": "user", "content": prompt},
-                        ],
+                        messages=messages,
                         temperature=0.3,
                         max_tokens=250,
                     )
@@ -1952,6 +2019,7 @@ def voice_fast_llm_reply(
                     duration_ms = int((time.perf_counter() - start_t) * 1000)
                     if reply:
                         logger.info("⚡ [GROQ SDK %s] (%dms): '%s'", model_candidate.upper(), duration_ms, reply)
+                        _save_session_turn(reply)
                         return reply
                 except Exception as model_err:
                     logger.warning("Groq SDK modèle %s a échoué: %s", model_candidate, model_err)
@@ -1972,10 +2040,7 @@ def voice_fast_llm_reply(
             for model_candidate in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
                 payload = {
                     "model": model_candidate,
-                    "messages": [
-                        {"role": "system", "content": full_system_prompt},
-                        {"role": "user", "content": prompt},
-                    ],
+                    "messages": messages,
                     "temperature": 0.3,
                     "max_tokens": 250,
                 }
@@ -1985,6 +2050,7 @@ def voice_fast_llm_reply(
                     reply = str(data["choices"][0]["message"]["content"] or "").strip()
                     if reply:
                         logger.info("⚡ [GROQ HTTP %s]: '%s'", model_candidate.upper(), reply)
+                        _save_session_turn(reply)
                         return reply
                 else:
                     logger.warning("Groq Chat API HTTP %s (%s): %s", resp.status_code, model_candidate, resp.text)
@@ -2004,9 +2070,12 @@ def voice_fast_llm_reply(
             chat_res = brain.chat(prompt, system_prompt=full_system_prompt)
             reply = str(chat_res.get("content") or "").strip()
             if reply and not chat_res.get("fallback_courtesy"):
+                _save_session_turn(reply)
                 return reply
         except Exception as exc:
             logger.warning("Repli ai_brain a échoué: %s", exc)
 
-    return "À vos ordres Moctar, je suis en ligne et tous les systèmes sont opérationnels."
+    fallback_rep = "À vos ordres Moctar, je suis en ligne et tous les systèmes sont opérationnels."
+    _save_session_turn(fallback_rep)
+    return fallback_rep
 

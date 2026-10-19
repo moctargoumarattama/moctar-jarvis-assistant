@@ -199,8 +199,40 @@ def execute_autonomous_task(
             "task_category": "identity",
         }
 
-    # 3. RECHERCHE GOOGLE
-    google_match = re.search(r"^(?:cherche|recherche)\s+sur\s+google\s+(.+)$", norm) or re.search(r"^(?:cherche|recherche)\s+(.+)\s+sur\s+google$", norm)
+    # 2.5. MÉTÉO EN DIRECT & PRÉVISIONS INSTANTANÉES (OPEN-METEO)
+    is_weather = (
+        any(k in norm for k in [
+            "meteo", "météo", "quel temps fait il", "quel temps fait-il",
+            "temperature dehors", "température extérieure", "temperature exterieure",
+            "est ce qu il pleut", "est-ce qu'il pleut", "pleut il", "pleut-il",
+            "prevision meteo", "prévision météo", "fait il beau", "fait-il beau",
+        ])
+        or (
+            bool(re.search(r"\b(?:temps|temp[ée]rature)\s+[aà]\s+[a-zA-ZÀ-ÿ]", norm))
+            and not any(w in norm for w in ("cpu", "ram", "serveur", "machine", "dell", "disque", "processeur"))
+        )
+    )
+    if is_weather:
+        import weather_service
+        city = weather_service.extract_city_from_query(raw_query)
+        target_day = "demain" if "demain" in norm else "today"
+        report = weather_service.get_weather_report(city=city, target_day=target_day)
+        oral_reply = str(report.get("oral_text") or f"Données météo indisponibles pour {city}, Moctar.")
+        tools_used.append({"tool": "get_weather", "arguments": {"city": city, "target_day": target_day}, "success": report.get("success", False)})
+        return {
+            "handled": True,
+            "reply": oral_reply,
+            "tools_used": tools_used,
+            "task_category": "weather",
+        }
+
+    # 3. RECHERCHE GOOGLE & NAVIGATION WEB
+    google_match = (
+        re.search(r"^(?:cherche|recherche)\s+(?:sur\s+(?:google|internet|le\s+web|le\s+net))\s+(.+)$", norm)
+        or re.search(r"^(?:cherche|recherche)\s+(.+)\s+(?:sur\s+(?:google|internet|le\s+web|le\s+net))$", norm)
+        or re.search(r"^(?:cherche|recherche)\s+sur\s+google\s+(.+)$", norm)
+        or re.search(r"^(?:cherche|recherche)\s+(.+)\s+sur\s+google$", norm)
+    )
     if google_match:
         query = google_match.group(1).strip()
         if query:
@@ -216,6 +248,27 @@ def execute_autonomous_task(
                 "title": title,
                 "tools_used": tools_used,
                 "task_category": "web_nav",
+            }
+
+    # RECHERCHE DE SAVOIR FACTUEL EN DIRECT (DUCKDUCKGO / WIKIPEDIA)
+    info_match = re.search(r"^(?:cherche|recherche)\s+(?:des\s+infos|des\s+informations|sur\s+l['’]actualit[ée]\s+de|les\s+derni[èe]res\s+nouvelles\s+de)\s+(.+)$", norm)
+    if info_match:
+        import web_search_service
+        subj = info_match.group(1).strip()
+        snippets = web_search_service.search_duckduckgo_snippets(subj, max_results=2)
+        if not snippets:
+            wiki = web_search_service.search_wikipedia_summary(subj)
+            if wiki:
+                snippets = [wiki]
+        if snippets:
+            summary = " ".join(snippets[:2])
+            if len(summary) > 280:
+                summary = summary[:277] + "..."
+            return {
+                "handled": True,
+                "reply": f"🔍 Informations en direct sur {subj} : {summary} Moctar.",
+                "tools_used": [{"tool": "web_search_instant", "arguments": {"query": subj}, "success": True}],
+                "task_category": "web_search",
             }
 
     # 4. YOUTUBE & MUSIQUE DÉTERMINISTE

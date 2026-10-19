@@ -223,3 +223,17 @@ def search_youtube(query):
     if status.startswith("Impossible"):
         return f"Impossible de lancer la recherche YouTube : {status.split(': ', 1)[-1]}"
     return f"Recherche YouTube pour {query}. {status}"
+
+
+def get_weather(city: str = "Niamey", target_day: str = "today") -> str:
+    """Récupère les informations météorologiques en direct et prévisions pour une ville via Open-Meteo."""
+    import weather_service
+    res = weather_service.get_weather_report(city=city, target_day=target_day)
+    return str(res.get("oral_text") or f"Données météo indisponibles pour {city}.")
+
+
+def search_web_instant(query: str) -> str:
+    """Recherche des faits ou des informations récentes sur le web en direct."""
+    import web_search_service
+    ctx = web_search_service.fetch_live_web_context(query)
+    return ctx if ctx else f"Aucune information récente trouvée pour '{query}'."

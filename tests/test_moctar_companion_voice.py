@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import io
+import json
 import os
 import struct
 import tempfile
@@ -742,6 +743,136 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertEqual(data_yt["action"], "open_browser")
             self.assertIn("youtube.com/results?search_query=", data_yt["url"])
             self.assertIn("Coran", data_yt["url"])
+
+
+    def test_weather_service_open_meteo_report_and_caching(self) -> None:
+        """Vérifie le connecteur météo Open-Meteo, le géocodage et la mise en cache."""
+        import weather_service
+
+        # 1. Extraction de la ville
+        self.assertEqual(weather_service.extract_city_from_query("quel temps fait-il à Paris ?"), "Paris")
+        self.assertEqual(weather_service.extract_city_from_query("météo à Casablanca"), "Casablanca")
+        self.assertEqual(weather_service.extract_city_from_query("donne-moi la météo"), "Niamey")
+
+        # 2. Rapport météo
+        fake_payload = {
+            "current": {
+                "temperature_2m": 31.4,
+                "apparent_temperature": 33.0,
+                "relative_humidity_2m": 38,
+                "wind_speed_10m": 12.0,
+                "weather_code": 0,
+            },
+            "daily": {
+                "weather_code": [0, 1],
+                "temperature_2m_max": [39.0, 38.0],
+                "temperature_2m_min": [25.0, 24.0],
+            },
+        }
+        mock_resp = Mock()
+        mock_resp.read.return_value = json.dumps(fake_payload).encode("utf-8")
+        mock_resp.__enter__ = Mock(return_value=mock_resp)
+        mock_resp.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            report = weather_service.get_weather_report("Niamey")
+            self.assertTrue(report["success"])
+            self.assertEqual(report["city"], "Niamey")
+            self.assertEqual(report["country"], "Niger")
+            self.assertIn("31°C", report["oral_text"])
+            self.assertIn("ciel totalement dégagé", report["oral_text"])
+            self.assertTrue(report["oral_text"].endswith("Moctar."))
+
+            # Deuxième appel immédiat : vérification de la lecture en cache
+            cached_report = weather_service.get_weather_report("Niamey")
+            self.assertTrue(cached_report["success"])
+            self.assertEqual(cached_report["oral_text"], report["oral_text"])
+
+    def test_web_search_service_factual_retrieval(self) -> None:
+        """Vérifie l'enrichissement par recherche web (DuckDuckGo et Wikipédia) et la détection."""
+        import web_search_service
+
+        # Détection de requêtes nécessitant le web
+        self.assertTrue(web_search_service.is_live_web_query("cherche sur le web le vainqueur du match"))
+        self.assertTrue(web_search_service.is_live_web_query("qui est Elon Musk"))
+        self.assertTrue(web_search_service.is_live_web_query("qu'est-ce que l'énergie photovoltaïque"))
+        self.assertFalse(web_search_service.is_live_web_query("bonjour"))
+
+        # Extraction de résumé Wikipédia mocké
+        wiki_data = {"extract": "Niamey est la capitale et la plus grande ville du Niger."}
+        mock_resp = Mock()
+        mock_resp.read.return_value = json.dumps(wiki_data).encode("utf-8")
+        mock_resp.__enter__ = Mock(return_value=mock_resp)
+        mock_resp.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            summary = web_search_service.search_wikipedia_summary("qui est Niamey")
+            self.assertEqual(summary, "Niamey est la capitale et la plus grande ville du Niger.")
+
+    def test_voice_fast_llm_reply_multi_turn_history_injection(self) -> None:
+        """Vérifie que l'historique multi-tours (3-4 messages précédents) est injecté dans le payload Groq."""
+        import ai_brain
+
+        fake_resp = Mock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {
+            "choices": [{"message": {"content": "Elle compte environ 1,5 million d'habitants, Moctar."}}],
+        }
+
+        prior_history = [
+            {"role": "user", "content": "Quelle est la capitale du Niger ?"},
+            {"role": "assistant", "content": "C'est Niamey, Moctar."},
+        ]
+
+        with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test_key"}), patch(
+            "requests.post", return_value=fake_resp
+        ) as post_mock:
+            reply = ai_brain.voice_fast_llm_reply(
+                "Combien d'habitants y vivent ?",
+                history=prior_history,
+            )
+            self.assertEqual(reply, "Elle compte environ 1,5 million d'habitants, Moctar.")
+            post_mock.assert_called_once()
+            payload = post_mock.call_args.kwargs["json"]
+            msgs = payload["messages"]
+
+            # System message en 0
+            self.assertEqual(msgs[0]["role"], "system")
+            # Tour 1 utilisateur
+            self.assertEqual(msgs[1]["role"], "user")
+            self.assertEqual(msgs[1]["content"], "Quelle est la capitale du Niger ?")
+            # Tour 1 assistant
+            self.assertEqual(msgs[2]["role"], "assistant")
+            self.assertEqual(msgs[2]["content"], "C'est Niamey, Moctar.")
+            # Tour 2 (question actuelle)
+            self.assertEqual(msgs[3]["role"], "user")
+            self.assertEqual(msgs[3]["content"], "Combien d'habitants y vivent ?")
+
+    def test_voice_interact_executes_autonomous_weather_report(self) -> None:
+        """Vérifie que la météo est exécutée en tâche autonome ultra-rapide sans passer par le LLM."""
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 2000, -2000, 2000, -2000))
+
+        with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Moctar quel temps fait-il à Niamey"), patch(
+            "weather_service.get_weather_report",
+            return_value={
+                "success": True,
+                "city": "Niamey",
+                "country": "Niger",
+                "temperature": 32.0,
+                "oral_text": "À Niamey, le ciel est dégagé avec 32°C actuellement, Moctar.",
+            },
+        ):
+            resp = self.client.post(
+                "/api/voice/interact",
+                content=wav_bytes,
+                headers={"Content-Type": "audio/wav"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertFalse(data["ignored"])
+            self.assertIn("32°C", data["reply_text"])
+            self.assertTrue(data["reply_text"].endswith("Moctar."))
+            self.assertIsNotNone(data["audio_url"])
 
 
 if __name__ == "__main__":

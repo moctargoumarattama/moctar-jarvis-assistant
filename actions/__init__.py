@@ -55,9 +55,11 @@ from .system_actions import (
 
 # 4. Web Actions
 from .web_actions import (
+    get_weather,
     open_site,
     open_url_smart,
     search_google,
+    search_web_instant,
     search_youtube,
 )
 
@@ -139,6 +141,8 @@ TOOL_DISPATCHER: Dict[str, Callable[..., Any]] = {
     "open_url_smart": open_url_smart,
     "search_google": search_google,
     "search_youtube": search_youtube,
+    "get_weather": get_weather,
+    "search_web_instant": search_web_instant,
 
     # Music Actions
     "play_music": play_music,
