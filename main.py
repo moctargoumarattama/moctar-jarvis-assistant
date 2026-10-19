@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sse_starlette.sse import EventSourceResponse
 
+import autonomous_library
 import collector
 import voice_transcribe
 from ai_brain import build_live_system_context, get_cpu_temperature_celsius, voice_fast_llm_reply
@@ -1233,79 +1234,127 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "thought_chain": ["Commande locale instantanée sans LLM (0ms)"],
                 "fast_path": True,
             }
-        elif is_conversational_fast_path(command_text) and (
-            os.environ.get("GROQ_API_KEY")
-            or os.environ.get("NOC_GROQ_API_KEY")
-            or getattr(getattr(runtime, "settings", None), "groq_api_key", None)
-            or getattr(runtime, "ai_brain", None)
-        ):
-            display_user_text = command_text
-            LOGGER.info("⚡ [VOICE FAST-PATH]: Routage conversationnel Groq Llama-3.3-70B (< 200ms) pour '%s'", command_text)
+        else:
+            is_devops_service = any(w in command_text.lower() for w in ("service", "services", "docker", "vps", "systemctl", "redemarre", "redémarre", "journalctl"))
             try:
-                raw_reply = await asyncio.to_thread(
-                    voice_fast_llm_reply,
+                db_path = getattr(getattr(runtime, "jarvis", None), "db_path", None)
+                session_id = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
+                if is_devops_service:
+                    autonomous_res = {"handled": False}
+                else:
+                    autonomous_res = autonomous_library.execute_autonomous_task(
+                        command_text,
+                        session_id=session_id,
+                        db_path=db_path,
+                    )
+            except Exception as auto_exc:
+                LOGGER.warning("Erreur lors de l'exécution de la tâche autonome : %s", auto_exc)
+                autonomous_res = {"handled": False}
+
+            if autonomous_res.get("handled") is True:
+                display_user_text = command_text
+                raw_reply = str(autonomous_res.get("reply") or "").strip()
+                if not re.search(r"\bmoctar[.!?]?$", raw_reply, re.IGNORECASE):
+                    raw_reply = f"{raw_reply.rstrip('.')} Moctar."
+                reply_text = raw_reply
+                cat = autonomous_res.get("task_category") or "locale"
+                LOGGER.info(
+                    "⚡ [VOICE AUTONOMOUS ACTION (0ms)]: '%s' -> '%s' (cat=%s, action=%s, url=%s)",
                     command_text,
-                    VOICE_FAST_SYSTEM_PROMPT,
-                    runtime,
+                    reply_text,
+                    cat,
+                    autonomous_res.get("action"),
+                    autonomous_res.get("url"),
                 )
-                reply_text = str(raw_reply or "À vos ordres Moctar.").strip()
-                if not re.search(r"\bmoctar[.!?]?$", reply_text, re.IGNORECASE):
-                    reply_text = f"{reply_text.rstrip('.')} Moctar."
                 agent_result = {
                     "status": "success",
                     "reply": reply_text,
-                    "tools_used": [],
-                    "thought_chain": ["Cerveau vocal ultra-rapide Groq Llama-3.3-70B (< 200ms)"],
+                    "action": autonomous_res.get("action"),
+                    "url": autonomous_res.get("url"),
+                    "title": autonomous_res.get("title"),
+                    "tools_used": autonomous_res.get("tools_used", []),
+                    "thought_chain": [f"Action locale autonome exécutée ({cat}) (0ms)"],
                     "fast_path": True,
                 }
                 if runtime.jarvis and getattr(runtime.jarvis, "memory", None):
                     try:
-                        session_id = getattr(runtime.jarvis, "active_session_id", "session_voice")
                         runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
                         runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
                     except Exception:
                         pass
-            except Exception as exc:
-                LOGGER.warning("Erreur fast-path conversationnel : %s", exc)
-                if runtime.jarvis:
-                    agent_result = await runtime.jarvis.execute_prompt_async(
-                        user_input=command_text,
-                        source="web_voice",
+            elif is_conversational_fast_path(command_text) and (
+                os.environ.get("GROQ_API_KEY")
+                or os.environ.get("NOC_GROQ_API_KEY")
+                or getattr(getattr(runtime, "settings", None), "groq_api_key", None)
+                or getattr(runtime, "ai_brain", None)
+            ):
+                display_user_text = command_text
+                LOGGER.info("⚡ [VOICE FAST-PATH]: Routage conversationnel Groq Llama-3.3-70B (< 200ms) pour '%s'", command_text)
+                try:
+                    raw_reply = await asyncio.to_thread(
+                        voice_fast_llm_reply,
+                        command_text,
+                        VOICE_FAST_SYSTEM_PROMPT,
+                        runtime,
                     )
+                    reply_text = str(raw_reply or "À vos ordres Moctar.").strip()
+                    if not re.search(r"\bmoctar[.!?]?$", reply_text, re.IGNORECASE):
+                        reply_text = f"{reply_text.rstrip('.')} Moctar."
+                    agent_result = {
+                        "status": "success",
+                        "reply": reply_text,
+                        "tools_used": [],
+                        "thought_chain": ["Cerveau vocal ultra-rapide Groq Llama-3.3-70B (< 200ms)"],
+                        "fast_path": True,
+                    }
+                    if runtime.jarvis and getattr(runtime.jarvis, "memory", None):
+                        try:
+                            session_id = getattr(runtime.jarvis, "active_session_id", "session_voice")
+                            runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
+                            runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
+                        except Exception:
+                            pass
+                except Exception as exc:
+                    LOGGER.warning("Erreur fast-path conversationnel : %s", exc)
+                    if runtime.jarvis:
+                        agent_result = await runtime.jarvis.execute_prompt_async(
+                            user_input=command_text,
+                            source="web_voice",
+                        )
+                    else:
+                        agent_result = {
+                            "status": "error",
+                            "reply": "Je reste à votre écoute Moctar.",
+                        }
+                    reply_text = str(
+                        agent_result.get("reply")
+                        or agent_result.get("response")
+                        or "Bien reçu, Moctar."
+                    ).strip()
+            else:
+                display_user_text = command_text
+                if runtime.jarvis:
+                    try:
+                        agent_result = await runtime.jarvis.execute_prompt_async(
+                            user_input=command_text,
+                            source="web_voice",
+                        )
+                    except Exception as exc:
+                        LOGGER.warning("Erreur AgentCore lors de /api/voice/interact : %s", exc)
+                        agent_result = {
+                            "status": "error",
+                            "reply": "Je suis à l'écoute Moctar, mais une erreur interne est survenue.",
+                        }
                 else:
                     agent_result = {
-                        "status": "error",
-                        "reply": "Je reste à votre écoute Moctar.",
+                        "status": "offline",
+                        "reply": "Je suis en ligne Moctar, mais le module AgentCore n'est pas initialisé.",
                     }
                 reply_text = str(
                     agent_result.get("reply")
                     or agent_result.get("response")
                     or "Bien reçu, Moctar."
                 ).strip()
-        else:
-            display_user_text = command_text
-            if runtime.jarvis:
-                try:
-                    agent_result = await runtime.jarvis.execute_prompt_async(
-                        user_input=command_text,
-                        source="web_voice",
-                    )
-                except Exception as exc:
-                    LOGGER.warning("Erreur AgentCore lors de /api/voice/interact : %s", exc)
-                    agent_result = {
-                        "status": "error",
-                        "reply": "Je suis à l'écoute Moctar, mais une erreur interne est survenue.",
-                    }
-            else:
-                agent_result = {
-                    "status": "offline",
-                    "reply": "Je suis en ligne Moctar, mais le module AgentCore n'est pas initialisé.",
-                }
-            reply_text = str(
-                agent_result.get("reply")
-                or agent_result.get("response")
-                or "Bien reçu, Moctar."
-            ).strip()
 
         audio_url: str | None = None
         try:

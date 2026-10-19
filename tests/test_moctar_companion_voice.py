@@ -669,5 +669,80 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
         )
 
 
+    def test_voice_interact_executes_autonomous_open_browser(self) -> None:
+        """Vérifie que 'Yo Moctar ouvre YouTube' exécute immédiatement open_site sans LLM et renvoie action='open_browser' avec l'URL."""
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 2000, -2000, 2000, -2000))
+        with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Moctar ouvre YouTube"):
+            resp = self.client.post(
+                "/api/voice/interact",
+                content=wav_bytes,
+                headers={"Content-Type": "audio/wav"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertTrue(data["ok"])
+            self.assertFalse(data["ignored"])
+            self.assertTrue(data["fast_path"])
+            self.assertEqual(data["action"], "open_browser")
+            self.assertEqual(data["url"], "https://www.youtube.com")
+            self.assertIn("YouTube", data["reply_text"])
+            self.assertTrue(data["reply_text"].endswith("Moctar."))
+
+    def test_voice_interact_executes_autonomous_add_todo_and_list(self) -> None:
+        """Vérifie que les ordres d'ajout et consultation de tâches s'exécutent réellement dans SQLite/JSON."""
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 2000, -2000, 2000, -2000))
+        with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Moctar ajoute la tâche vérifier les panneaux solaires"):
+            resp = self.client.post(
+                "/api/voice/interact",
+                content=wav_bytes,
+                headers={"Content-Type": "audio/wav"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertTrue(data["ok"])
+            self.assertIn("vérifier les panneaux solaires", data["reply_text"])
+            self.assertTrue(data["reply_text"].endswith("Moctar."))
+
+        with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Moctar liste mes tâches"):
+            resp_list = self.client.post(
+                "/api/voice/interact",
+                content=wav_bytes,
+                headers={"Content-Type": "audio/wav"},
+            )
+            self.assertEqual(resp_list.status_code, 200)
+            data_list = resp_list.json()
+            self.assertTrue(data_list["ok"])
+            self.assertIn("vérifier les panneaux solaires", data_list["reply_text"])
+
+    def test_voice_interact_executes_autonomous_google_and_youtube_searches(self) -> None:
+        """Vérifie que la recherche Google et YouTube renvoient l'action 'open_browser' avec l'URL de recherche correspondante."""
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 2000, -2000, 2000, -2000))
+        # Google
+        with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Moctar cherche sur Google le prix de l'onduleur"):
+            resp = self.client.post(
+                "/api/voice/interact",
+                content=wav_bytes,
+                headers={"Content-Type": "audio/wav"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(data["action"], "open_browser")
+            self.assertIn("google.com/search?q=", data["url"])
+            self.assertIn("prix", data["url"])
+
+        # YouTube Musique
+        with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Moctar mets du Coran sur YouTube"):
+            resp_yt = self.client.post(
+                "/api/voice/interact",
+                content=wav_bytes,
+                headers={"Content-Type": "audio/wav"},
+            )
+            self.assertEqual(resp_yt.status_code, 200)
+            data_yt = resp_yt.json()
+            self.assertEqual(data_yt["action"], "open_browser")
+            self.assertIn("youtube.com/results?search_query=", data_yt["url"])
+            self.assertIn("Coran", data_yt["url"])
+
+
 if __name__ == "__main__":
     unittest.main()

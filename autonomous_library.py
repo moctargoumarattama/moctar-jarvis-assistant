@@ -18,6 +18,8 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 import unicodedata
 
+from urllib.parse import quote_plus
+
 import actions
 from actions.web_actions import resolve_site_url
 import config
@@ -197,14 +199,102 @@ def execute_autonomous_task(
             "task_category": "identity",
         }
 
-    # 3. OUVERTURE DE SITES OU APPLICATIONS (FAST-PATH UNIVERSEL)
+    # 3. RECHERCHE GOOGLE
+    google_match = re.search(r"^(?:cherche|recherche)\s+sur\s+google\s+(.+)$", norm) or re.search(r"^(?:cherche|recherche)\s+(.+)\s+sur\s+google$", norm)
+    if google_match:
+        query = google_match.group(1).strip()
+        if query:
+            url = f"https://www.google.com/search?q={quote_plus(query)}"
+            title = f"Recherche Google: {query}"
+            actions.execute_tool("search_google", {"query": query})
+            tools_used.append({"tool": "search_google", "arguments": {"query": query}, "success": True})
+            return {
+                "handled": True,
+                "reply": f"🔍 J'ai lancé la recherche Google pour '{query}' dans votre navigateur, Moctar.",
+                "action": "open_browser",
+                "url": url,
+                "title": title,
+                "tools_used": tools_used,
+                "task_category": "web_nav",
+            }
+
+    # 4. YOUTUBE & MUSIQUE DÉTERMINISTE
+    yt_search_match = re.search(r"^(?:cherche|recherche|trouve)\s+sur\s+youtube\s+(.+)$", norm) or re.search(r"^(?:cherche|recherche|trouve)\s+(.+)\s+sur\s+youtube$", norm)
+    is_play_music = (
+        bool(re.match(r"^(?:mets|met|joue|lance|ecoute)\s+(?:de\s+la\s+|du\s+|un\s+|une\s+|la\s+)?(?:musique|chanson|son|morceau|playlist|video|vidéo|coran)?", norm))
+        and any(k in norm for k in ("musique", "chanson", "son", "morceau", "playlist", "video", "vidéo", "coran", "rap", "rai", "jazz", "audio"))
+    ) or norm.startswith(("mets de la musique", "joue de la musique", "lance la musique", "mets du son", "mets du coran"))
+
+    if yt_search_match or is_play_music:
+        target_query = ""
+        if yt_search_match:
+            target_query = yt_search_match.group(1).strip()
+        else:
+            cleaned_m = raw_query
+            for pfx in [
+                "cherche sur youtube", "recherche sur youtube", "trouve sur youtube",
+                "mets sur youtube", "mets de la musique de", "mets de la musique", "mets la musique de",
+                "mets la musique", "mets la chanson de", "mets la chanson", "mets du son de", "mets du son",
+                "mets du coran", "joue de la musique de", "joue de la musique", "joue la musique de",
+                "joue la musique", "joue", "lance la musique de", "lance la musique", "mets",
+            ]:
+                if re.search(rf"^{pfx}\s*", cleaned_m, flags=re.IGNORECASE):
+                    cleaned_m = re.sub(rf"^{pfx}\s*", "", cleaned_m, flags=re.IGNORECASE).strip()
+                    break
+            target_query = re.sub(r"\s+sur\s+youtube$", "", cleaned_m, flags=re.IGNORECASE).strip()
+
+        if not target_query or target_query.lower() in ("de la musique", "musique", "du son", "un son", "audio"):
+            target_query = "musique relaxante"
+        elif norm.startswith("mets du coran") or norm == "coran":
+            target_query = "Coran sourate Ar-Rahman recitation apaisante"
+
+        url = f"https://www.youtube.com/results?search_query={quote_plus(target_query)}"
+        title = f"YouTube: {target_query}"
+        actions.execute_tool("search_youtube", {"query": target_query})
+        tools_used.append({"tool": "search_youtube", "arguments": {"query": target_query}, "success": True})
+        return {
+            "handled": True,
+            "reply": f"🎵 J'ai lancé '{target_query}' sur YouTube dans votre navigateur, Moctar.",
+            "action": "open_browser",
+            "url": url,
+            "title": title,
+            "tools_used": tools_used,
+            "task_category": "iot_music",
+        }
+
+    # CONTRÔLE DE LECTURE MUSICALE
+    if any(k in norm for k in ["coupe la musique", "pause musique", "mets en pause", "arrete la musique", "reprends la musique", "relance la musique", "morceau suivant", "chanson suivante"]):
+        action_type = "music_pause" if any(w in norm for w in ("pause", "coupe", "arrete")) else ("music_next" if "suivant" in norm else "music_resume")
+        res = actions.execute_tool("control_music", {"action": action_type})
+        tools_used.append({"tool": "control_music", "arguments": {"action": action_type}, "success": True})
+        msg = res.get("message") if isinstance(res, dict) else str(res)
+        return {"handled": True, "reply": f"⏯️ {msg}", "tools_used": tools_used, "task_category": "iot_music"}
+
+    # 5. OUVERTURE DE SITES OU APPLICATIONS (FAST-PATH UNIVERSEL)
     open_verbs = ("ouvre", "lance", "va sur", "ouve", "demarre", "start")
     if any(norm.startswith(v + " ") for v in open_verbs):
         for v in open_verbs:
             if norm.startswith(v + " "):
                 target = raw_query[len(v):].strip()
+                target_norm = _normalize(target)
+
+                # Application locale
+                if any(app in target_norm for app in ["terminal", "cmd", "invite de commande", "powershell", "calculatrice", "notepad", "bloc notes", "bloc-notes"]):
+                    app_res = actions.execute_tool("open_app", {"app_name": target})
+                    tools_used.append({"tool": "open_app", "arguments": {"app_name": target}, "success": bool(app_res.get("success"))})
+                    msg = app_res.get("message") if isinstance(app_res, dict) else str(app_res)
+                    return {"handled": True, "reply": f"🚀 {msg}", "tools_used": tools_used, "task_category": "system_tools"}
+
+                # Dossier local
+                if any(folder in target_norm for folder in ["dossier", "repertoire", "telechargements", "documents"]):
+                    folder_res = actions.execute_tool("open_folder", {"folder_path": target})
+                    tools_used.append({"tool": "open_folder", "arguments": {"folder_path": target}, "success": bool(folder_res.get("success"))})
+                    msg = folder_res.get("message") if isinstance(folder_res, dict) else str(folder_res)
+                    return {"handled": True, "reply": f"📁 {msg}", "tools_used": tools_used, "task_category": "system_tools"}
+
+                # Site Web
                 site_url, title = resolve_site_url(target)
-                exec_res = actions.execute_tool("open_site", {"target": target})
+                actions.execute_tool("open_site", {"target": target})
                 tools_used.append({"tool": "open_site", "arguments": {"target": target}, "success": True})
                 return {
                     "handled": True,
@@ -216,7 +306,22 @@ def execute_autonomous_task(
                     "task_category": "web_nav",
                 }
 
-    # 4. HEURE & DATE
+    # FERMETURE D'APPLICATION
+    if norm.startswith("ferme ") and not any(w in norm for w in ("musique", "son", "onglet", "session")):
+        app_target = re.sub(r"^ferme\s+(?:l['’]application\s+|l['’]app\s+)?", "", raw_query, flags=re.IGNORECASE).strip()
+        close_res = actions.execute_tool("close_app", {"app_name": app_target})
+        tools_used.append({"tool": "close_app", "arguments": {"app_name": app_target}, "success": bool(close_res.get("success"))})
+        msg = close_res.get("message") if isinstance(close_res, dict) else str(close_res)
+        return {"handled": True, "reply": f"🛑 {msg}", "tools_used": tools_used, "task_category": "system_tools"}
+
+    # CAPTURE D'ÉCRAN
+    if any(k in norm for k in ["capture d'ecran", "capture d ecran", "screenshot", "capture l'ecran", "capture l ecran"]):
+        cap_res = actions.execute_tool("capture_screenshot", {})
+        tools_used.append({"tool": "capture_screenshot", "arguments": {}, "success": bool(cap_res.get("success"))})
+        msg = cap_res.get("message") if isinstance(cap_res, dict) else str(cap_res)
+        return {"handled": True, "reply": f"📸 {msg}", "tools_used": tools_used, "task_category": "system_tools"}
+
+    # 6. HEURE & DATE
     if any(k in norm for k in ["heure", "quelle heure"]):
         res = actions.execute_tool("get_time_response", {})
         tools_used.append({"tool": "get_time_response", "arguments": {}, "success": True})
@@ -229,36 +334,49 @@ def execute_autonomous_task(
         msg = res.get("message") if isinstance(res, dict) else str(res)
         return {"handled": True, "reply": f"📅 {msg}", "tools_used": tools_used, "task_category": "system_tools"}
 
-    # 5. BATTERIE & VOLUME
+    # 7. BATTERIE & VOLUME
     if "batterie" in norm or "charge" in words:
         res = actions.execute_tool("get_battery_response", {})
         tools_used.append({"tool": "get_battery_response", "arguments": {}, "success": True})
         msg = res.get("message") if isinstance(res, dict) else str(res)
         return {"handled": True, "reply": f"🔋 {msg}", "tools_used": tools_used, "task_category": "system_tools"}
 
-    if any(k in norm for k in ["volume", "mute", "muet", "coupe le son", "monte le son", "baisse le son"]):
-        # Détection du niveau ou de l'action
+    if any(k in norm for k in ["volume", "mute", "muet", "coupe le son", "monte le son", "baisse le son", "remets le son", "retablis le son", "demute"]):
         match_pct = re.search(r"(\d+)\s*(?:%|pourcent)?", norm)
         pct = int(match_pct.group(1)) if match_pct else None
-        if "coupe" in norm or "muet" in norm or "mute" in norm:
+        if any(w in norm for w in ("coupe", "muet", "mute")):
             level = 0
+            rep = "🔇 Son coupé, Moctar."
+        elif any(w in norm for w in ("remets", "retablis", "demute")):
+            level = 50
+            rep = "🔊 Son rétabli à 50%, Moctar."
         elif pct is not None:
             level = pct
+            rep = f"🔊 Volume sonore ajusté à {level}%, Moctar."
         elif "monte" in norm:
             level = 80
+            rep = "🔊 Volume augmenté à 80%, Moctar."
         elif "baisse" in norm:
             level = 30
+            rep = "🔉 Volume baissé à 30%, Moctar."
         else:
             level = 50
+            rep = f"🔊 Volume sonore ajusté à {level}%, Moctar."
         res = actions.execute_tool("change_volume", {"level": level})
         tools_used.append({"tool": "change_volume", "arguments": {"level": level}, "success": True})
-        return {"handled": True, "reply": f"🔊 Volume sonore ajusté à {level}%.", "tools_used": tools_used, "task_category": "system_tools"}
+        return {"handled": True, "reply": rep, "tools_used": tools_used, "task_category": "system_tools"}
 
-    # 6. TÉLÉMÉTRIE MATÉRIELLE & INFRASTRUCTURE
-    is_telemetry = bool(words.intersection({
-        "etat", "statut", "status", "infrastructure", "systeme", "system",
-        "cpu", "ram", "disque", "stockage", "telemetrie", "ressource", "ressources", "materiel",
-    }))
+    # 8. TÉLÉMÉTRIE MATÉRIELLE & INFRASTRUCTURE
+    is_service_management = bool(words.intersection({"service", "services", "systemctl", "docker", "vps", "processus", "demon", "daemon", "restart", "redemarre", "redémarre"}))
+    is_telemetry = (
+        bool(words.intersection({
+            "cpu", "ram", "disque", "stockage", "telemetrie", "ressource", "ressources", "materiel",
+        }))
+        or (
+            bool(words.intersection({"etat", "statut", "status", "infrastructure", "systeme", "system"}))
+            and not is_service_management
+        )
+    ) and not is_service_management
     if is_telemetry:
         res = actions.execute_tool("get_system_telemetry", {})
         tools_used.append({"tool": "get_system_telemetry", "arguments": {}, "success": bool(res.get("success"))})
@@ -266,34 +384,47 @@ def execute_autonomous_task(
         report = _format_telemetry_report(res)
         return {"handled": True, "reply": report, "tools_used": tools_used, "task_category": "telemetry"}
 
-    # 7. TÂCHES & NOTES (PRODUCTIVITÉ)
-    if any(k in norm for k in ["liste mes taches", "liste les taches", "mes todos", "liste todo", "quoi faire", "programme"]):
+    # 9. TÂCHES & NOTES (PRODUCTIVITÉ)
+    if re.search(r"\b(?:liste\s+mes\s+t[aâ]ches|liste\s+les\s+t[aâ]ches|mes\s+todos|mes\s+t[aâ]ches|liste\s+todo|quoi\s+faire|programme|qu['’]\s*est[- ]ce\s+que\s+j['’]\s*ai\s+[aà]\s+faire|t[aâ]ches\s+du\s+jour|planning)\b", norm):
         res = actions.execute_tool("list_todos", {})
         tools_used.append({"tool": "list_todos", "arguments": {}, "success": bool(res.get("success"))})
         msg = res.get("message") if isinstance(res, dict) else str(res)
         return {"handled": True, "reply": f"📝 **Vos tâches en cours :**\n{msg}", "tools_used": tools_used, "task_category": "productivity"}
 
-    if norm.startswith("ajoute todo ") or norm.startswith("ajoute la tache ") or norm.startswith("ajoute une tache "):
-        task_text = re.sub(r"^(?:ajoute todo |ajoute la tache |ajoute une tache )", "", raw_query, flags=re.IGNORECASE).strip()
+    add_todo_match = re.search(r"^(?:ajoute\s+(?:la\s+t[aâ]che|une\s+t[aâ]che|todo|le\s+todo|[aà]\s+(?:mes\s+t[aâ]ches|ma\s+liste(?:\s+de\s+t[aâ]ches)?))|mets\s+dans\s+mes\s+t[aâ]ches)\s+(.+)$", raw_query, flags=re.IGNORECASE)
+    if add_todo_match:
+        task_text = add_todo_match.group(1).strip()
         res = actions.execute_tool("add_todo", {"content": task_text})
         tools_used.append({"tool": "add_todo", "arguments": {"content": task_text}, "success": bool(res.get("success"))})
         msg = res.get("message") if isinstance(res, dict) else str(res)
         return {"handled": True, "reply": f"✅ {msg}", "tools_used": tools_used, "task_category": "productivity"}
 
-    if norm.startswith("cree une note ") or norm.startswith("note que ") or norm.startswith("prends note "):
-        note_content = re.sub(r"^(?:cree une note |note que |prends note )", "", raw_query, flags=re.IGNORECASE).strip()
+    create_note_match = re.search(r"^(?:cr[ée]e\s+une\s+note|note\s+que|prends\s+note|enregistre\s+la\s+note|note\s+pour\s+plus\s+tard)\s+(.+)$", raw_query, flags=re.IGNORECASE)
+    if create_note_match:
+        note_content = create_note_match.group(1).strip()
         res = actions.execute_tool("create_note", {"title": f"Note du {datetime.now().strftime('%d/%m %H:%M')}", "content": note_content})
         tools_used.append({"tool": "create_note", "arguments": {"content": note_content}, "success": bool(res.get("success"))})
         msg = res.get("message") if isinstance(res, dict) else str(res)
         return {"handled": True, "reply": f"📌 {msg}", "tools_used": tools_used, "task_category": "productivity"}
 
-    if any(k in norm for k in ["mes rappels", "prochains rappels", "alertes"]):
+    if any(k in norm for k in ["mes rappels", "prochains rappels", "alertes", "alarmes"]):
         res = actions.execute_tool("get_upcoming_reminders", {})
         tools_used.append({"tool": "get_upcoming_reminders", "arguments": {}, "success": bool(res.get("success"))})
         msg = res.get("message") if isinstance(res, dict) else str(res)
         return {"handled": True, "reply": f"⏰ **Rappels programmés :**\n{msg}", "tools_used": tools_used, "task_category": "productivity"}
 
-    # 8. GÉNIE ÉNERGÉTIQUE & SOLAIRE
+    if norm.startswith(("rappelle moi ", "rappelle-moi ", "rappel moi ", "programme un rappel ", "mets un rappel ")):
+        try:
+            import intent_engine
+            slots = intent_engine.parse_reminder_slots(norm)
+            res = actions.execute_tool("schedule_reminder", slots)
+            tools_used.append({"tool": "schedule_reminder", "arguments": slots, "success": bool(res.get("success"))})
+            msg = res.get("message") if isinstance(res, dict) else str(res)
+            return {"handled": True, "reply": f"⏰ {msg}", "tools_used": tools_used, "task_category": "productivity"}
+        except Exception:
+            pass
+
+    # 10. GÉNIE ÉNERGÉTIQUE & SOLAIRE
     if any(k in norm for k in ["solaire", "panneaux solaires", "dimensionnement solaire"]):
         match_kwh = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:kwh|kw|wh)?", norm)
         kwh = float(match_kwh.group(1).replace(",", ".")) if match_kwh else 5.0
@@ -330,7 +461,7 @@ def execute_autonomous_task(
             "task_category": "energy",
         }
 
-    # 9. GIT & PROJETS
+    # 11. GIT & PROJETS
     if "git status" in norm or "statut git" in norm:
         res = actions.execute_tool("git_status", {})
         tools_used.append({"tool": "git_status", "arguments": {}, "success": bool(res.get("success"))})
@@ -349,7 +480,7 @@ def execute_autonomous_task(
         msg = res.get("message") if isinstance(res, dict) else str(res)
         return {"handled": True, "reply": f"📋 **Checklist de Maintenance :**\n{msg}", "tools_used": tools_used, "task_category": "git_dev"}
 
-    # 10. DOMOTIQUE IOT
+    # 12. DOMOTIQUE IOT
     if any(k in norm for k in ["iot", "domotique", "capteurs"]):
         res = actions.execute_tool("get_iot_status", {})
         tools_used.append({"tool": "get_iot_status", "arguments": {}, "success": bool(res.get("success"))})
