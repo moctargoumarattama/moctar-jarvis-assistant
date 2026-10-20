@@ -1900,6 +1900,68 @@ def build_live_system_context(runtime: Any = None) -> str:
 
 
 _FAST_VOICE_SESSION_TURNS: dict[str, list[dict[str, str]]] = {}
+_GROQ_MODELS_CACHE: tuple[float, list[str]] = (0.0, [])
+
+DEFAULT_PREFERRED_GROQ_MODELS: list[str] = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-70b-versatile",
+    "llama3-70b-8192",
+    "llama-3.1-8b-instant",
+    "llama3-8b-8192",
+    "mixtral-8x7b-32768",
+    "gemma2-9b-it",
+    "qwen-2.5-32b",
+    "llama-3.2-3b-preview",
+    "llama-3.2-1b-preview",
+]
+
+
+def get_available_groq_chat_models(api_key: str) -> list[str]:
+    """Interroge dynamiquement l'API Groq pour lister les modèles de chat actifs autorisés pour cette clé."""
+    global _GROQ_MODELS_CACHE
+    now = time.monotonic()
+    cached_t, cached_list = _GROQ_MODELS_CACHE
+    if cached_list and (now - cached_t < 1800.0):
+        return cached_list
+
+    candidates = list(DEFAULT_PREFERRED_GROQ_MODELS)
+    env_model = os.environ.get("GROQ_CHAT_MODEL", "").strip()
+    if env_model:
+        candidates.insert(0, env_model)
+
+    discovered: list[str] = []
+    if api_key:
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                "https://api.groq.com/openai/v1/models",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "User-Agent": "Jarvis-Moctar-Engine/1.0",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                if resp.status == 200:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    items = body.get("data", [])
+                    raw_ids = [m.get("id") for m in items if isinstance(m, dict) and m.get("id")]
+                    chat_ids = [
+                        i for i in raw_ids
+                        if not any(k in i.lower() for k in ("whisper", "guard", "embed", "tts", "audio", "moderation"))
+                    ]
+                    for pref in candidates:
+                        if pref in chat_ids and pref not in discovered:
+                            discovered.append(pref)
+                    for cid in chat_ids:
+                        if cid not in discovered:
+                            discovered.append(cid)
+                    logger.info("⚡ [GROQ DISCOVERY]: %d modèles de chat détectés (%s...)", len(discovered), discovered[:3])
+        except Exception as exc:
+            logger.debug("Découverte dynamique des modèles Groq indisponible (%s), repli sur la liste par défaut.", exc)
+
+    final_list = discovered or candidates
+    _GROQ_MODELS_CACHE = (now, final_list)
+    return final_list
 
 
 def voice_fast_llm_reply(
@@ -1909,7 +1971,7 @@ def voice_fast_llm_reply(
     session_id: str | None = None,
     history: list[dict[str, str]] | None = None,
 ) -> str:
-    """Cerveau vocal ultra-rapide (< 200 ms) via Groq llama-3.3-70b-versatile.
+    """Cerveau vocal ultra-rapide (< 200 ms) via Groq LLM (ou Gemini en repli fluide).
 
     Injecte en temps réel le contexte vivant du Dell M4800, la mémoire multi-tours
     (derniers échanges), les préférences permanentes et le savoir web factuel.
@@ -2002,12 +2064,15 @@ def voice_fast_llm_reply(
         _FAST_VOICE_SESSION_TURNS[sess_key] = _FAST_VOICE_SESSION_TURNS[sess_key][-8:]
 
     if groq_api_key:
+        discovered_models = get_available_groq_chat_models(groq_api_key)
+        models_to_try = [m for m in discovered_models if m][:4]
+
         # Essai 1 : SDK Groq officiel (utilisé si le package groq est installé)
         try:
             from groq import Groq  # type: ignore[import-not-found]
 
             client = Groq(api_key=groq_api_key, timeout=8.0)
-            for model_candidate in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
+            for model_candidate in models_to_try:
                 try:
                     start_t = time.perf_counter()
                     completion = client.chat.completions.create(
@@ -2038,7 +2103,7 @@ def voice_fast_llm_reply(
                 "Authorization": f"Bearer {groq_api_key}",
                 "Content-Type": "application/json",
             }
-            for model_candidate in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
+            for model_candidate in models_to_try:
                 payload = {
                     "model": model_candidate,
                     "messages": messages,

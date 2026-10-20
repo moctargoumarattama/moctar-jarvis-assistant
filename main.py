@@ -162,7 +162,7 @@ async def generate_cached_tts(
     return audio_bytes, cache_hit
 
 
-VOICE_SESSION_DURATION_SECONDS = 0.0
+VOICE_SESSION_DURATION_SECONDS = float(os.getenv("VOICE_SESSION_DURATION_SECONDS", "0.0"))
 VOICE_BUTLER_GREETINGS = (
     "À vos ordres Moctar, je vous écoute.",
     "Oui Moctar, je suis là.",
@@ -206,13 +206,42 @@ def _is_pure_filler_or_wake(text: str) -> bool:
     return all(tok in _VOICE_FILLER_WORDS for tok in tokens)
 
 
+def is_direct_voice_command(text: str) -> bool:
+    """Identifie les ordres opérationnels explicites exécutables directement sans mot de réveil préalable."""
+    if not text or len(text.strip()) < 3:
+        return False
+    norm = _strip_accents_1to1(text).lower().strip()
+    # 1. Bureau & Environnement de Travail
+    if any(k in norm for k in (
+        "au bureau", "mode bureau", "mets-toi a mon bureau", "mets-toi au bureau",
+        "mets toi a mon bureau", "mets toi au bureau", "mode travail", "au travail",
+        "espace de travail", "lance l'environnement", "lance le travail", "bonne bureau",
+        "ouvre le bureau", "ouvre mon bureau",
+    )):
+        return True
+    # 2. Heure & Date
+    if re.search(r"\b(?:quelle?\s+heure|il\s+est\s+quelle?\s+heure|donne\s+l['’]heure|quel\s+jour|quelle?\s+date|on\s+est\s+le\s+combien)\b", norm):
+        return True
+    # 3. Météo & Climat
+    if re.search(r"\b(?:m[ée]t[ée]o|quel\s+temps|quel\s+degr[ée]|combien\s+de\s+degr[ée]s?|pleut[- ]il|est[- ]ce\s+qu['’]il\s+pleut|il\s+fait\s+quel\s+degr[ée]|fait\s+quel\s+degr[ée])\b", norm):
+        return True
+    # 4. Multimédia & Audio
+    if re.search(r"\b(?:arr[êe]te\s+la\s+musique|stop\s+la\s+musique|pause\s+la\s+musique|coupe\s+le\s+son|mute|remets\s+le\s+son|monte\s+le\s+son|baisse\s+le\s+son)\b", norm):
+        return True
+    # 5. Gestion Système, Contexte & Organisation
+    if re.search(r"\b(?:briefing|o[uù]\s+en\s+est[- ]on|optimise\s+le\s+syst[èe]me|mode\s+optimisation|fin\s+de\s+journ[ée]e|bonne\s+nuit|liste\s+mes\s+t[aâ]ches|mes\s+todos)\b", norm):
+        return True
+    return False
+
+
 def extract_voice_interact_command(transcript: str, session_active: bool = False) -> tuple[bool, str, bool]:
     """Vérifie le mot-clé (tolérance phonétique totale partout dans la phrase) ou une session vocale ouverte.
 
     Prend en priorité le texte situé APRÈS le mot-clé.
     Si le texte avant n'est qu'une interjection et qu'il n'y a rien après (ex: 'au Mokhtar.'),
     retourne un appel de réveil pur (_WAKE_ONLY_SENTINEL).
-    Ignore toute transcription résiduelle de moins de 4 caractères.
+    Exécute également les ordres opérationnels directs sans mot-clé préalable.
+    Ignore toute transcription résiduelle de moins de 4 caractères hors commande reconnue.
     """
     filtered = voice_transcribe.filter_whisper_hallucinations(transcript)
     if not filtered:
@@ -242,6 +271,10 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
         if len(clean_text) < 4 or _is_pure_filler_or_wake(clean_text):
             return False, "", False
         return True, clean_text, False
+
+    clean_text = filtered.strip(" ,.:;!?-")
+    if clean_text and is_direct_voice_command(clean_text):
+        return True, clean_text, True
 
     return False, "", False
 
@@ -296,9 +329,9 @@ def handle_instant_local_command(text: str) -> str | None:
         mois_nom = mois[now.month]
         return f"Nous sommes le {jour_nom} {now.day} {mois_nom} {now.year}, Moctar."
 
-    # 4. Température réelle en °C ("température du pc", "température processeur", "chauffe", "la température actuelle")
-    if re.search(r"\b(?:temp[ée]rature\s+(?:du\s+pc|processeur|cpu|actuelle)|chauffe|temp[ée]rature\s+du\s+serveur)\b", normalized) or (
-        "temperature" in normalized and not any(w in normalized for w in ("meteo", "météo", "dehors", "exterieur", "extérieur", "climat"))
+    # 4. Température réelle en °C du processeur/serveur ("température du pc", "température processeur", "chauffe", "température du serveur", "la température actuelle")
+    if re.search(r"\b(?:temp[ée]rature\s+(?:du\s+pc|processeur|cpu|actuelle|du\s+serveur|de\s+la\s+machine)|temp[ée]rature\s+cpu|chauffe)\b", normalized) or (
+        "temperature" in normalized and "actuelle" in normalized
     ):
         try:
             import psutil
@@ -1292,7 +1325,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 or getattr(runtime, "ai_brain", None)
             ):
                 display_user_text = command_text
-                LOGGER.info("⚡ [VOICE FAST-PATH]: Routage conversationnel Groq Llama-3.3-70B (< 200ms) pour '%s'", command_text)
+                LOGGER.info("⚡ [VOICE FAST-PATH]: Routage conversationnel Groq (< 200ms) pour '%s'", command_text)
                 try:
                     session_id = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
                     raw_reply = await asyncio.to_thread(
@@ -1309,7 +1342,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "status": "success",
                         "reply": reply_text,
                         "tools_used": [],
-                        "thought_chain": ["Cerveau vocal ultra-rapide Groq Llama-3.3-70B (< 200ms)"],
+                        "thought_chain": ["Cerveau vocal ultra-rapide Groq (< 200ms)"],
                         "fast_path": True,
                     }
                     if runtime.jarvis and getattr(runtime.jarvis, "memory", None):

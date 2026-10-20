@@ -27,25 +27,40 @@ PREWARMED_COORDINATES: dict[str, tuple[float, float, str, str]] = {
     "maradi": (13.5, 7.10174, "Maradi", "Niger"),
     "zinder": (13.80716, 8.9881, "Zinder", "Niger"),
     "tahoua": (14.88878, 5.26922, "Tahoua", "Niger"),
+    "maroc": (34.02088, -6.84165, "Rabat", "Maroc"),
     "rabat": (34.02088, -6.84165, "Rabat", "Maroc"),
     "casablanca": (33.58831, -7.61138, "Casablanca", "Maroc"),
     "marrakech": (31.63416, -7.99994, "Marrakech", "Maroc"),
     "tanger": (35.75946, -5.83395, "Tanger", "Maroc"),
+    "france": (48.85341, 2.3488, "Paris", "France"),
     "paris": (48.85341, 2.3488, "Paris", "France"),
     "lyon": (45.74846, 4.84671, "Lyon", "France"),
     "marseille": (43.29695, 5.38107, "Marseille", "France"),
     "bordeaux": (44.84044, -0.5805, "Bordeaux", "France"),
     "toulouse": (43.60426, 1.44367, "Toulouse", "France"),
+    "senegal": (14.6937, -17.44406, "Dakar", "Sénégal"),
     "dakar": (14.6937, -17.44406, "Dakar", "Sénégal"),
+    "mali": (12.65, -8.0, "Bamako", "Mali"),
     "bamako": (12.65, -8.0, "Bamako", "Mali"),
+    "burkina": (12.36566, -1.53388, "Ouagadougou", "Burkina Faso"),
+    "burkina faso": (12.36566, -1.53388, "Ouagadougou", "Burkina Faso"),
     "ouagadougou": (12.36566, -1.53388, "Ouagadougou", "Burkina Faso"),
+    "cote d'ivoire": (5.30966, -4.01266, "Abidjan", "Côte d'Ivoire"),
+    "cote divoire": (5.30966, -4.01266, "Abidjan", "Côte d'Ivoire"),
     "abidjan": (5.30966, -4.01266, "Abidjan", "Côte d'Ivoire"),
+    "togo": (6.13748, 1.21227, "Lomé", "Togo"),
     "lome": (6.13748, 1.21227, "Lomé", "Togo"),
+    "benin": (6.36536, 2.41833, "Cotonou", "Bénin"),
     "cotonou": (6.36536, 2.41833, "Cotonou", "Bénin"),
+    "algerie": (36.7525, 3.04197, "Alger", "Algérie"),
     "alger": (36.7525, 3.04197, "Alger", "Algérie"),
+    "tunisie": (36.81897, 10.16579, "Tunis", "Tunisie"),
     "tunis": (36.81897, 10.16579, "Tunis", "Tunisie"),
+    "canada": (45.50884, -73.58781, "Montréal", "Canada"),
     "montreal": (45.50884, -73.58781, "Montréal", "Canada"),
+    "belgique": (50.85045, 4.34878, "Bruxelles", "Belgique"),
     "bruxelles": (50.85045, 4.34878, "Bruxelles", "Belgique"),
+    "suisse": (46.20222, 6.14569, "Genève", "Suisse"),
     "geneve": (46.20222, 6.14569, "Genève", "Suisse"),
 }
 
@@ -104,8 +119,10 @@ def extract_city_from_query(query: str, default: str = DEFAULT_CITY) -> str:
     # 2. Motifs d'extraction avec prépositions
     patterns = [
         r"\b(?:temps\s+fait-il\s+[aà]|temps\s+[aà]|pleut-il\s+[aà]|fait-il\s+beau\s+[aà])\s+([A-Za-zÀ-ÿ\- ]{2,30})\b",
-        r"\b(?:m[ée]t[ée]o\s+(?:[aà]|pour|sur|de|vers|en)\s+|ville\s+de\s+)([A-Za-zÀ-ÿ\- ]{2,30})\b",
-        r"\b(?:m[ée]t[ée]o|[aà]|pour|sur|de|vers)\s+([A-Za-zÀ-ÿ\- ]{2,30})\b",
+        r"\b(?:m[ée]t[ée]o\s+(?:[aà]|pour|sur|de|vers|en|au|du)\s+|ville\s+de\s+)([A-Za-zÀ-ÿ\- ]{2,30})\b",
+        r"\b(?:degr[ée]s?|temp[ée]rature|temps|climat)\s+(?:[aà]|au|en|pour|sur|du)\s+([A-Za-zÀ-ÿ\- ]{2,30})\b",
+        r"\b(?:[aà]|au|en)\s+([A-Za-zÀ-ÿ\- ]{2,30})\s*[,.]?\s+(?:il\s+fait|quel\s+degr[ée]|combien\s+de\s+degr[ée]s?|quelle\s+temp[ée]rature)\b",
+        r"\b(?:m[ée]t[ée]o|[aà]|pour|sur|de|vers|au|du)\s+([A-Za-zÀ-ÿ\- ]{2,30})\b",
     ]
     for pat in patterns:
         m = re.search(pat, text, flags=re.IGNORECASE)
@@ -237,12 +254,12 @@ def get_weather_report(
             t_max_tom = float(temp_max_list[1])
             t_min_tom = float(temp_min_list[1])
             oral_text = (
-                f"Demain à {official_name}, prévoyez un {desc_tomorrow} avec des températures "
+                f"Demain à {location_display}, prévoyez un {desc_tomorrow} avec des températures "
                 f"comprises entre {round(t_min_tom)}°C et {round(t_max_tom)}°C, Moctar."
             )
         else:
             oral_text = (
-                f"À {official_name}, le {desc} domine avec {round(temp)}°C actuellement "
+                f"À {location_display}, le {desc} domine avec {round(temp)}°C actuellement "
                 f"(ressenti {round(apparent_temp)}°C). Vent à {round(wind_speed)} km/h, "
                 f"prévisions entre {round(temp_min)}°C et {round(temp_max)}°C, Moctar."
             )

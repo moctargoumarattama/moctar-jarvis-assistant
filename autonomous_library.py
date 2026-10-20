@@ -235,7 +235,12 @@ def execute_autonomous_task(
         }
 
     # 2.3. MODE TRAVAIL & ENVIRONNEMENT DE DÉVELOPPEMENT
-    if any(k in norm for k in ["mode travail", "je me mets au travail", "au travail", "espace de travail", "lance l'environnement", "lance le travail"]):
+    if any(k in norm for k in [
+        "mode travail", "je me mets au travail", "au travail", "espace de travail",
+        "lance l'environnement", "lance le travail", "au bureau", "mode bureau",
+        "mets-toi a mon bureau", "mets-toi au bureau", "mets toi a mon bureau", "mets toi au bureau",
+        "sur mon bureau", "bureau de travail", "bonne bureau", "ouvre le bureau", "ouvre mon bureau",
+    ]):
         actions.execute_tool("open_app", {"app_name": "code"})
         return {
             "handled": True,
@@ -278,13 +283,19 @@ def execute_autonomous_task(
     # 2.6. MÉTÉO EN DIRECT & PRÉVISIONS INSTANTANÉES (OPEN-METEO)
     is_weather = (
         any(k in norm for k in [
-            "meteo", "météo", "quel temps fait il", "quel temps fait-il",
+            "meteo", "météo", "quel temps fait il", "quel temps fait-il", "quel temps",
             "temperature dehors", "température extérieure", "temperature exterieure",
             "est ce qu il pleut", "est-ce qu'il pleut", "pleut il", "pleut-il",
             "prevision meteo", "prévision météo", "fait il beau", "fait-il beau",
+            "quel degre", "combien de degre", "fait quel degre", "combien il fait",
+            "degre dehors", "degré dehors",
         ])
         or (
-            bool(re.search(r"\b(?:temps|temp[ée]rature)\s+[aà]\s+[a-zA-ZÀ-ÿ]", norm))
+            bool(re.search(r"\b(?:temps|temp[ée]rature|degr[ée]s?)\s+(?:[aà]|au|en|pour|sur|du)\s+[a-zA-ZÀ-ÿ]", norm))
+            and not any(w in norm for w in ("cpu", "ram", "serveur", "machine", "dell", "disque", "processeur"))
+        )
+        or (
+            bool(re.search(r"\b(?:quel\s+degr[ée]|combien\s+de\s+degr[ée]s?|il\s+fait\s+quel\s+degr[ée]|fait\s+quel\s+degr[ée]|il\s+fait\s+combien)\b", norm))
             and not any(w in norm for w in ("cpu", "ram", "serveur", "machine", "dell", "disque", "processeur"))
         )
     )
@@ -514,7 +525,11 @@ def execute_autonomous_task(
         return {"handled": True, "reply": report, "tools_used": tools_used, "task_category": "telemetry"}
 
     # 9. TÂCHES & NOTES (PRODUCTIVITÉ)
-    if re.search(r"\b(?:liste\s+mes\s+t[aâ]ches|liste\s+les\s+t[aâ]ches|mes\s+todos|mes\s+t[aâ]ches|liste\s+todo|quoi\s+faire|programme|qu['’]\s*est[- ]ce\s+que\s+j['’]\s*ai\s+[aà]\s+faire|t[aâ]ches\s+du\s+jour|planning)\b", norm):
+    has_weather_intent = is_weather or any(w in norm for w in ("degre", "degré", "meteo", "météo", "pluie", "temperature", "température", "soleil", "chaleur", "froid"))
+    if not has_weather_intent and re.search(
+        r"\b(?:liste\s+mes\s+t[aâ]ches|liste\s+les\s+t[aâ]ches|mes\s+todos|mes\s+t[aâ]ches|liste\s+todo|quoi\s+faire|mon\s+programme(?:\s+du\s+jour)?|programme\s+du\s+jour|quel\s+est\s+mon\s+programme|qu['’]\s*est[- ]ce\s+que\s+j['’]\s*ai\s+[aà]\s+faire|t[aâ]ches\s+du\s+jour|mon\s+planning(?:\s+du\s+jour)?|planning\s+du\s+jour|quel\s+est\s+mon\s+planning)\b",
+        norm,
+    ):
         res = actions.execute_tool("list_todos", {})
         tools_used.append({"tool": "list_todos", "arguments": {}, "success": bool(res.get("success"))})
         msg = res.get("message") if isinstance(res, dict) else str(res)

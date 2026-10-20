@@ -916,6 +916,78 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
         self.assertIn("oral_text", ctx)
         self.assertIn("main", ctx["branch"])
 
+    def test_voice_interact_direct_action_commands_without_wake_word(self) -> None:
+        """Vérifie que les ordres opérationnels directs sont acceptés même sans mot-clé préalable et hors session."""
+        from main import extract_voice_interact_command
+
+        # Directs acceptés
+        acc, cmd, wake = extract_voice_interact_command("Mets-toi à mon bureau.", session_active=False)
+        self.assertTrue(acc)
+        self.assertIn("bureau", cmd.lower())
+
+        acc, cmd, wake = extract_voice_interact_command("au bureau.", session_active=False)
+        self.assertTrue(acc)
+        self.assertIn("bureau", cmd.lower())
+
+        acc, cmd, wake = extract_voice_interact_command("Quelle heure est-il ?", session_active=False)
+        self.assertTrue(acc)
+        self.assertIn("heure", cmd.lower())
+
+        acc, cmd, wake = extract_voice_interact_command("la météo", session_active=False)
+        self.assertTrue(acc)
+        self.assertIn("météo", cmd.lower())
+
+        # Hors session et phrase ordinaire non-commande : rejet propre
+        acc, cmd, wake = extract_voice_interact_command("une phrase de conversation quelconque", session_active=False)
+        self.assertFalse(acc)
+
+    def test_weather_query_not_hijacked_by_todo(self) -> None:
+        """Vérifie qu'une question météo contenant 'programme' et 'degré' ne déclenche jamais les todos."""
+        import autonomous_library
+
+        res = autonomous_library.execute_autonomous_task("Le programme du Maroc, il fait quel degré ?")
+        self.assertTrue(res["handled"])
+        self.assertEqual(res["task_category"], "weather")
+        self.assertIn("Moctar", res["reply"])
+        self.assertTrue("Maroc" in res["reply"] or "Rabat" in res["reply"])
+        self.assertNotIn("Vos tâches en cours", res["reply"])
+
+    def test_groq_dynamic_models_discovery(self) -> None:
+        """Vérifie le listing dynamique et le filtrage intelligent des modèles Groq de chat."""
+        import ai_brain
+        from unittest.mock import MagicMock
+
+        # Fallback par défaut sans clé
+        models = ai_brain.get_available_groq_chat_models("")
+        self.assertTrue(len(models) > 0)
+        self.assertIn("llama3-70b-8192", models)
+
+        # Simulation d'une réponse API Groq avec un mix chat et audio
+        mock_response_data = {
+            "data": [
+                {"id": "whisper-large-v3"},
+                {"id": "llama3-70b-8192"},
+                {"id": "distil-whisper-large-v3-en"},
+                {"id": "mixtral-8x7b-32768"},
+            ]
+        }
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps(mock_response_data).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        old_cache = ai_brain._GROQ_MODELS_CACHE
+        try:
+            with patch("urllib.request.urlopen", return_value=mock_resp):
+                ai_brain._GROQ_MODELS_CACHE = (0.0, [])
+                discovered = ai_brain.get_available_groq_chat_models("gsk_fake_test_key")
+                self.assertIn("llama3-70b-8192", discovered)
+                self.assertIn("mixtral-8x7b-32768", discovered)
+                self.assertNotIn("whisper-large-v3", discovered)
+                self.assertNotIn("distil-whisper-large-v3-en", discovered)
+        finally:
+            ai_brain._GROQ_MODELS_CACHE = old_cache
+
 
 if __name__ == "__main__":
     unittest.main()
