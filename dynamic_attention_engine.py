@@ -1,0 +1,210 @@
+"""Moteur d'Attention Dynamique & Conversation Continue (Dynamic Turn-Taking) pour JARVIS / M.O.C.T.A.R.
+
+Remplace le mot de réveil binaire par une gestion d'attention naturelle :
+- Maintient l'écoute collaborative continue (Dynamic Turn-Taking) quand Moctar travaille.
+- Distingue chirurgicalement quand Moctar s'adresse à M.O.C.T.A.R ou quand il réfléchit à voix haute ("attends voir...", "voyons pourquoi ça bugue...").
+- Ne coupe JAMAIS la réflexion de l'utilisateur, tout en maintenant la session active et attentive.
+- Détecte les formules de clôture naturelle ("c'est bon", "laisse tomber", "merci Moctar", "bonne nuit") pour repasser en veille silencieuse.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import time
+from typing import Any, Dict, Optional, Tuple
+
+LOGGER = logging.getLogger("moctar.dynamic_attention")
+
+DEFAULT_ATTENTION_WINDOW_SECONDS = 45.0
+THINKING_EXTENSION_SECONDS = 30.0
+
+# 1. Marqueurs stricts de réflexion à voix haute (Thinking Out Loud / Self-Talk)
+_THINKING_PREFIX_PATTERNS = [
+    re.compile(r"^(?:euh|hum|heum|ah|eh|ben|bah|tiens|voyons)\b", re.I),
+    re.compile(r"^(?:attends|attends\s+voir|attendez|voyons|voyons\s+voir)\b", re.I),
+    re.compile(r"^(?:alors\s+l[aà]|bon\s+alors|ouais\s+alors)\b", re.I),
+    re.compile(r"^(?:attends\s+(?:une\s+seconde|un\s+peu|deux\s+secondes))\b", re.I),
+]
+
+_THINKING_SOLILOQUY_PATTERNS = [
+    re.compile(r"\b(?:pourquoi\s+(?:[cç]a|il|elle)\s+(?:bugue?|plante?|marche\s+pas|fonctionne\s+pas))\b", re.I),
+    re.compile(r"\b(?:si\s+je\s+(?:fais|change|modifie|teste|mets|lance))\b", re.I),
+    re.compile(r"\b(?:je\s+(?:vais\s+tester|regarde|cherche|fais\s+voir|disais\s+quoi))\b", re.I),
+    re.compile(r"\b(?:c['’]est\s+bizarre|bizarre\s+ce\s+truc|tiens\s+c['’]est\s+curieux)\b", re.I),
+    re.compile(r"\b(?:o[uù]\s+est[- ]ce\s+que\s+j['’]ai\s+mis|comment\s+j['’]avais\s+fait)\b", re.I),
+    re.compile(r"\b(?:non\s+c['’]est\s+pas\s+[cç]a|pas\s+[cç]a)\b", re.I),
+]
+
+# 2. Marqueurs d'interpellation explicite ou verbes opérationnels à l'impératif (Directed Speech)
+_DIRECTED_IMPERATIVES = (
+    "ouvre", "ouvrir", "ferme", "fermer", "quitte", "quitter", "lance", "lancer",
+    "relance", "relancer", "redémarre", "redemarre", "coupe", "couper", "mets",
+    "mettre", "donne", "donner", "dis", "dire", "cherche", "chercher", "trouve",
+    "ajoute", "ajouter", "liste", "lister", "nettoie", "optimise", "optimiser",
+    "snap", "place", "maximise", "minimise", "aide", "analyse", "vérifie", "verifie",
+)
+
+_DIRECTED_INTERROGATIVES = (
+    "c'est quoi", "qu'est-ce que", "qu est ce que", "comment", "pourquoi",
+    "où en est", "ou en est", "combien", "quel est", "quelle est", "quel temps",
+    "quelle heure", "quel jour", "qui est", "qui es-tu",
+)
+
+_DISENGAGE_PHRASES = {
+    "c'est bon", "c est bon", "c'est tout", "c est tout", "laisse tomber",
+    "rien laisse tomber", "merci", "merci moctar", "bonne nuit", "a plus tard",
+    "à plus tard", "je coupe", "au revoir", "stop", "pause", "repose-toi",
+}
+
+
+def classify_utterance_attention(text: str, is_session_active: bool = False) -> Dict[str, Any]:
+    """Analyse chirurgicalement si Moctar s'adresse au système ou réfléchit à voix haute.
+
+    Args:
+        text: Transcription réparée de la parole.
+        is_session_active: Indique si une session collaborative est déjà engagée.
+
+    Returns:
+        Dict contenant :
+            - intent: 'directed_speech', 'thinking_out_loud', 'disengage', 'ambient'
+            - is_directed: bool
+            - is_thinking_out_loud: bool
+            - should_disengage: bool
+            - reason: str
+    """
+    clean = (text or "").strip()
+    if not clean or len(clean) < 2:
+        return {
+            "intent": "ambient",
+            "is_directed": False,
+            "is_thinking_out_loud": False,
+            "should_disengage": False,
+            "reason": "empty_or_too_short",
+        }
+
+    norm = clean.lower().strip(" ,.:;!?-'\u2019")
+
+    # 1. Formules de clôture / désengagement explicite
+    if norm in _DISENGAGE_PHRASES or any(norm.startswith(dp) for dp in ("merci moctar", "c'est bon moctar", "bonne nuit")):
+        return {
+            "intent": "disengage",
+            "is_directed": True,
+            "is_thinking_out_loud": False,
+            "should_disengage": True,
+            "reason": "explicit_disengage",
+        }
+
+    # 2. Interpellation explicite avec le nom du copilote
+    has_explicit_wake = bool(re.search(r"\b(?:moctar|jarvis)\b", norm))
+    has_second_person = bool(re.search(r"\b(?:tu\s+|t['’]|peux[- ]tu|pourrais[- ]tu|dis[- ]moi|te\s+)\b", norm))
+
+    # 3. Détection de la réflexion à voix haute (Thinking Out Loud) prioritaire en l'absence d'interpellation directe
+    if not (has_explicit_wake or has_second_person):
+        for p in _THINKING_PREFIX_PATTERNS:
+            if p.search(norm):
+                return {
+                    "intent": "thinking_out_loud",
+                    "is_directed": False,
+                    "is_thinking_out_loud": True,
+                    "should_disengage": False,
+                    "reason": "prefix_hesitation",
+                }
+        for p in _THINKING_SOLILOQUY_PATTERNS:
+            if p.search(norm):
+                return {
+                    "intent": "thinking_out_loud",
+                    "is_directed": False,
+                    "is_thinking_out_loud": True,
+                    "should_disengage": False,
+                    "reason": "soliloquy_pattern",
+                }
+        if norm in ("attends", "attends voir", "voyons", "voyons voir", "hum", "euh", "bizarre", "tiens", "ouais", "ah ouais"):
+            return {
+                "intent": "thinking_out_loud",
+                "is_directed": False,
+                "is_thinking_out_loud": True,
+                "should_disengage": False,
+                "reason": "single_hesitation_token",
+            }
+
+    # 4. Présence d'un verbe impératif opérationnel
+    has_imperative = False
+    tokens = [t.strip(" ,.:;!?-") for t in norm.split() if t.strip(" ,.:;!?-")]
+    if tokens:
+        first_word = tokens[0]
+        if first_word in _DIRECTED_IMPERATIVES:
+            has_imperative = True
+        elif len(tokens) > 1 and tokens[1] in _DIRECTED_IMPERATIVES and first_word in ("moctar", "jarvis", "yo", "dis", "s'il", "stp"):
+            has_imperative = True
+
+    # 5. Présence d'une question interrogative directe
+    has_interrogative = any(norm.startswith(q) or f" {q}" in norm for q in _DIRECTED_INTERROGATIVES)
+
+    # Si explicitement interpellé (avec 'Moctar' ou 'tu' ou un verbe d'action clair)
+    if has_explicit_wake or (is_session_active and (has_second_person or has_imperative or has_interrogative)):
+        return {
+            "intent": "directed_speech",
+            "is_directed": True,
+            "is_thinking_out_loud": False,
+            "should_disengage": False,
+            "reason": "explicit_directed_speech",
+        }
+
+    # 6. Si en session active et phrase d'au moins 2 mots non classée en réflexion
+    if is_session_active and len(tokens) >= 2:
+        return {
+            "intent": "directed_speech",
+            "is_directed": True,
+            "is_thinking_out_loud": False,
+            "should_disengage": False,
+            "reason": "engaged_session_followup",
+        }
+
+    # Hors session sans marqueur
+    return {
+        "intent": "ambient",
+        "is_directed": False,
+        "is_thinking_out_loud": False,
+        "should_disengage": False,
+        "reason": "ambient_speech_without_wake",
+    }
+
+
+class DynamicAttentionTracker:
+    """Gestionnaire d'état de l'attention continue pour M.O.C.T.A.R."""
+
+    def __init__(self, window_seconds: float = DEFAULT_ATTENTION_WINDOW_SECONDS) -> None:
+        self.window_seconds = window_seconds
+        self.attention_until: float = 0.0
+        self.last_directed_time: float = 0.0
+        self.turn_count: int = 0
+
+    def is_engaged(self) -> bool:
+        """Indique si la session d'attention collaborative est actuellement active."""
+        return time.monotonic() < self.attention_until
+
+    def engage(self, duration: Optional[float] = None) -> float:
+        """Engage ou prolonge la fenêtre d'attention collaborative."""
+        dur = duration if duration is not None else self.window_seconds
+        now = time.monotonic()
+        self.attention_until = now + dur
+        self.last_directed_time = now
+        self.turn_count += 1
+        LOGGER.info("⚡ [ATTENTION ENGAGED]: Session active pour %.1fs (tour #%d)", dur, self.turn_count)
+        return self.attention_until
+
+    def extend_for_thinking(self, duration: float = THINKING_EXTENSION_SECONDS) -> float:
+        """Prolonge silencieusement la session pendant que Moctar réfléchit à voix haute."""
+        now = time.monotonic()
+        new_until = now + duration
+        if new_until > self.attention_until:
+            self.attention_until = new_until
+        LOGGER.info("⚡ [ATTENTION EXTENDED (THINKING)]: Écoute maintenue pour %.1fs sans interruption", duration)
+        return self.attention_until
+
+    def disengage(self) -> None:
+        """Clôture la session et repasse en veille silencieuse."""
+        self.attention_until = 0.0
+        self.turn_count = 0
+        LOGGER.info("⚡ [ATTENTION DISENGAGED]: Retour en veille passive.")

@@ -44,6 +44,7 @@ from .system_actions import (
     analyze_screen,
     capture_screenshot,
     change_volume,
+    close_active_window,
     close_app,
     get_battery_response,
     get_date_response,
@@ -52,6 +53,7 @@ from .system_actions import (
     open_app,
     open_folder,
     optimize_system,
+    snap_active_window,
 )
 
 # 4. Web Actions
@@ -138,6 +140,8 @@ TOOL_DISPATCHER: Dict[str, Callable[..., Any]] = {
     "close_app": close_app,
     "open_folder": open_folder,
     "optimize_system": optimize_system,
+    "close_active_window": close_active_window,
+    "snap_active_window": snap_active_window,
 
     # Web Actions
     "open_site": open_site,

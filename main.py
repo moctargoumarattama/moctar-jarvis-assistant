@@ -27,6 +27,9 @@ from sse_starlette.sse import EventSourceResponse
 
 import autonomous_library
 import collector
+import desktop_window_manager
+import dynamic_attention_engine
+import stt_phonetic_repair
 import voice_transcribe
 from ai_brain import build_live_system_context, get_cpu_temperature_celsius, voice_fast_llm_reply
 from voice_semantic_engine import execute_voice_semantic_turn
@@ -211,7 +214,9 @@ def is_direct_voice_command(text: str) -> bool:
     """Identifie les ordres opérationnels explicites exécutables directement sans mot de réveil préalable."""
     if not text or len(text.strip()) < 3:
         return False
-    norm = _strip_accents_1to1(text).lower().strip()
+    # Réparation phonétique amont préalable pour reconnaître les commandes vocales altérées
+    repaired, _ = stt_phonetic_repair.repair_stt_transcript(text)
+    norm = _strip_accents_1to1(repaired).lower().strip()
     # 1. Bureau, VS Code & Lancement d'Applications
     if any(k in norm for k in (
         "au bureau", "mode bureau", "mets-toi a mon bureau", "mets-toi au bureau",
@@ -235,6 +240,13 @@ def is_direct_voice_command(text: str) -> bool:
     # 5. Gestion Système, Contexte & Organisation
     if re.search(r"\b(?:briefing|o[uù]\s+en\s+est[- ]on|optimise\s+le\s+syst[èe]me|mode\s+optimisation|fin\s+de\s+journ[ée]e|bonne\s+nuit|liste\s+mes\s+t[aâ]ches|mes\s+todos)\b", norm):
         return True
+    # 6. Contrôle de fenêtres & actions sur pronoms ("ferme ça", "mets-le à droite", "plein écran")
+    if re.search(r"\b(?:ferme|quitte)\s+(?:[cç]a|le|la|cette\s+fen[êe]tre|l['’]appli?)\b", norm) or norm in (
+        "ferme ca", "ferme ça", "ferme le", "quitte ca", "quitte ça", "ferme la fenetre", "ferme la fenêtre",
+    ):
+        return True
+    if re.search(r"\b(?:mets?[-\s]le\s+[aà]\s+(?:droite|gauche)|place\s+[aà]\s+(?:droite|gauche)|snap\s+(?:right|left)|plein\s+[ée]cran|maximise|minimise|r[ée]duis)\b", norm):
+        return True
     return False
 
 
@@ -247,7 +259,8 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
     Exécute également les ordres opérationnels directs sans mot-clé préalable.
     Ignore toute transcription résiduelle de moins de 4 caractères hors commande reconnue.
     """
-    filtered = voice_transcribe.filter_whisper_hallucinations(transcript)
+    repaired, _ = stt_phonetic_repair.repair_stt_transcript(transcript)
+    filtered = voice_transcribe.filter_whisper_hallucinations(repaired)
     if not filtered:
         return False, "", False
 
@@ -1230,8 +1243,76 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         runtime_session = getattr(runtime, "voice_session_until", 0.0) > time.monotonic()
         session_active = header_session or query_session or runtime_session
 
+        # 1. Couche de Réparation Phonétique & Correction d'Erreurs STT (< 0.1 ms)
+        repaired_transcript, stt_repairs = stt_phonetic_repair.repair_stt_transcript(transcript)
+        if stt_repairs:
+            LOGGER.info(
+                "⚡ [STT PHONETIC REPAIR] (0ms): '%s' -> '%s' (regles: %s)",
+                transcript,
+                repaired_transcript,
+                [r["rule"] for r in stt_repairs],
+            )
+
+        # 2. Dynamic Turn-Taking & Attention Engine (Gestion naturelle de la parole)
+        attention = dynamic_attention_engine.classify_utterance_attention(
+            repaired_transcript,
+            is_session_active=session_active,
+        )
+
+        # A) Désengagement explicite ("merci moctar", "c'est bon", "bonne nuit")
+        if session_active and attention.get("should_disengage"):
+            runtime.voice_session_until = 0.0
+            reply_text = "À votre service Moctar, je reste en veille."
+            LOGGER.info("⚡ [VOICE DISENGAGE]: Fin de session collaborative demandée -> '%s'", reply_text)
+            audio_url: str | None = None
+            try:
+                _, _, cache_key = await generate_cached_tts_with_key(reply_text, DEFAULT_TTS_VOICE)
+                audio_url = f"/api/voice/tts/cache/{cache_key}.mp3"
+            except Exception:
+                pass
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "ignored": False,
+                    "user_text": repaired_transcript,
+                    "raw_transcript": transcript,
+                    "reply_text": reply_text,
+                    "audio_url": audio_url,
+                    "session_active": False,
+                    "wake_word_detected": False,
+                    "action": None,
+                    "url": None,
+                    "title": None,
+                    "tools_used": [],
+                    "thought_chain": ["Désengagement explicite de la session vocale"],
+                    "fast_path": True,
+                }
+            )
+
+        # B) Réflexion à voix haute pendant une session active ("attends voir...", "voyons pourquoi ça plante...")
+        # Ne JAMAIS couper Moctar ; prolonger silencieusement la session d'écoute.
+        if session_active and attention.get("is_thinking_out_loud"):
+            if VOICE_SESSION_DURATION_SECONDS > 0:
+                runtime.voice_session_until = time.monotonic() + max(VOICE_SESSION_DURATION_SECONDS, 30.0)
+            LOGGER.info(
+                "⚡ [VOICE ATTENTION]: Moctar réfléchit à voix haute ('%s'). Écoute maintenue en silence.",
+                repaired_transcript,
+            )
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "ignored": True,
+                    "reason": "thinking_out_loud",
+                    "user_text": repaired_transcript,
+                    "raw_transcript": transcript,
+                    "reply_text": "",
+                    "audio_url": None,
+                    "session_active": True,
+                }
+            )
+
         accepted, command_text, wake_detected = extract_voice_interact_command(
-            transcript,
+            repaired_transcript,
             session_active=session_active,
         )
         if not accepted or not command_text:

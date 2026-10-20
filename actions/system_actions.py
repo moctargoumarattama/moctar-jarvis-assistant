@@ -747,3 +747,15 @@ def optimize_system() -> Dict[str, Any]:
             data=None,
             error=str(exc),
         )
+
+
+def close_active_window(target_app: str = "") -> Dict[str, Any]:
+    """Ferme la fenetre ou l'application actuellement active au premier plan (ex: 'ferme ca', 'quitte cette fenetre')."""
+    import desktop_window_manager
+    return desktop_window_manager.close_active_window(target_app=target_app)
+
+
+def snap_active_window(position: str = "maximize") -> Dict[str, Any]:
+    """Positionne ou redimensionne la fenetre active ('left', 'right', 'maximize', 'minimize')."""
+    import desktop_window_manager
+    return desktop_window_manager.snap_active_window(position=position)

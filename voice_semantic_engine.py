@@ -207,17 +207,34 @@ VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "search_web_instant",
-            "description": "Recherche sur le web des faits, actualités ou informations récentes quand la question porte sur un événement récent ou du savoir externe.",
+            "name": "close_active_window",
+            "description": "Ferme la fenêtre ou l'application actuellement active au premier plan (ex: 'ferme ça', 'quitte ça', 'ferme cette fenêtre').",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
+                    "target_app": {
                         "type": "string",
-                        "description": "Mots-clés de la recherche web.",
+                        "description": "Nom optionnel de l'application active à fermer (ex: 'vscode', 'chrome', 'terminal').",
                     }
                 },
-                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "snap_active_window",
+            "description": "Positionne ou redimensionne la fenêtre active au premier plan sur l'écran ('left', 'right', 'maximize', 'minimize').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "position": {
+                        "type": "string",
+                        "enum": ["left", "right", "maximize", "minimize"],
+                        "description": "Position ou disposition désirée pour la fenêtre active.",
+                    }
+                },
+                "required": ["position"],
             },
         },
     },
@@ -279,13 +296,66 @@ def execute_voice_semantic_turn(
     et formule une synthèse vocale limpide en français professionnel pour Moctar.
     En cas d'indisponibilité du LLM, bascule automatiquement sur la bibliothèque autonome.
     """
-    clean_text = (command_text or "").strip()
+    import stt_phonetic_repair
+    import desktop_window_manager
+
+    # 1. Réparation Phonétique & Correction d'Erreurs STT en amont (< 1 ms)
+    clean_text, repairs = stt_phonetic_repair.repair_stt_transcript(command_text or "")
+    if repairs:
+        LOGGER.info("⚡ [VOICE PHONETIC REPAIR] (%dms): '%s' -> '%s' (regles: %s)",
+                    0, command_text, clean_text, [r["rule"] for r in repairs])
+
     sess_key = session_id or getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
 
-    # 1. Contexte vivant et télémétrie Dell Precision M4800
+    # 2. Conscience Contextuelle Permanente : Fenêtre active et résolution des pronoms
+    win_info = desktop_window_manager.get_active_window_info()
+    pronoun_action = desktop_window_manager.resolve_pronoun_reference(clean_text, win_info)
+    if pronoun_action:
+        act_type = pronoun_action.get("action")
+        if act_type == "close_active_window":
+            close_res = desktop_window_manager.close_active_window(pronoun_action.get("target"))
+            reply_msg = _format_reply_ending(close_res.get("message", "Fenêtre fermée."))
+            LOGGER.info("⚡ [VOICE PRONOUN ACTION (0ms)]: '%s' -> %s", clean_text, reply_msg)
+            return {
+                "status": "success",
+                "reply": reply_msg,
+                "action": "close_app",
+                "url": None,
+                "title": pronoun_action.get("title"),
+                "tools_used": [{"tool": "close_active_window", "arguments": pronoun_action, "success": True}],
+                "thought_chain": ["Résolution contextuelle de pronom sur la fenêtre active (0ms)"],
+                "fast_path": True,
+                "semantic_tool_calling": True,
+            }
+        elif act_type == "snap_active_window":
+            snap_res = desktop_window_manager.snap_active_window(pronoun_action.get("position"))
+            reply_msg = _format_reply_ending(snap_res.get("message", "Disposition appliquée."))
+            LOGGER.info("⚡ [VOICE PRONOUN ACTION (0ms)]: '%s' -> %s", clean_text, reply_msg)
+            return {
+                "status": "success",
+                "reply": reply_msg,
+                "action": "snap_window",
+                "url": None,
+                "title": None,
+                "tools_used": [{"tool": "snap_active_window", "arguments": pronoun_action, "success": True}],
+                "thought_chain": ["Disposition contextuelle de la fenêtre active (0ms)"],
+                "fast_path": True,
+                "semantic_tool_calling": True,
+            }
+
+    # 3. Contexte vivant et télémétrie Dell Precision M4800
     telemetry = build_live_system_context(runtime)
     base_prompt = system_prompt or VOICE_FAST_SYSTEM_PROMPT
     prompt_sections = [base_prompt, VOICE_SEMANTIC_SYSTEM_PROMPT]
+
+    # Injection de la fenêtre active dans le prompt système
+    if win_info.get("available"):
+        prompt_sections.append(
+            f"[FENÊTRE ET APPLICATION ACTIVE AU PREMIER PLAN]\n"
+            f"Application courante : {win_info.get('app_name')} (titre: '{win_info.get('window_title')}')\n"
+            f"Processus : {win_info.get('process_name')} (PID {win_info.get('pid')})\n"
+            f"Note : Si Moctar dit 'ferme ça', 'relance-le', 'mets-le à droite', 'ça' fait référence à cette application."
+        )
 
     # Mémoire de faits ou préférences
     if runtime and getattr(runtime, "jarvis", None) and getattr(runtime.jarvis, "memory", None):
@@ -393,6 +463,14 @@ def execute_voice_semantic_turn(
 
             elif func_name in ("add_todo", "list_todos"):
                 tool_replies.append(tool_res.get("message", "Tâches mises à jour"))
+
+            elif func_name == "close_active_window":
+                action_name = "close_app"
+                tool_replies.append(tool_res.get("message", "Fenêtre active fermée"))
+
+            elif func_name == "snap_active_window":
+                action_name = "snap_window"
+                tool_replies.append(tool_res.get("message", "Disposition de fenêtre appliquée"))
 
             else:
                 msg = tool_res.get("message")
