@@ -17,7 +17,7 @@ import time
 from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Path as APIPath, Request, Response
@@ -209,7 +209,7 @@ def split_speech_sentences(text: str) -> list[str]:
     return merged if merged else [cleaned]
 
 
-def get_dynamic_tts_prosody(text: str, hour: Optional[int] = None) -> tuple[str, str]:
+def get_dynamic_tts_prosody(text: str, hour: int | None = None) -> tuple[str, str]:
     """Calcule une prosodie vocale vivante (rate, pitch) adaptée à l'heure et au ton de l'échange."""
     if hour is None:
         try:
