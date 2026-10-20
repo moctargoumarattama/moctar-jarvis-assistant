@@ -77,6 +77,37 @@ _DISENGAGE_REGEX = re.compile(
     re.I,
 )
 
+# 3. Marqueurs de fin inachevée / phrase en cours d'énonciation (Predictive Turn-Taking / Semantic VAD)
+_TRAILING_INCOMPLETE_CONNECTORS = re.compile(
+    r"(?:"
+    r"\.\.\.+$|"
+    r"…$|"
+    r"\b(?:et|ou|mais|donc|car|or|ni)\s*$|"
+    r"\b(?:parce\s+qu[e']?|puisqu[e']?|attendu\s+que|vu\s+que)\s*$|"
+    r"\b(?:que|qu['’]|qui|dont|o[uù]|si|comme|quand|lorsqu[e']?)\s*$|"
+    r"\b(?:pour|avec|dans|sur|sous|vers|chez|sans|pendant|depuis|contre|entre)\s*$|"
+    r"\b(?:de|du|des|d['’]|le|la|les|l['’]|un|une)\s*$|"
+    r"\b(?:mon|ma|mes|ton|ta|tes|son|sa|ses|notre|votre|leur|ce|cet|cette|ces)\s*$|"
+    r"\b(?:je\s+voudrais(?:\s+que)?|je\s+veux(?:\s+que)?|j['’]aimerais(?:\s+que)?)\s*$|"
+    r"\b(?:peux[- ]tu|pourrais[- ]tu|est[- ]ce\s+que|dis[- ]moi|fais\s+voir|attends\s+que|il\s+faut\s+que|faut\s+que)\s*$|"
+    r"\b(?:que\s+tu|qu['’]on|si\s+tu|si\s+on)\s*$"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def is_incomplete_utterance(text: str) -> bool:
+    """Détecte chirurgicalement si l'énoncé de Moctar est grammaticalement inachevé
+    (connecteur de fin, préposition, ellipse ou formule introductive suspendue).
+    """
+    clean = (text or "").strip()
+    if not clean:
+        return False
+    if clean.endswith("...") or clean.endswith("…"):
+        return True
+    norm = clean.rstrip(" ,;:-").lower()
+    return bool(_TRAILING_INCOMPLETE_CONNECTORS.search(norm))
+
 
 def classify_utterance_attention(text: str, is_session_active: bool = False) -> Dict[str, Any]:
     """Analyse chirurgicalement si Moctar s'adresse au système ou réfléchit à voix haute.
@@ -90,6 +121,7 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
             - intent: 'directed_speech', 'thinking_out_loud', 'disengage', 'ambient'
             - is_directed: bool
             - is_thinking_out_loud: bool
+            - is_incomplete: bool
             - should_disengage: bool
             - reason: str
     """
@@ -99,6 +131,7 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
             "intent": "ambient",
             "is_directed": False,
             "is_thinking_out_loud": False,
+            "is_incomplete": False,
             "should_disengage": False,
             "reason": "empty_or_too_short",
         }
@@ -111,6 +144,7 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
             "intent": "disengage",
             "is_directed": True,
             "is_thinking_out_loud": False,
+            "is_incomplete": False,
             "should_disengage": True,
             "reason": "explicit_disengage",
         }
@@ -119,7 +153,19 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
     has_explicit_wake = bool(re.search(r"\b(?:moctar|jarvis)\b", norm))
     has_second_person = bool(re.search(r"\b(?:tu\s+|t['’]|peux[- ]tu|pourrais[- ]tu|dis[- ]moi|te\s+)\b", norm))
 
-    # 3. Détection de la réflexion à voix haute (Thinking Out Loud) prioritaire en l'absence d'interpellation directe
+    # 3. VAD Sémantique : Détection des phrases inachevées (Turn-Taking Prédictif)
+    # Ne JAMAIS couper Moctar s'il est en train de formuler sa pensée ou sa commande.
+    if (is_session_active or has_explicit_wake) and is_incomplete_utterance(clean):
+        return {
+            "intent": "thinking_out_loud",
+            "is_directed": False,
+            "is_thinking_out_loud": True,
+            "is_incomplete": True,
+            "should_disengage": False,
+            "reason": "incomplete_utterance",
+        }
+
+    # 4. Détection de la réflexion à voix haute (Thinking Out Loud) prioritaire en l'absence d'interpellation directe
     if not (has_explicit_wake or has_second_person):
         for p in _THINKING_PREFIX_PATTERNS:
             if p.search(norm):
@@ -127,6 +173,7 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
                     "intent": "thinking_out_loud",
                     "is_directed": False,
                     "is_thinking_out_loud": True,
+                    "is_incomplete": False,
                     "should_disengage": False,
                     "reason": "prefix_hesitation",
                 }
@@ -136,6 +183,7 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
                     "intent": "thinking_out_loud",
                     "is_directed": False,
                     "is_thinking_out_loud": True,
+                    "is_incomplete": False,
                     "should_disengage": False,
                     "reason": "soliloquy_pattern",
                 }
@@ -144,11 +192,12 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
                 "intent": "thinking_out_loud",
                 "is_directed": False,
                 "is_thinking_out_loud": True,
+                "is_incomplete": False,
                 "should_disengage": False,
                 "reason": "single_hesitation_token",
             }
 
-    # 4. Présence d'un verbe impératif opérationnel
+    # 5. Présence d'un verbe impératif opérationnel
     has_imperative = False
     tokens = [t.strip(" ,.:;!?-") for t in norm.split() if t.strip(" ,.:;!?-")]
     if tokens:
@@ -158,7 +207,7 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
         elif len(tokens) > 1 and tokens[1] in _DIRECTED_IMPERATIVES and first_word in ("moctar", "jarvis", "yo", "dis", "s'il", "stp"):
             has_imperative = True
 
-    # 5. Présence d'une question interrogative directe
+    # 6. Présence d'une question interrogative directe
     has_interrogative = any(norm.startswith(q) or f" {q}" in norm for q in _DIRECTED_INTERROGATIVES)
 
     # Si explicitement interpellé (avec 'Moctar' ou 'tu' ou un verbe d'action clair)
@@ -167,16 +216,18 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
             "intent": "directed_speech",
             "is_directed": True,
             "is_thinking_out_loud": False,
+            "is_incomplete": False,
             "should_disengage": False,
             "reason": "explicit_directed_speech",
         }
 
-    # 6. Si en session active et phrase d'au moins 2 mots non classée en réflexion
+    # 7. Si en session active et phrase d'au moins 2 mots non classée en réflexion
     if is_session_active and len(tokens) >= 2:
         return {
             "intent": "directed_speech",
             "is_directed": True,
             "is_thinking_out_loud": False,
+            "is_incomplete": False,
             "should_disengage": False,
             "reason": "engaged_session_followup",
         }
@@ -186,6 +237,7 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
         "intent": "ambient",
         "is_directed": False,
         "is_thinking_out_loud": False,
+        "is_incomplete": False,
         "should_disengage": False,
         "reason": "ambient_speech_without_wake",
     }

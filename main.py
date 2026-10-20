@@ -1289,20 +1289,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             )
 
-        # B) Réflexion à voix haute pendant une session active ("attends voir...", "voyons pourquoi ça plante...")
+        # B) Réflexion à voix haute ou phrase inachevée (VAD Sémantique & Turn-Taking Prédictif)
         # Ne JAMAIS couper Moctar ; prolonger silencieusement la session d'écoute.
-        if session_active and attention.get("is_thinking_out_loud"):
+        if (session_active or attention.get("is_incomplete")) and attention.get("is_thinking_out_loud"):
             if VOICE_SESSION_DURATION_SECONDS > 0:
                 runtime.voice_session_until = time.monotonic() + max(VOICE_SESSION_DURATION_SECONDS, 30.0)
+            is_inc = bool(attention.get("is_incomplete"))
+            reason_str = "incomplete_utterance" if is_inc else "thinking_out_loud"
             LOGGER.info(
-                "⚡ [VOICE ATTENTION]: Moctar réfléchit à voix haute ('%s'). Écoute maintenue en silence.",
+                "⚡ [VOICE ATTENTION]: Moctar %s ('%s'). Écoute maintenue en silence.",
+                "n'a pas terminé sa phrase (VAD sémantique)" if is_inc else "réfléchit à voix haute",
                 repaired_transcript,
             )
             return JSONResponse(
                 {
                     "ok": True,
                     "ignored": True,
-                    "reason": "thinking_out_loud",
+                    "reason": reason_str,
                     "user_text": repaired_transcript,
                     "raw_transcript": transcript,
                     "reply_text": "",

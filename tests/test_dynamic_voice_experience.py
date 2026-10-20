@@ -284,6 +284,115 @@ class DynamicVoiceExperienceTests(unittest.TestCase):
             self.assertEqual(data["action"], "open_app")
             self.assertEqual(data["url"], "vscode://file/opt/jarvis")
 
+    def test_dynamic_stt_acoustic_biasing_prompt(self) -> None:
+        """Vérifie que build_dynamic_stt_prompt amorce Whisper avec le glossaire actif et le contexte du Dell M4800."""
+        import voice_transcribe
+
+        # 1. Prompt de base
+        prompt_default = voice_transcribe.build_dynamic_stt_prompt()
+        self.assertIn("Moctar", prompt_default)
+        self.assertIn("M.O.C.T.A.R", prompt_default)
+        self.assertIn("Dell Precision M4800", prompt_default)
+        self.assertIn("VS Code", prompt_default)
+        self.assertIn("mode bureau", prompt_default)
+        self.assertLessEqual(len(prompt_default), 850)
+
+        # 2. Biasing avec fenêtre active VS Code
+        fake_vscode = {"available": True, "app_name": "vscode", "window_title": "voice_transcribe.py - Jarvis"}
+        prompt_vscode = voice_transcribe.build_dynamic_stt_prompt(active_window=fake_vscode)
+        self.assertIn("Éditeur VS Code", prompt_vscode)
+        self.assertIn("débogage", prompt_vscode)
+
+        # 3. Biasing avec fenêtre active Terminal
+        fake_term = {"available": True, "app_name": "terminal", "window_title": "moctar@Precision-M4800:~"}
+        prompt_term = voice_transcribe.build_dynamic_stt_prompt(active_window=fake_term)
+        self.assertIn("Terminal bash", prompt_term)
+        self.assertIn("systemctl", prompt_term)
+
+    def test_vad_semantic_incomplete_utterance_detection(self) -> None:
+        """Vérifie la détection chirurgicale des énoncés inachevés (connecteurs terminaux, ellipses)."""
+        # A) Phrases inachevées (doivent être détectées)
+        incomplete_examples = [
+            "ouvre VS Code et",
+            "attends voir parce que",
+            "je voudrais que...",
+            "mets la musique de",
+            "vérifie les",
+            "si on regarde dans",
+            "peux-tu",
+            "relance le",
+        ]
+        for phrase in incomplete_examples:
+            self.assertTrue(
+                dynamic_attention_engine.is_incomplete_utterance(phrase),
+                f"Échec détection inachevée pour '{phrase}'",
+            )
+
+        # B) Phrases achevées (ne doivent PAS être détectées comme inachevées)
+        complete_examples = [
+            "ouvre VS Code",
+            "donne la météo à Niamey",
+            "ferme ça",
+            "mets-le à droite",
+            "quel temps fait-il",
+            "qui es-tu",
+        ]
+        for phrase in complete_examples:
+            self.assertFalse(
+                dynamic_attention_engine.is_incomplete_utterance(phrase),
+                f"Faux positif inachevé pour '{phrase}'",
+            )
+
+    def test_classify_utterance_attention_with_incomplete_speech(self) -> None:
+        """Vérifie le routage attentionnel prédictif pour les phrases coupées en cours de route."""
+        # En session active avec fin inachevée -> maintien silencieux
+        att_session = dynamic_attention_engine.classify_utterance_attention("ouvre VS Code et", is_session_active=True)
+        self.assertTrue(att_session["is_incomplete"])
+        self.assertTrue(att_session["is_thinking_out_loud"])
+        self.assertFalse(att_session["is_directed"])
+        self.assertEqual(att_session["reason"], "incomplete_utterance")
+
+        # Hors session avec mot-clé mais phrase inachevée -> ouverture de session silencieuse
+        att_wake = dynamic_attention_engine.classify_utterance_attention("Yo Moctar, je voudrais...", is_session_active=False)
+        self.assertTrue(att_wake["is_incomplete"])
+        self.assertTrue(att_wake["is_thinking_out_loud"])
+        self.assertEqual(att_wake["reason"], "incomplete_utterance")
+
+        # Hors session parole d'ambiance avec connecteur -> rejet ambient sans activation
+        att_ambient = dynamic_attention_engine.classify_utterance_attention("et puis voilà", is_session_active=False)
+        self.assertFalse(att_ambient["is_thinking_out_loud"])
+        self.assertEqual(att_ambient["intent"], "ambient")
+
+    def test_api_voice_interact_incomplete_utterance_silently_preserves_session(self) -> None:
+        """Vérifie que /api/voice/interact ne coupe pas Moctar sur une phrase inachevée et prolonge l'écoute."""
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 1000, -1000, 1000, -1000))
+
+        with patch("main.voice_transcribe.transcribe_audio", return_value="ouvre VS Code et"):
+            resp = self.client.post(
+                "/api/voice/interact",
+                content=wav_bytes,
+                headers={"Content-Type": "audio/wav", "X-Voice-Session-Active": "true"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertTrue(data["ok"])
+            self.assertTrue(data["ignored"])
+            self.assertEqual(data["reason"], "incomplete_utterance")
+            self.assertEqual(data["user_text"], "ouvre VS Code et")
+            self.assertEqual(data["reply_text"], "")
+            self.assertIsNone(data["audio_url"])
+            self.assertTrue(data["session_active"])
+
+    def test_proactive_engineer_personality_prompt(self) -> None:
+        """Vérifie que la personnalité proactive d'ingénieur de M.O.C.T.A.R est bien ancrée."""
+        from voice_semantic_engine import VOICE_SEMANTIC_SYSTEM_PROMPT
+
+        self.assertIn("copilote d'ingénierie d'élite", VOICE_SEMANTIC_SYSTEM_PROMPT)
+        self.assertIn("ChatGPT Voice / Claude", VOICE_SEMANTIC_SYSTEM_PROMPT)
+        self.assertIn("étape logique suivante", VOICE_SEMANTIC_SYSTEM_PROMPT)
+        self.assertIn("bon sens d'ingénieur", VOICE_SEMANTIC_SYSTEM_PROMPT)
+        self.assertTrue(VOICE_SEMANTIC_SYSTEM_PROMPT.strip().endswith("'Moctar'."))
+
 
 if __name__ == "__main__":
     unittest.main()

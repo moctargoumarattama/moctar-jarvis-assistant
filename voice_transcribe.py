@@ -321,7 +321,64 @@ def load_audio(path: str | os.PathLike[str]) -> np.ndarray | str:
     return samples if samples is not None else str(path)
 
 
-def transcribe_groq_api(audio_path: str | os.PathLike[str], api_key: str | None = None) -> str | None:
+def build_dynamic_stt_prompt(
+    active_window: dict[str, Any] | None = None,
+    extra_terms: list[str] | None = None,
+) -> str:
+    """Génère un prompt de biasing acoustique dynamique (Zero-Shot Acoustic Biasing)
+    pour amorcer le décodeur Whisper Large-v3 avec le vocabulaire opérationnel de Moctar,
+    de l'environnement Dell Precision M4800 et des fenêtres/outils actifs.
+    """
+    base_anchors = [
+        "Bonjour Moctar, ici M.O.C.T.A.R sur Dell Precision M4800. JARVIS.",
+        "Ouvre Visual Studio Code, VS Code, code, terminal, bash, Python, pytest, Git status, commit, push, pull,",
+        "Docker, Uvicorn, FastAPI, systemctl, NOC, supervision, météo, degrés, Niamey, Maroc,",
+        "mode bureau, mode travail, ferme ça, relance-le, mets-le à droite, mets-le à gauche, plein écran, snap,",
+        "WhatsApp, volume, musique, Coran.",
+    ]
+
+    context_biasing: list[str] = []
+
+    # 1. Fenêtre active au premier plan (Dell M4800)
+    win = active_window
+    if win is None:
+        try:
+            import desktop_window_manager
+            win = desktop_window_manager.get_active_window_info()
+        except Exception:
+            win = None
+
+    if win and win.get("available"):
+        app = str(win.get("app_name") or "").lower()
+        title = str(win.get("window_title") or "")
+        if "vscode" in app or "code" in app:
+            context_biasing.append("Éditeur VS Code : fichier, fonction, terminal intégré, débogage, sauvegarder, extension.")
+        elif "terminal" in app or "bash" in app:
+            context_biasing.append("Terminal bash : script, sudo, journalctl, htop, curl, grep, apt, processus.")
+        elif any(b in app for b in ("chrome", "firefox", "browser")):
+            context_biasing.append("Navigateur Web : onglet, recherche, page, YouTube, lien, actualiser.")
+
+        clean_title_tokens = [
+            t for t in re.findall(r"[\w.-]+", title)
+            if len(t) > 3 and not t.isdigit() and t.lower() not in ("precision", "dell")
+        ]
+        if clean_title_tokens:
+            context_biasing.append(" ".join(clean_title_tokens[:6]) + ".")
+
+    if extra_terms:
+        context_biasing.append(" ".join(extra_terms) + ".")
+
+    full_prompt = " ".join(base_anchors + context_biasing)
+    if len(full_prompt) > 850:
+        full_prompt = full_prompt[:850].rsplit(" ", 1)[0] + "."
+    return full_prompt
+
+
+def transcribe_groq_api(
+    audio_path: str | os.PathLike[str],
+    api_key: str | None = None,
+    prompt: str | None = None,
+) -> str | None:
     """Transcrit l'audio via l'API Groq Whisper Large-v3 (< 150ms) si GROQ_API_KEY est configurée."""
     key = (api_key or os.environ.get("GROQ_API_KEY", "") or os.environ.get("NOC_GROQ_API_KEY", "")).strip()
     if not key:
@@ -335,11 +392,7 @@ def transcribe_groq_api(audio_path: str | os.PathLike[str], api_key: str | None 
     url = "https://api.groq.com/openai/v1/audio/transcriptions"
     model = os.environ.get("GROQ_WHISPER_MODEL", "whisper-large-v3")
 
-    prompt_fr = (
-        "Bonjour Moctar, ici JARVIS. Ouvre Visual Studio Code, VS Code, code, terminal, "
-        "système, serveur, météo, degrés, Niamey, Maroc, mode bureau, mode travail, "
-        "Docker, Python, Git status, WhatsApp, volume, musique."
-    )
+    prompt_fr = prompt if prompt is not None else build_dynamic_stt_prompt()
 
     # Essai 1 : SDK groq si présent
     try:
@@ -400,6 +453,7 @@ def transcribe_audio(
     *,
     allow_empty: bool = False,
     groq_api_key: str | None = None,
+    groq_prompt: str | None = None,
 ) -> str:
     """Transcrire l'audio fourni via Groq Whisper Large-v3 (< 150ms) ou repli sur faster-whisper local."""
     audio = Path(audio_path)
@@ -410,7 +464,10 @@ def transcribe_audio(
         return ""
 
     # 1. Tentative ultra-rapide via Groq API si GROQ_API_KEY est configurée
-    groq_text = transcribe_groq_api(audio, api_key=groq_api_key)
+    if groq_prompt is not None:
+        groq_text = transcribe_groq_api(audio, api_key=groq_api_key, prompt=groq_prompt)
+    else:
+        groq_text = transcribe_groq_api(audio, api_key=groq_api_key)
     if groq_text is not None:
         filtered = filter_whisper_hallucinations(groq_text)
         if groq_text.strip() and not filtered:
