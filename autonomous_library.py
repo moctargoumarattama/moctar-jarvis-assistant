@@ -255,7 +255,27 @@ def execute_autonomous_task(
             "task_category": "system_tools",
         }
 
-    # 2.5. MÉTÉO EN DIRECT & PRÉVISIONS INSTANTANÉES (OPEN-METEO)
+    # 2.5. MÉMOIRE DE CONTEXTE PROJET & ÉTAT D'AVANCEMENT (« OÙ EN EST-ON ? »)
+    norm_clean = norm.replace("-", " ").replace("'", " ")
+    is_project_context_query = any(k in norm or k in norm_clean for k in [
+        "ou en est on", "ou en sommes nous", "etat du projet", "avancement du projet",
+        "point projet", "point sur le projet", "qu est ce qu on a fait", "qu avons nous fait",
+        "sur quoi on travaille", "sur quoi on bossait", "sur quoi on etait", "ou on en etait",
+        "rappelle moi ce qu on faisait", "c est quoi la suite", "qu est ce qui reste a faire",
+        "prochaines etapes", "quel est l avancement", "avancement",
+    ])
+    if is_project_context_query:
+        import project_context_service
+        ctx = project_context_service.get_project_context_summary(db_path=db_path, session_id=session_id)
+        tools_used.append({"tool": "get_project_context", "arguments": {}, "success": ctx.get("success", False)})
+        return {
+            "handled": True,
+            "reply": ctx.get("oral_text"),
+            "tools_used": tools_used,
+            "task_category": "project_context",
+        }
+
+    # 2.6. MÉTÉO EN DIRECT & PRÉVISIONS INSTANTANÉES (OPEN-METEO)
     is_weather = (
         any(k in norm for k in [
             "meteo", "météo", "quel temps fait il", "quel temps fait-il",

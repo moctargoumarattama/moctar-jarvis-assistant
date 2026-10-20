@@ -86,6 +86,7 @@ from .personal_actions import (
 
 # 7. Project Actions
 from .project_actions import (
+    get_project_context,
     git_log,
     git_pull,
     git_status,
@@ -181,6 +182,7 @@ TOOL_DISPATCHER: Dict[str, Callable[..., Any]] = {
     "prepare_push": prepare_push,
     "maintenance_checklist": maintenance_checklist,
     "summarize_tabular_file": summarize_tabular_file,
+    "get_project_context": get_project_context,
 }
 
 

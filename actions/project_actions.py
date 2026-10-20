@@ -15,6 +15,10 @@ class ProjectAssistant:
     def _resolve_project(self, project_key=None):
         key = project_key or self.current_project_key
         if not key:
+            cwd_path = Path.cwd()
+            if (cwd_path / ".git").exists():
+                from types import SimpleNamespace
+                return SimpleNamespace(path=cwd_path, label="Jarvis", key="jarvis", framework="serveur")
             return None
         return self.projects.get(key)
 
@@ -543,3 +547,38 @@ def summarize_tabular_file(file_path: str):
             data=None,
             error=str(exc),
         )
+
+
+def get_project_context(project_key: str = ""):
+    """Récupère une synthèse complète de l'avancement du projet (Git, commits récents, statut, tâches en cours).
+
+    Critères d'utilisation:
+        - L'agent DOIT appeler cet outil lorsque l'utilisateur demande l'état du projet, l'avancement,
+          ou pose la question 'où en est-on ?'.
+
+    Args:
+        project_key (str): Clé optionnelle du projet cible. Si vide, utilise le projet courant.
+
+    Returns:
+        Dict[str, Any]: Résultat standardisé avec la synthèse textuelle d'avancement.
+    """
+    from actions.base import format_action_result
+    try:
+        import project_context_service
+        ctx = project_context_service.get_project_context_summary()
+        return format_action_result(
+            action="get_project_context",
+            success=True,
+            message=ctx.get("oral_text"),
+            data=ctx,
+            error=None,
+        )
+    except Exception as exc:
+        return format_action_result(
+            action="get_project_context",
+            success=False,
+            message=f"Erreur lors de la récupération du contexte projet : {exc}",
+            data=None,
+            error=str(exc),
+        )
+

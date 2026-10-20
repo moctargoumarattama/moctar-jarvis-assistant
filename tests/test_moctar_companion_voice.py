@@ -748,6 +748,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
     def test_weather_service_open_meteo_report_and_caching(self) -> None:
         """Vérifie le connecteur météo Open-Meteo, le géocodage et la mise en cache."""
         import weather_service
+        weather_service._WEATHER_CACHE.clear()
 
         # 1. Extraction de la ville
         self.assertEqual(weather_service.extract_city_from_query("quel temps fait-il à Paris ?"), "Paris")
@@ -873,6 +874,47 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertIn("32°C", data["reply_text"])
             self.assertTrue(data["reply_text"].endswith("Moctar."))
             self.assertIsNotNone(data["audio_url"])
+
+
+    def test_autonomous_operational_commands_and_project_context(self) -> None:
+        """Vérifie l'exécution déterministe (0 ms) des 4 commandes professionnelles et de l'état du projet."""
+        import autonomous_library
+        import project_context_service
+
+        # 1. Briefing opérationnel
+        res_briefing = autonomous_library.execute_autonomous_task("fais-moi le point")
+        self.assertTrue(res_briefing["handled"])
+        self.assertIn("Moctar", res_briefing["reply"])
+        self.assertIn("Serveur Dell", res_briefing["reply"])
+
+        # 2. Optimisation système
+        res_optim = autonomous_library.execute_autonomous_task("optimise le système")
+        self.assertTrue(res_optim["handled"])
+        self.assertIn("Optimisation terminée", res_optim["reply"])
+
+        # 3. Mode travail
+        res_travail = autonomous_library.execute_autonomous_task("mode travail")
+        self.assertTrue(res_travail["handled"])
+        self.assertEqual(res_travail["action"], "open_app")
+        self.assertIn("VS Code", res_travail["reply"])
+
+        # 4. Fin de journée
+        res_fin = autonomous_library.execute_autonomous_task("fin de journée")
+        self.assertTrue(res_fin["handled"])
+        self.assertIn("Session clôturée", res_fin["reply"])
+
+        # 5. État d'avancement du projet ("Où en est-on ?")
+        res_projet = autonomous_library.execute_autonomous_task("où en est-on ?")
+        self.assertTrue(res_projet["handled"])
+        self.assertEqual(res_projet["task_category"], "project_context")
+        self.assertIn("Moctar, voici le point d'avancement", res_projet["reply"])
+        self.assertIn("Tous les indicateurs sont nominaux, Moctar.", res_projet["reply"])
+
+        # 6. Test direct de project_context_service
+        ctx = project_context_service.get_project_context_summary()
+        self.assertTrue(ctx["success"])
+        self.assertIn("oral_text", ctx)
+        self.assertIn("main", ctx["branch"])
 
 
 if __name__ == "__main__":
