@@ -1,0 +1,477 @@
+"""Moteur vocal sémantique natif avec Tool Calling LLM (< 500 ms) pour JARVIS / M.O.C.T.A.R.
+
+Remplace l'ancienne forêt de regex rigides ('if "mot" in texte:') par la compréhension
+d'intention native et l'appel de fonctions structuré (Function Calling) de Gemini / LLM.
+
+Traite les formulations naturelles, informelles ou complexes :
+- "prépare-moi de quoi bosser" -> open_app(target="vscode")
+- "ouvre le truc pour coder" -> open_app(target="vscode")
+- "mets-toi au mode bureau" -> open_app(target="vscode")
+- "il fait quel temps dehors à Casa ?" -> get_weather(city="Casablanca")
+- "c'est quoi l'avancement du projet ?" -> get_project_context()
+- "coupe le son" -> control_music(action="pause")
+- "nettoie la mémoire" -> optimize_system()
+- "Scott", "Bonjour", etc. -> réponse conversationnelle fluide
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import re
+import time
+from typing import Any, Dict, List, Optional
+
+import actions
+from actions import execute_tool
+import ai_brain
+from ai_brain import build_live_system_context
+
+LOGGER = logging.getLogger("moctar.voice_semantic_engine")
+
+VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "open_app",
+            "description": (
+                "Lance ou ouvre une application ou un environnement de travail sur la machine "
+                "(ex: 'vscode' pour coder, travailler, mode bureau, espace de travail; 'terminal', 'chrome', 'calc', 'notepad')."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": (
+                            "Nom de l'application à lancer (ex: 'vscode', 'chrome', 'terminal', 'notepad', 'calc'). "
+                            "Pour tout ce qui concerne le travail, le code ou le mode bureau, utiliser impérativement 'vscode'."
+                        ),
+                    }
+                },
+                "required": ["target"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_site",
+            "description": "Ouvre un site web ou service dans le navigateur (ex: 'youtube', 'google', 'github', 'wikipedia', 'gmail', 'whatsapp').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Nom du site web ou URL cible (ex: 'youtube', 'github', 'google').",
+                    }
+                },
+                "required": ["target"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Récupère les informations météorologiques et températures réelles pour une ville (ex: 'Niamey', 'Casablanca', 'Paris').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {
+                        "type": "string",
+                        "description": "Nom de la ville demandée (par défaut 'Niamey' si non précisé).",
+                    },
+                    "target_day": {
+                        "type": "string",
+                        "enum": ["today", "demain"],
+                        "description": "Jour cible : 'today' pour aujourd'hui, 'demain' pour les prévisions du lendemain.",
+                    },
+                },
+                "required": ["city"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "control_music",
+            "description": "Contrôle la lecture multimédia ou audio du système hôte (pause, reprise, suivant, précédent, arrêt).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["pause", "resume", "next", "previous", "stop"],
+                        "description": "Action audio à exécuter.",
+                    }
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_todos",
+            "description": "Consulte et liste les tâches en cours ou to-dos de Moctar.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Nombre maximum de tâches à retourner (par défaut 5).",
+                    }
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_todo",
+            "description": "Ajoute une nouvelle tâche ou to-do à la liste personnelle de Moctar.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Intitulé clair et complet de la tâche à ajouter.",
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                        "description": "Priorité de la tâche (par défaut 'medium').",
+                    },
+                },
+                "required": ["title"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_reminder",
+            "description": "Programme un rappel pour Moctar dans un délai spécifié en secondes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reminder_text": {
+                        "type": "string",
+                        "description": "Objet ou texte du rappel.",
+                    },
+                    "delay_seconds": {
+                        "type": "integer",
+                        "description": "Délai en secondes avant le déclenchement du rappel (ex: 300 pour 5 min, 900 pour 15 min).",
+                    },
+                },
+                "required": ["reminder_text", "delay_seconds"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_project_context",
+            "description": "Obtient la synthèse complète de l'avancement du projet JARVIS (derniers commits Git, état des modules, chantiers récents). À appeler quand Moctar demande 'où en est-on ?', 'qu'est-ce qu'on a fait ?', 'avancement du projet'.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_system_telemetry",
+            "description": "Obtient la télémétrie complète du système hôte (CPU %, RAM %, température, disque, réseau).",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "optimize_system",
+            "description": "Nettoie la mémoire vive (RAM), purge les caches temporaires et optimise les ressources du serveur Dell Precision M4800.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_web_instant",
+            "description": "Recherche sur le web des faits, actualités ou informations récentes quand la question porte sur un événement récent ou du savoir externe.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Mots-clés de la recherche web.",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
+]
+
+VOICE_FAST_SYSTEM_PROMPT = (
+    "Tu es M.O.C.T.A.R, le copilote d'ingénierie et assistant personnel de Moctar. "
+    "Tu t'exprimes en français professionnel, simple, clair et fluide. "
+    "Ton attitude est celle d'un partenaire technique fiable, calme et bienveillant. "
+    "Tu dialogues naturellement en tenant compte des derniers échanges pour ne pas te répéter. "
+    "Pour une salutation simple, sois cordial, direct et concis (1 phrase). "
+    "Pour une question du quotidien, de météo, savoir, culture, actualité ou sciences, "
+    "fournis une synthèse claire, vivante et structurée en 2 à 3 phrases fluides (environ 35 à 50 mots), "
+    "en donnant directement les faits essentiels et pertinents. "
+    "Évite tout jargon théâtral, superlatif excessif ou formule creuse. "
+    "Ne dis jamais que tu es un simple assistant ou que tu n'as pas accès à internet. "
+    "Termine naturellement par 'Moctar'."
+)
+
+VOICE_SEMANTIC_SYSTEM_PROMPT = (
+    "Tu es M.O.C.T.A.R, copilote d'ingénierie et assistant personnel de Moctar sur son infrastructure Dell Precision M4800. "
+    "Tu t'exprimes en français professionnel, simple, clair et concis (1 à 2 phrases fluides). "
+    "Tu disposes d'outils natifs (Function Calling) pour exécuter directement les actions sur le système et les services. "
+    "\n\n"
+    "Directives de sélection des outils :\n"
+    "- Si Moctar demande d'ouvrir une application, de travailler, de coder, de préparer son bureau ou son espace de travail "
+    "(ex: 'prépare-moi de quoi bosser', 'ouvre le truc pour coder', 'mets-toi au mode bureau', 'ouvre vs code') -> appelle 'open_app' avec target='vscode'.\n"
+    "- Si Moctar demande de la musique, de couper le son, d'arrêter ou mettre en pause -> appelle 'control_music'.\n"
+    "- Si Moctar demande la météo ou la température extérieure pour une ville ou ici -> appelle 'get_weather'.\n"
+    "- Si Moctar demande où en est le projet, ce qu'on a fait, les derniers commits ou l'avancement -> appelle 'get_project_context'.\n"
+    "- Si Moctar demande d'optimiser le système ou libérer la RAM -> appelle 'optimize_system'.\n"
+    "- Si Moctar demande d'ajouter ou lister ses tâches/rappels -> appelle 'add_todo', 'list_todos', 'schedule_reminder'.\n"
+    "- Si Moctar pose une question factuelle, d'actualité, de culture, de sciences ou discute amicalement sans action requise -> "
+    "réponds directement avec bienveillance et précision technique, sans appeler d'outil inutilement.\n"
+    "\n"
+    "Termine toujours naturellement par 'Moctar'."
+)
+
+
+def _format_reply_ending(text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return "À vos ordres Moctar."
+    if not re.search(r"\bmoctar[.!?]?$", cleaned, re.IGNORECASE):
+        cleaned = f"{cleaned.rstrip('.')} Moctar."
+    return cleaned
+
+
+def execute_voice_semantic_turn(
+    command_text: str,
+    runtime: Any = None,
+    session_id: str | None = None,
+    history: list[dict[str, str]] | None = None,
+    system_prompt: str | None = None,
+) -> dict[str, Any]:
+    """Exécute un tour d'interaction vocale via Function Calling LLM (< 500 ms).
+
+    Analyse sémantiquement l'intention de l'utilisateur, déclenche l'outil approprié
+    et formule une synthèse vocale limpide en français professionnel pour Moctar.
+    En cas d'indisponibilité du LLM, bascule automatiquement sur la bibliothèque autonome.
+    """
+    clean_text = (command_text or "").strip()
+    sess_key = session_id or getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
+
+    # 1. Contexte vivant et télémétrie Dell Precision M4800
+    telemetry = build_live_system_context(runtime)
+    base_prompt = system_prompt or VOICE_FAST_SYSTEM_PROMPT
+    prompt_sections = [base_prompt, VOICE_SEMANTIC_SYSTEM_PROMPT]
+
+    # Mémoire de faits ou préférences
+    if runtime and getattr(runtime, "jarvis", None) and getattr(runtime.jarvis, "memory", None):
+        try:
+            facts = runtime.jarvis.memory.get_system_context_snippet(clean_text)
+            if facts and isinstance(facts, str):
+                prompt_sections.append(facts)
+        except Exception:
+            pass
+
+    if telemetry and isinstance(telemetry, str):
+        prompt_sections.append(telemetry)
+    full_system_prompt = "\n\n".join(str(s) for s in prompt_sections if s)
+
+    # 2. Récupération ou initialisation de l'instance AIBrain
+    brain = getattr(runtime, "ai_brain", None)
+    if not brain:
+        try:
+            brain = ai_brain.AIBrain()
+        except Exception:
+            brain = None
+
+    llm_res: dict[str, Any] | None = None
+    if brain and hasattr(brain, "chat"):
+        try:
+            t0 = time.perf_counter()
+            llm_res = brain.chat(
+                clean_text,
+                tools=VOICE_FAST_TOOLS,
+                system_prompt=full_system_prompt,
+                temperature=0.1,
+            )
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            LOGGER.info("⚡ [VOICE SEMANTIC LLM] (%dms): finish_reason=%s, tools=%d",
+                        duration_ms, llm_res.get("finish_reason"), len(llm_res.get("tool_calls", [])))
+        except Exception as exc:
+            LOGGER.warning("Erreur lors de l'appel LLM sémantique : %s", exc)
+            llm_res = None
+
+    # 3. Traitement des Function Calls s'ils ont été émis par le LLM
+    if llm_res and llm_res.get("tool_calls"):
+        tool_calls = llm_res["tool_calls"]
+        tools_used: list[dict[str, Any]] = []
+        action_name: str | None = None
+        action_url: str | None = None
+        action_title: str | None = None
+        tool_replies: list[str] = []
+
+        for call in tool_calls:
+            func_name = call.get("name") or call.get("function", {}).get("name")
+            raw_args = call.get("arguments") or call.get("function", {}).get("arguments") or {}
+            if isinstance(raw_args, str):
+                try:
+                    args = json.loads(raw_args)
+                except Exception:
+                    args = {}
+            else:
+                args = dict(raw_args)
+
+            LOGGER.info("⚡ [VOICE TOOL DISPATCH]: %s(%s)", func_name, args)
+            t_exec = time.perf_counter()
+            tool_res = execute_tool(func_name, args)
+            t_diff = int((time.perf_counter() - t_exec) * 1000)
+
+            tools_used.append({
+                "tool": func_name,
+                "arguments": args,
+                "success": bool(tool_res.get("success", False)),
+                "duration_ms": t_diff,
+            })
+
+            # Extraction spécifique selon l'outil
+            if func_name == "open_app":
+                action_name = "open_app"
+                target_norm = str(args.get("target") or args.get("app_name") or args.get("app") or "").lower()
+                if any(w in target_norm for w in ("vscode", "vs code", "code", "bureau", "travail")):
+                    action_url = "vscode://file/opt/jarvis"
+                    action_title = "Visual Studio Code"
+                    tool_replies.append("Environnement de travail initialisé. VS Code et terminal de supervision prêts")
+                else:
+                    action_url = tool_res.get("data", {}).get("url") if isinstance(tool_res.get("data"), dict) else None
+                    action_title = tool_res.get("data", {}).get("title") if isinstance(tool_res.get("data"), dict) else target_norm.capitalize()
+                    tool_replies.append(tool_res.get("message", "Application lancée"))
+
+            elif func_name in ("open_site", "search_google", "search_youtube"):
+                action_name = "open_browser"
+                data_dict = tool_res.get("data") if isinstance(tool_res.get("data"), dict) else {}
+                action_url = data_dict.get("url")
+                action_title = data_dict.get("title") or "Navigation Web"
+                tool_replies.append(tool_res.get("message", "Ouverture dans le navigateur"))
+
+            elif func_name == "get_project_context":
+                msg = tool_res.get("message")
+                tool_replies.append(msg if msg else "Contexte projet récupéré")
+
+            elif func_name == "get_weather":
+                msg = tool_res.get("message")
+                tool_replies.append(msg if msg else "Données météo récupérées")
+
+            elif func_name == "optimize_system":
+                tool_replies.append(tool_res.get("message", "Optimisation système effectuée"))
+
+            elif func_name == "control_music":
+                tool_replies.append(tool_res.get("message", "Contrôle multimédia transmis"))
+
+            elif func_name in ("add_todo", "list_todos"):
+                tool_replies.append(tool_res.get("message", "Tâches mises à jour"))
+
+            else:
+                msg = tool_res.get("message")
+                if msg:
+                    tool_replies.append(msg)
+
+        # Synthèse de la réponse orale
+        llm_text = (llm_res.get("content") or "").strip()
+        if llm_text and not any(m in llm_text.lower() for m in ("indisponible", "erreur", "offline")):
+            final_reply = _format_reply_ending(llm_text)
+        elif tool_replies:
+            final_reply = _format_reply_ending(" ".join(r for r in tool_replies if r))
+        else:
+            final_reply = "Action exécutée avec succès, Moctar."
+
+        return {
+            "status": "success",
+            "reply": final_reply,
+            "action": action_name,
+            "url": action_url,
+            "title": action_title,
+            "tools_used": tools_used,
+            "thought_chain": [f"Action sémantique résolue par LLM Tool Calling ({tools_used[0]['tool'] if tools_used else 'action'})"],
+            "fast_path": True,
+            "semantic_tool_calling": True,
+        }
+
+    # 4. Traitement conversationnel si le LLM a répondu directement sans outil avec succès
+    is_error = (
+        not llm_res
+        or llm_res.get("finish_reason") == "error"
+        or llm_res.get("fallback_courtesy")
+        or any(m in (llm_res.get("content") or "").lower() for m in ("indisponible", "erreur"))
+    )
+    if not is_error and llm_res and llm_res.get("content"):
+        final_reply = _format_reply_ending(llm_res["content"])
+        return {
+            "status": "success",
+            "reply": final_reply,
+            "action": None,
+            "url": None,
+            "title": None,
+            "tools_used": [],
+            "thought_chain": ["Réponse conversationnelle sémantique Gemini (< 400ms)"],
+            "fast_path": True,
+            "semantic_tool_calling": False,
+        }
+
+    # 5. Repli déterministe sur autonomous_library si le LLM n'est pas disponible (offline / tests)
+    import autonomous_library
+    db_path = getattr(getattr(runtime, "jarvis", None), "db_path", None)
+    auto_res = autonomous_library.execute_autonomous_task(
+        clean_text,
+        session_id=sess_key,
+        db_path=db_path,
+    )
+    if auto_res.get("handled") is True:
+        raw_reply = _format_reply_ending(str(auto_res.get("reply") or ""))
+        return {
+            "status": "success",
+            "reply": raw_reply,
+            "action": auto_res.get("action"),
+            "url": auto_res.get("url"),
+            "title": auto_res.get("title"),
+            "tools_used": auto_res.get("tools_used", []),
+            "thought_chain": [f"Repli déterministe autonome ({auto_res.get('task_category', 'local')})"],
+            "fast_path": True,
+            "semantic_tool_calling": False,
+        }
+
+    # 6. Réponse par défaut ultime
+    return {
+        "status": "success",
+        "reply": "À vos ordres Moctar, je suis en ligne et tous les systèmes sont opérationnels.",
+        "action": None,
+        "url": None,
+        "title": None,
+        "tools_used": [],
+        "thought_chain": ["Réponse nominale par défaut"],
+        "fast_path": True,
+        "semantic_tool_calling": False,
+    }

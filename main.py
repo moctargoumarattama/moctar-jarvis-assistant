@@ -29,6 +29,7 @@ import autonomous_library
 import collector
 import voice_transcribe
 from ai_brain import build_live_system_context, get_cpu_temperature_celsius, voice_fast_llm_reply
+from voice_semantic_engine import execute_voice_semantic_turn
 from config import RESTART_ALLOWLIST, Settings
 from cyberdefense import CyberDefenseManager, TRAP_PATHS
 from sentinel import SentinelManager
@@ -1321,81 +1322,51 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
                     except Exception:
                         pass
-            elif is_conversational_fast_path(command_text) and (
-                os.environ.get("GROQ_API_KEY")
-                or os.environ.get("NOC_GROQ_API_KEY")
-                or getattr(getattr(runtime, "settings", None), "groq_api_key", None)
-                or getattr(runtime, "ai_brain", None)
-            ):
+            elif (is_devops_service or is_system_command(command_text)) and getattr(runtime, "jarvis", None) and hasattr(runtime.jarvis, "execute_prompt_async"):
                 display_user_text = command_text
-                LOGGER.info("⚡ [VOICE FAST-PATH]: Routage conversationnel Groq (< 200ms) pour '%s'", command_text)
                 try:
-                    session_id = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
-                    raw_reply = await asyncio.to_thread(
-                        voice_fast_llm_reply,
-                        command_text,
-                        VOICE_FAST_SYSTEM_PROMPT,
-                        runtime,
-                        session_id,
+                    agent_result = await runtime.jarvis.execute_prompt_async(
+                        user_input=command_text,
+                        source="web_voice",
                     )
-                    reply_text = str(raw_reply or "À vos ordres Moctar.").strip()
-                    if not re.search(r"\bmoctar[.!?]?$", reply_text, re.IGNORECASE):
-                        reply_text = f"{reply_text.rstrip('.')} Moctar."
-                    agent_result = {
-                        "status": "success",
-                        "reply": reply_text,
-                        "tools_used": [],
-                        "thought_chain": ["Cerveau vocal ultra-rapide Groq (< 200ms)"],
-                        "fast_path": True,
-                    }
-                    if runtime.jarvis and getattr(runtime.jarvis, "memory", None):
-                        try:
-                            session_id = getattr(runtime.jarvis, "active_session_id", "session_voice")
-                            runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
-                            runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
-                        except Exception:
-                            pass
                 except Exception as exc:
-                    LOGGER.warning("Erreur fast-path conversationnel : %s", exc)
-                    if runtime.jarvis:
-                        agent_result = await runtime.jarvis.execute_prompt_async(
-                            user_input=command_text,
-                            source="web_voice",
-                        )
-                    else:
-                        agent_result = {
-                            "status": "error",
-                            "reply": "Je reste à votre écoute Moctar.",
-                        }
-                    reply_text = str(
-                        agent_result.get("reply")
-                        or agent_result.get("response")
-                        or "Bien reçu, Moctar."
-                    ).strip()
-            else:
-                display_user_text = command_text
-                if runtime.jarvis:
-                    try:
-                        agent_result = await runtime.jarvis.execute_prompt_async(
-                            user_input=command_text,
-                            source="web_voice",
-                        )
-                    except Exception as exc:
-                        LOGGER.warning("Erreur AgentCore lors de /api/voice/interact : %s", exc)
-                        agent_result = {
-                            "status": "error",
-                            "reply": "Je suis à l'écoute Moctar, mais une erreur interne est survenue.",
-                        }
-                else:
+                    LOGGER.warning("Erreur AgentCore lors de /api/voice/interact : %s", exc)
                     agent_result = {
-                        "status": "offline",
-                        "reply": "Je suis en ligne Moctar, mais le module AgentCore n'est pas initialisé.",
+                        "status": "error",
+                        "reply": "Je suis à l'écoute Moctar, mais une erreur interne est survenue sur l'infrastructure.",
                     }
                 reply_text = str(
                     agent_result.get("reply")
                     or agent_result.get("response")
                     or "Bien reçu, Moctar."
                 ).strip()
+            else:
+                # Cœur Sémantique Natif LLM avec Tool Calling (< 500 ms)
+                display_user_text = command_text
+                session_id = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
+                agent_result = await asyncio.to_thread(
+                    execute_voice_semantic_turn,
+                    command_text,
+                    runtime,
+                    session_id,
+                    None,
+                    VOICE_FAST_SYSTEM_PROMPT,
+                )
+                reply_text = str(
+                    agent_result.get("reply")
+                    or agent_result.get("response")
+                    or "À vos ordres Moctar."
+                ).strip()
+                if not re.search(r"\bmoctar[.!?]?$", reply_text, re.IGNORECASE):
+                    reply_text = f"{reply_text.rstrip('.')} Moctar."
+                agent_result["reply"] = reply_text
+
+                if runtime.jarvis and getattr(runtime.jarvis, "memory", None):
+                    try:
+                        runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
+                        runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
+                    except Exception:
+                        pass
 
         audio_url: str | None = None
         try:

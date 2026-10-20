@@ -33,7 +33,16 @@ def control_music(action, pyautogui_module=None):
         "music_next": ("nexttrack", "Je passe au morceau suivant."),
         "music_previous": ("prevtrack", "Je reviens au morceau precedent."),
     }
-    key, response = mapping[action]
+    norm_action = str(action or '').strip().lower()
+    if norm_action in ('pause', 'stop'):
+        norm_action = 'music_pause'
+    elif norm_action in ('resume', 'play', 'playpause'):
+        norm_action = 'music_resume'
+    elif norm_action in ('next', 'suivant'):
+        norm_action = 'music_next'
+    elif norm_action in ('previous', 'precedent', 'précédent'):
+        norm_action = 'music_previous'
+    key, response = mapping.get(norm_action, ('playpause', 'Commande multimédia transmise.'))
     try:
         pyautogui_module.press(key)
         return response

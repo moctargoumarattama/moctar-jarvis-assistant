@@ -51,6 +51,7 @@ from .system_actions import (
     get_time_response,
     open_app,
     open_folder,
+    optimize_system,
 )
 
 # 4. Web Actions
@@ -136,6 +137,7 @@ TOOL_DISPATCHER: Dict[str, Callable[..., Any]] = {
     "open_app": open_app,
     "close_app": close_app,
     "open_folder": open_folder,
+    "optimize_system": optimize_system,
 
     # Web Actions
     "open_site": open_site,
@@ -429,7 +431,7 @@ def execute_tool(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> 
 
     # Normalisation et aliasing intelligent des arguments pour petits modèles
     if "target" not in raw_args:
-        for alias in ("url", "site", "query", "name", "app", "target_url"):
+        for alias in ("url", "site", "query", "name", "app", "app_name", "application", "target_url"):
             if alias in raw_args and raw_args[alias]:
                 raw_args["target"] = raw_args[alias]
                 break
