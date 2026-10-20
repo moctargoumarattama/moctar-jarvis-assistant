@@ -370,7 +370,24 @@ def execute_voice_semantic_turn(
         prompt_sections.append(telemetry)
     full_system_prompt = "\n\n".join(str(s) for s in prompt_sections if s)
 
-    # 2. Récupération ou initialisation de l'instance AIBrain
+    # 2. Récupération de l'historique conversationnel récent (Multi-Turn Context)
+    chat_messages: list[dict[str, Any]] = []
+    if runtime and getattr(runtime, "jarvis", None) and getattr(runtime.jarvis, "memory", None):
+        try:
+            raw_history = runtime.jarvis.memory.get_context_window(sess_key, max_turns=6)
+            if raw_history and isinstance(raw_history, list):
+                for m in raw_history:
+                    role = m.get("role")
+                    content = m.get("content")
+                    if role in ("user", "assistant") and content:
+                        chat_messages.append({"role": role, "content": str(content)})
+        except Exception as hist_err:
+            LOGGER.debug("Erreur chargement historique session vocale : %s", hist_err)
+
+    chat_messages.append({"role": "user", "content": clean_text})
+    llm_payload: Any = clean_text if len(chat_messages) <= 1 else chat_messages
+
+    # 3. Récupération ou initialisation de l'instance AIBrain
     brain = getattr(runtime, "ai_brain", None)
     if not brain:
         try:
@@ -383,7 +400,7 @@ def execute_voice_semantic_turn(
         try:
             t0 = time.perf_counter()
             llm_res = brain.chat(
-                clean_text,
+                llm_payload,
                 tools=VOICE_FAST_TOOLS,
                 system_prompt=full_system_prompt,
                 temperature=0.1,
@@ -477,14 +494,63 @@ def execute_voice_semantic_turn(
                 if msg:
                     tool_replies.append(msg)
 
-        # Synthèse de la réponse orale
-        llm_text = (llm_res.get("content") or "").strip()
-        if llm_text and not any(m in llm_text.lower() for m in ("indisponible", "erreur", "offline")):
-            final_reply = _format_reply_ending(llm_text)
-        elif tool_replies:
-            final_reply = _format_reply_ending(" ".join(r for r in tool_replies if r))
-        else:
-            final_reply = "Action exécutée avec succès, Moctar."
+        # Synthèse vocale intelligente par le LLM (Two-Step ReAct Loop)
+        final_reply: str | None = None
+        if brain and hasattr(brain, "chat"):
+            try:
+                synthesis_messages = list(chat_messages)
+                synthesis_messages.append({
+                    "role": "assistant",
+                    "content": llm_res.get("content") or "",
+                    "tool_calls": tool_calls,
+                })
+                for call in tool_calls:
+                    f_name = call.get("name") or call.get("function", {}).get("name")
+                    c_id = call.get("id") or f"call_{f_name}"
+                    matching_reply = next((r for r in tool_replies if r), "Action exécutée avec succès.")
+                    synthesis_messages.append({
+                        "role": "tool",
+                        "name": f_name,
+                        "tool_call_id": c_id,
+                        "content": json.dumps({"status": "success", "result": matching_reply}, ensure_ascii=False),
+                    })
+                synthesis_prompt = (
+                    f"{full_system_prompt}\n\n"
+                    f"[CONSIGNE DE SYNTHÈSE VOCALE DIRECTE]\n"
+                    f"Les outils système ont été exécutés avec succès. Formule une réponse orale concise, limpide, vivante et naturelle en 1 ou 2 phrases courtes pour Moctar.\n"
+                    f"Donne directement les faits essentiels (météo, état, action confirmée) en français professionnel d'ingénieur, sans lire de JSON ni jargon informatique superflu.\n"
+                    f"Termine naturellement par 'Moctar'."
+                )
+                t_synth = time.perf_counter()
+                synth_res = brain.chat(
+                    synthesis_messages,
+                    tools=None,
+                    system_prompt=synthesis_prompt,
+                    temperature=0.2,
+                )
+                t_synth_ms = int((time.perf_counter() - t_synth) * 1000)
+                synth_text = (synth_res.get("content") or "").strip() if synth_res else ""
+                if synth_text and not any(m in synth_text.lower() for m in ("indisponible", "erreur", "offline")):
+                    final_reply = _format_reply_ending(synth_text)
+                    LOGGER.info("⚡ [VOICE TOOL SYNTHESIS] (%dms): '%s'", t_synth_ms, final_reply)
+            except Exception as synth_exc:
+                LOGGER.debug("Synthèse LLM post-outil échouée, repli direct : %s", synth_exc)
+
+        if not final_reply:
+            llm_text = (llm_res.get("content") or "").strip()
+            if llm_text and not any(m in llm_text.lower() for m in ("indisponible", "erreur", "offline")):
+                final_reply = _format_reply_ending(llm_text)
+            elif tool_replies:
+                final_reply = _format_reply_ending(" ".join(r for r in tool_replies if r))
+            else:
+                final_reply = "Action exécutée avec succès, Moctar."
+
+        if runtime and getattr(runtime, "jarvis", None) and getattr(runtime.jarvis, "memory", None):
+            try:
+                runtime.jarvis.memory.add_message(session_id=sess_key, role="user", content=clean_text)
+                runtime.jarvis.memory.add_message(session_id=sess_key, role="assistant", content=final_reply)
+            except Exception:
+                pass
 
         return {
             "status": "success",
@@ -507,6 +573,12 @@ def execute_voice_semantic_turn(
     )
     if not is_error and llm_res and llm_res.get("content"):
         final_reply = _format_reply_ending(llm_res["content"])
+        if runtime and getattr(runtime, "jarvis", None) and getattr(runtime.jarvis, "memory", None):
+            try:
+                runtime.jarvis.memory.add_message(session_id=sess_key, role="user", content=clean_text)
+                runtime.jarvis.memory.add_message(session_id=sess_key, role="assistant", content=final_reply)
+            except Exception:
+                pass
         return {
             "status": "success",
             "reply": final_reply,

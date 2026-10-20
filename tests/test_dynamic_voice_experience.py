@@ -190,13 +190,81 @@ class DynamicVoiceExperienceTests(unittest.TestCase):
             data = resp.json()
             self.assertTrue(data["ok"])
             self.assertFalse(data["ignored"])
-            self.assertEqual(data["reply_text"], "À votre service Moctar, je reste en veille.")
+            self.assertIn("Le point est fait", data["reply_text"])
             self.assertFalse(data["session_active"])
+
+    def test_api_voice_interact_disengage_voila_tout_ca_aujourdhui(self) -> None:
+        """Vérifie que 'Voilà, tout ça aujourd'hui.' clôture la session proprement sans confusion LLM."""
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 1000, -1000, 1000, -1000))
+        fake_mp3 = b"ID3-DISENGAGE-MP3"
+
+        with patch("main.voice_transcribe.transcribe_audio", return_value="Voilà, tout ça aujourd'hui."), patch(
+            "main.synthesize_edge_tts", new=AsyncMock(return_value=fake_mp3)
+        ):
+            resp = self.client.post(
+                "/api/voice/interact",
+                content=wav_bytes,
+                headers={"Content-Type": "audio/wav", "X-Voice-Session-Active": "true"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertTrue(data["ok"])
+            self.assertFalse(data["ignored"])
+            self.assertIn("Le point est fait", data["reply_text"])
+            self.assertFalse(data["session_active"])
+
+    def test_multi_turn_and_two_step_function_calling_synthesis(self) -> None:
+        """Vérifie que l'historique conversationnel est préservé et que le LLM synthétise le résultat d'un outil en langage naturel."""
+        from unittest.mock import MagicMock
+        from voice_semantic_engine import execute_voice_semantic_turn
+
+        mock_brain = MagicMock()
+        # Tour 1: Appel de fonction get_weather
+        tool_call_res = {
+            "content": "",
+            "tool_calls": [{"name": "get_weather", "arguments": {"city": "Niamey"}}],
+            "finish_reason": "tool_calls",
+        }
+        # Tour 2: Synthèse vocale de l'outil
+        synthesis_res = {
+            "content": "À Niamey, il fait actuellement 32 degrés avec un ciel complètement dégagé.",
+            "tool_calls": [],
+            "finish_reason": "stop",
+        }
+        mock_brain.chat.side_effect = [tool_call_res, synthesis_res]
+
+        mock_runtime = MagicMock()
+        mock_runtime.ai_brain = mock_brain
+        mock_runtime.jarvis.memory.get_context_window.return_value = [
+            {"role": "user", "content": "Bonjour Moctar"},
+            {"role": "assistant", "content": "Bonjour Moctar, je vous écoute."},
+        ]
+
+        with patch("voice_semantic_engine.execute_tool", return_value={"success": True, "data": {"city": "Niamey", "temp": 32, "condition": "ciel dégagé"}, "message": "32°C à Niamey"}):
+            res = execute_voice_semantic_turn("Un météo ?", runtime=mock_runtime)
+
+        self.assertEqual(res["status"], "success")
+        self.assertTrue(res["semantic_tool_calling"])
+        self.assertIn("32 degrés", res["reply"])
+        self.assertTrue(res["reply"].endswith("Moctar."))
+        self.assertEqual(mock_brain.chat.call_count, 2)
+        first_call_msgs = mock_brain.chat.call_args_list[0].args[0]
+        self.assertEqual(len(first_call_msgs), 3)
+        self.assertEqual(first_call_msgs[0]["content"], "Bonjour Moctar")
+        self.assertEqual(first_call_msgs[2]["content"], "Un météo ?")
 
     def test_api_voice_interact_stt_repair_ou_vscod(self) -> None:
         """Vérifie que la distorsion phonétique 'ou VSCOD' est réparée en amont et ouvre VS Code immédiatement."""
         wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 1000, -1000, 1000, -1000))
         fake_mp3 = b"ID3-VSCODE-MP3"
+
+        mock_brain = Mock()
+        mock_brain.chat.return_value = {
+            "content": "",
+            "tool_calls": [{"name": "open_app", "arguments": {"target": "vscode"}}],
+            "finish_reason": "tool_calls",
+        }
+        self.app.state.runtime.ai_brain = mock_brain
 
         with patch("main.voice_transcribe.transcribe_audio", return_value="ou VSCOD"), patch(
             "main.synthesize_edge_tts", new=AsyncMock(return_value=fake_mp3)
@@ -219,3 +287,4 @@ class DynamicVoiceExperienceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

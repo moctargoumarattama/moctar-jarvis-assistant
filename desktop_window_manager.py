@@ -410,3 +410,4 @@ def snap_active_window(position: str = "maximize") -> Dict[str, Any]:
         message=f"Disposition de fenêtre appliquée ({pos}), Moctar.",
         data={"position": pos},
     )
+

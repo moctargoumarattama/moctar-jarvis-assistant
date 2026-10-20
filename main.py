@@ -1259,10 +1259,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             is_session_active=session_active,
         )
 
-        # A) Désengagement explicite ("merci moctar", "c'est bon", "bonne nuit")
+        # A) Désengagement explicite ("merci moctar", "c'est bon", "voilà tout ça aujourd'hui", "bonne nuit")
         if session_active and attention.get("should_disengage"):
             runtime.voice_session_until = 0.0
-            reply_text = "À votre service Moctar, je reste en veille."
+            reply_text = "C'est bien noté Moctar. Le point est fait, tout reste sous contrôle. Je passe en veille."
             LOGGER.info("⚡ [VOICE DISENGAGE]: Fin de session collaborative demandée -> '%s'", reply_text)
             audio_url: str | None = None
             try:
@@ -1422,7 +1422,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     or "Bien reçu, Moctar."
                 ).strip()
             else:
-                # Cœur Sémantique Natif LLM avec Tool Calling (< 500 ms)
+                # Cœur Sémantique Natif LLM avec Tool Calling & Mémoire Multi-Tours (< 500 ms)
                 display_user_text = command_text
                 session_id = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
                 agent_result = await asyncio.to_thread(

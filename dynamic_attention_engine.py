@@ -55,7 +55,27 @@ _DISENGAGE_PHRASES = {
     "c'est bon", "c est bon", "c'est tout", "c est tout", "laisse tomber",
     "rien laisse tomber", "merci", "merci moctar", "bonne nuit", "a plus tard",
     "à plus tard", "je coupe", "au revoir", "stop", "pause", "repose-toi",
+    "voilà tout ça aujourd'hui", "voila tout ca aujourd'hui", "voilà tout ça", "voila tout ca",
+    "voilà c'est tout", "voila c est tout", "voilà c'est tout pour aujourd'hui",
+    "c'est tout pour aujourd'hui", "c est tout pour aujourd'hui", "tout ça aujourd'hui",
+    "tout ca aujourd'hui", "on a fini", "on a fini pour aujourd'hui", "on s'arrête là",
+    "on s arrete la", "fini pour aujourd'hui", "c'est bon pour aujourd'hui",
+    "c est bon pour aujourd'hui", "je pense que c'est tout", "je pense que c est tout",
+    "bonne soirée", "bonne soiree", "le point est fait",
 }
+
+_DISENGAGE_REGEX = re.compile(
+    r"^(?:voil[aà],?\s*)?(?:(?:c['’]?est\s+)?tout\s+(?:[cç]a\s+)?(?:pour\s+)?aujourd['’]hui|"
+    r"c['’]?est\s+tout(?:\s+pour\s+(?:l['’]instant|aujourd['’]hui))?|"
+    r"on\s+(?:a\s+fini|s['’]arr[êe]te\s+l[aà])(?:\s+pour\s+aujourd['’]hui)?|"
+    r"fini\s+pour\s+aujourd['’]hui|"
+    r"c['’]?est\s+bon(?:\s+pour\s+(?:moi|aujourd['’]hui))?|"
+    r"merci(?:\s+beaucoup)?(?:\s+moctar)?|"
+    r"bonne\s+(?:nuit|soir[ée]e)|"
+    r"[aà]\s+plus(?:\s+tard)?|"
+    r"repose[- ]toi)\b",
+    re.I,
+)
 
 
 def classify_utterance_attention(text: str, is_session_active: bool = False) -> Dict[str, Any]:
@@ -86,7 +106,7 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
     norm = clean.lower().strip(" ,.:;!?-'\u2019")
 
     # 1. Formules de clôture / désengagement explicite
-    if norm in _DISENGAGE_PHRASES or any(norm.startswith(dp) for dp in ("merci moctar", "c'est bon moctar", "bonne nuit")):
+    if norm in _DISENGAGE_PHRASES or _DISENGAGE_REGEX.search(norm) or any(norm.startswith(dp) for dp in ("merci moctar", "c'est bon moctar", "bonne nuit", "voilà tout")):
         return {
             "intent": "disengage",
             "is_directed": True,

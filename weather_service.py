@@ -255,13 +255,12 @@ def get_weather_report(
             t_min_tom = float(temp_min_list[1])
             oral_text = (
                 f"Demain à {location_display}, prévoyez un {desc_tomorrow} avec des températures "
-                f"comprises entre {round(t_min_tom)}°C et {round(t_max_tom)}°C, Moctar."
+                f"entre {round(t_min_tom)}°C et {round(t_max_tom)}°C, Moctar."
             )
         else:
             oral_text = (
-                f"À {location_display}, le {desc} domine avec {round(temp)}°C actuellement "
-                f"(ressenti {round(apparent_temp)}°C). Vent à {round(wind_speed)} km/h, "
-                f"prévisions entre {round(temp_min)}°C et {round(temp_max)}°C, Moctar."
+                f"À {location_display}, il fait {round(temp)}°C avec un {desc}. "
+                f"Prévisions entre {round(temp_min)}°C et {round(temp_max)}°C, Moctar."
             )
 
         result: dict[str, Any] = {
