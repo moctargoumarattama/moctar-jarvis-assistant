@@ -121,6 +121,45 @@
     let silentGainNode = null;
     let isAssistantSpeaking = false;
     let echoDampeningTimer = null;
+    let activeAudioPlaybackFinish = null;
+    let userBargedIn = false;
+    let bargeInStreak = 0;
+
+    function triggerBargeIn() {
+      userBargedIn = true;
+      isAssistantSpeaking = false;
+      bargeInStreak = 0;
+      if (activeAudioPlaybackFinish) {
+        const finish = activeAudioPlaybackFinish;
+        activeAudioPlaybackFinish = null;
+        finish(false);
+      }
+      const speaker = win.MoctarSpeaker || null;
+      if (speaker) {
+        try {
+          speaker.pause?.();
+          speaker.currentTime = 0;
+        } catch {}
+      }
+      if (typeof win.speechSynthesis !== 'undefined' && win.speechSynthesis.speaking) {
+        try { win.speechSynthesis.cancel(); } catch {}
+      }
+      if (echoDampeningTimer !== null) {
+        cancel(echoDampeningTimer);
+        echoDampeningTimer = null;
+      }
+      clearPreRollBuffer();
+      isSpeaking = true;
+      silenceElapsedMs = 0;
+      recordingElapsedMs = 0;
+      phraseStartTime = getNow();
+      startPhraseRecorder();
+      emit('listening', {
+        rms: currentRms,
+        isSpeaking: true,
+        message: '🎤 Moctar : écoute prioritaire (interruption)...',
+      });
+    }
 
     function clearPreRollBuffer() {
       preRollWriteIndex = 0;
@@ -200,10 +239,9 @@
     }
 
     function handleAudioProcess(event) {
-      if (destroyed || suspended || status !== 'active' || isAssistantSpeaking) {
-        if (isAssistantSpeaking) {
-          clearPreRollBuffer();
-        }
+      if (destroyed || suspended || status !== 'active') return;
+      if (isAssistantSpeaking && !isSpeaking) {
+        clearPreRollBuffer();
         return;
       }
       const input = event.inputBuffer.getChannelData(0);
@@ -392,10 +430,12 @@
         const finish = (ok) => {
           if (settled) return;
           settled = true;
+          activeAudioPlaybackFinish = null;
           speaker.onended = null;
           speaker.onerror = null;
           resolve(ok);
         };
+        activeAudioPlaybackFinish = finish;
         speaker.onended = () => finish(true);
         speaker.onerror = () => finish(false);
         try {
@@ -672,11 +712,14 @@
         }
         if (!fetchImpl) return;
 
+        const isBargeInSend = userBargedIn;
+        userBargedIn = false;
         const response = await fetchImpl(interactUrl, {
           method: 'POST',
           headers: {
             'Content-Type': (blob && blob.type) || mimeType || 'audio/wav',
-            'X-Voice-Session-Active': (phase === 'listening' || manual) ? 'true' : 'false',
+            'X-Voice-Session-Active': (phase === 'listening' || manual || isBargeInSend) ? 'true' : 'false',
+            'X-Voice-Barge-In': isBargeInSend ? 'true' : 'false',
           },
           body: blob,
         });
@@ -720,6 +763,7 @@
           return;
         }
 
+        processingAudio = false;
         const current = { generation };
         job = current;
         clearFollowup();
@@ -736,14 +780,15 @@
           let played = false;
           if (Array.isArray(payload.audio_chunks) && payload.audio_chunks.length > 1) {
             for (const chunkUrl of payload.audio_chunks) {
-              if (generation !== current.generation || destroyed || suspended) break;
+              if (generation !== current.generation || destroyed || suspended || userBargedIn) break;
               const ok = await playAudioUrl(chunkUrl);
+              if (userBargedIn) break;
               played = ok || played;
             }
-          } else if (payload.audio_url) {
+          } else if (payload.audio_url && !userBargedIn) {
             played = await playAudioUrl(payload.audio_url);
           }
-          if (!played && replyText) {
+          if (!played && replyText && !userBargedIn) {
             await speakWithNativeSpeechSynthesis(replyText);
           }
           releaseEchoLock();
@@ -939,6 +984,20 @@
             }
           }
         }
+      } else if (isAssistantSpeaking && !processingAudio) {
+        const rmsLevel = computeRmsLevel();
+        currentRms = rmsLevel;
+        // Détection Barge-in : l'utilisateur parle par-dessus la voix de M.O.C.T.A.R
+        const bargeInThreshold = Math.max(vadThreshold * 1.6, 0.05);
+        if (rmsLevel > bargeInThreshold) {
+          bargeInStreak++;
+          if (bargeInStreak >= 2) {
+            triggerBargeIn();
+          }
+        } else {
+          bargeInStreak = 0;
+        }
+        updateSolarActivity(Math.min(rmsLevel * 0.5, 0.1), false);
       } else {
         updateSolarActivity(0, false);
       }
@@ -1164,6 +1223,9 @@
       get isSpeaking() { return isSpeaking; },
       get isPushToTalk() { return isPushToTalk; },
       get isAssistantSpeaking() { return isAssistantSpeaking; },
+      get userBargedIn() { return userBargedIn; },
+      triggerBargeIn,
+      bargeIn: triggerBargeIn,
       startPushToTalk,
       stopPushToTalk,
       async enable() {

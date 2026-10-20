@@ -692,4 +692,62 @@ test('speaker anti-echo lock ignores microphone and clears pre-roll buffer durin
   assert.equal(f.engine.isAssistantSpeaking, false);
 });
 
+test('full-duplex barge-in interrupts assistant playback when user speaks and starts active listening', async t => {
+  let finishAudio = null;
+  let audioPaused = false;
+  class FakeAudioInterruptible {
+    constructor(url) {
+      this.src = url || '';
+    }
+    load() {}
+    play() {
+      return new Promise((resolve) => {
+        finishAudio = () => {
+          this.onended?.();
+          resolve();
+        };
+      });
+    }
+    pause() {
+      audioPaused = true;
+    }
+  }
+
+  const f = createWebAudioFixture(t, {
+    Audio: FakeAudioInterruptible,
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        reply_text: 'Je vous explique en détail tout le fonctionnement de Jarvis...',
+        audio_url: '/api/voice/tts/cache/long_speech.mp3',
+      }),
+    }),
+  });
+
+  await f.engine.enable();
+  await f.settle();
+
+  // Déclencher une interaction
+  await f.engine.startPushToTalk();
+  await f.settle();
+  f.engine.stopPushToTalk();
+  await f.settle();
+
+  assert.equal(f.engine.isAssistantSpeaking, true);
+
+  // L'utilisateur interrompt M.O.C.T.A.R en parlant (RMS > 0.05)
+  f.rms = 0.085;
+  f.time.stepFrame(16);
+  f.time.stepFrame(16);
+  await f.settle();
+
+  // Vérifier que le barge-in a coupé le son et basculé en écoute prioritaire
+  assert.equal(audioPaused, true, 'Speaker must be paused on barge-in');
+  assert.equal(f.engine.isAssistantSpeaking, false, 'Assistant speaking flag must be reset');
+  assert.equal(f.engine.isSpeaking, true, 'Engine must immediately switch to recording user');
+  assert.equal(f.engine.userBargedIn, true, 'userBargedIn flag must be set');
+});
+
+
 

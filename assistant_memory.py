@@ -202,6 +202,117 @@ class AssistantMemory:
             logger.exception("Erreur lors de l'enregistrement du fait dans memories : %s", exc)
             return False
 
+    def save_daily_episode(
+        self,
+        topic: str,
+        summary: str,
+        source: str = "desktop",
+        tags: Optional[List[str]] = None,
+        importance: int = 2,
+    ) -> bool:
+        """Enregistre un épisode quotidien de travail ou de vie pour la mémoire vivante.
+        
+        Permet à M.O.C.T.A.R de se souvenir des sujets de la veille, des échanges sur WhatsApp,
+        ou du travail en cours pour accueillir Moctar de façon personnalisée et proactive.
+        """
+        clean_topic = (topic or "").strip()
+        clean_summary = (summary or "").strip()
+        if not clean_topic:
+            return False
+        now_dt = datetime.now()
+        timestamp_key = now_dt.strftime("%Y%m%d_%H%M%S")
+        key = f"ep_{timestamp_key}"
+        data = {
+            "topic": clean_topic,
+            "summary": clean_summary or clean_topic,
+            "source": source,
+            "tags": tags or [],
+            "timestamp": now_dt.isoformat(timespec="seconds"),
+        }
+        val_str = json.dumps(data, ensure_ascii=False)
+        return self.save_fact(category="daily_episode", key=key, value=val_str, importance=importance)
+
+    def get_latest_daily_episode(self) -> Optional[Dict[str, Any]]:
+        """Récupère le dernier épisode quotidien enregistré."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT timestamp, key, content, importance_score FROM memories "
+                    "WHERE category = 'daily_episode' ORDER BY timestamp DESC LIMIT 1"
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                try:
+                    data = json.loads(row[2])
+                    if isinstance(data, dict):
+                        return data
+                except Exception:
+                    return {"topic": row[2], "summary": row[2], "source": "desktop", "timestamp": row[0]}
+        except Exception as exc:
+            logger.error("Erreur lors de la lecture du dernier épisode quotidien : %s", exc)
+        return None
+
+    def get_recent_daily_episodes(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Récupère la liste des épisodes récents ordonnés chronologiquement inversé."""
+        episodes = []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT timestamp, key, content FROM memories "
+                    "WHERE category = 'daily_episode' ORDER BY timestamp DESC LIMIT ?",
+                    (int(limit),)
+                )
+                rows = cursor.fetchall()
+                for r in rows:
+                    try:
+                        d = json.loads(r[2])
+                        if isinstance(d, dict):
+                            episodes.append(d)
+                    except Exception:
+                        episodes.append({"topic": r[2], "summary": r[2], "timestamp": r[0]})
+        except Exception as exc:
+            logger.error("Erreur lors de la lecture des épisodes récents : %s", exc)
+        return episodes
+
+    def build_episodic_greeting(self, hour: Optional[int] = None) -> Optional[str]:
+        """Formule une salutation contextuelle et vivante basée sur le dernier épisode."""
+        latest = self.get_latest_daily_episode()
+        if not latest or not latest.get("topic"):
+            return None
+        topic = latest.get("topic", "").strip()
+        source = latest.get("source", "desktop")
+        ts_str = latest.get("timestamp")
+        diff_hours = 0.0
+        if ts_str:
+            try:
+                dt = datetime.fromisoformat(ts_str)
+                diff_hours = (datetime.now() - dt).total_seconds() / 3600.0
+            except Exception:
+                diff_hours = 12.0
+
+        if hour is None:
+            try:
+                hour = datetime.now().hour
+            except Exception:
+                hour = 12
+
+        # 1. Continuité WhatsApp récente (< 4 heures)
+        if source == "whatsapp" and diff_hours < 4.0:
+            return f"Sur WhatsApp tout à l'heure, on parlait de {topic}. Tu veux qu'on reprenne ça, Moctar ?"
+
+        # 2. Continuité matinale de la veille (travail d'hier soir)
+        if 6 <= hour < 12 and 6.0 <= diff_hours <= 24.0:
+            return f"Hier soir on travaillait sur {topic}. On continue là-dessus ce matin, Moctar ?"
+
+        # 3. Épisode récent (< 6h)
+        if diff_hours < 6.0:
+            return f"On avançait sur {topic}. On continue là-dessus, Moctar ?"
+
+        return None
+
     def search_facts(
         self,
         query: str,

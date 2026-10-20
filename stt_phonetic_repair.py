@@ -77,9 +77,11 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     (re.compile(r"\b(?:[aà]|au)\s+casat?\b", re.I), "à Casablanca", "city_casa"),
     (re.compile(r"\b(?:[aà]|au)\s+(?:niam[eé]|nyamey)\b", re.I), "à Niamey", "city_niamey"),
 
-    # 7. Nom de Moctar & Phonétique
+    # 7. Nom de Moctar & Phonétique & Surnoms familiers
     (re.compile(r"\b(?:m['’\s]?occupe\s+tard|moccupe\s+tard|m['’\s]?occaque|moccaque)\b", re.I), "Moctar", "wake_moctar_repair"),
     (re.compile(r"\b(?:mokta|moktar|mokhtar|mouctar|mouktar|motard)\b", re.I), "Moctar", "wake_moctar_variants"),
+    (re.compile(r"\b(?:yo\s+)?(?:moc|mok|moque)\b", re.I), "Moc", "wake_moc"),
+    (re.compile(r"\b(?:t['’]es\s+l[aà]|tu\s+es\s+l[aà])\b", re.I), "tu es là", "wake_are_you_there"),
 
     # 8. Questions directes d'identité, de rôle & transitions (Whisper corrections observées en conditions réelles)
     (re.compile(r"\b(?:j['’]?ai\s+qui,?\s+toi|rikitoa|t['’]es\s+qui,?\s+toi|t\s+es\s+qui,?\s+toi)\b", re.I), "tu es qui toi", "identity_who_are_you"),
@@ -87,6 +89,10 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     (re.compile(r"\bc['’]est\s+quoi\s+ton\s+djob\b", re.I), "c'est quoi ton job", "identity_job_spelling"),
     (re.compile(r"\b(?:active|mets)[-\s]le\s+mode\s+bureau\b", re.I), "active le mode bureau", "activate_desktop_mode"),
     (re.compile(r"\bet\s+on\s+va\s+passer\s+[aà]\s+ceci\b", re.I), "on va passer à ceci", "transition_next_step"),
+
+    # 9. Commandes d'interruption vocale (Barge-In)
+    (re.compile(r"\b(?:arr[êe]te\s+de\s+parler|tais[- ]toi|ferme[- ]la|chut|silence)\b", re.I), "tais-toi", "interruption_silence"),
+    (re.compile(r"\b(?:attends?\s*(?:voir)?)\b", re.I), "attends", "interruption_wait"),
 ]
 
 # Remplacements de mots uniques individuels

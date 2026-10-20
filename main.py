@@ -253,20 +253,21 @@ _VOICE_WAKE_PREFIX_RE = re.compile(
     r"^\s*(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|et\s+vous|you)\s+)?"
     r"(?:yo\s+moctar|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|"
     r"m['’]?occupe\s+tard|m['’]?occaque|moccupe\s+tard|moccaque|"
-    r"jarvis|elmo)\b[\s,.:;!?-]*",
+    r"moc|mok|mokti|jarvis|elmo)\b[\s,.:;!?-]*",
     re.IGNORECASE,
 )
 _VOICE_WAKE_ANYWHERE_RE = re.compile(
     r"\b(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|et\s+vous|you)\s+)?"
     r"(yo\s+moctar|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|"
     r"m['’]?occupe\s+tard|m['’]?occaque|moccupe\s+tard|moccaque|"
-    r"jarvis|elmo|yo\s+elmo|allo\s+moctar|dis\s+moctar)\b[\s,.:;!?-]*",
+    r"moc|mok|mokti|jarvis|elmo|yo\s+elmo|allo\s+moctar|dis\s+moctar)\b[\s,.:;!?-]*",
     re.IGNORECASE,
 )
 _VOICE_FILLER_WORDS = {
     "au", "yo", "hey", "ok", "bonjour", "salut", "dis", "allo", "allô", "ecoute", "écoute", "oui",
     "et", "vous", "you", "tout", "le", "monde", "ah", "eh", "oh", "ha",
     "moctar", "moktar", "mokta", "mokhtar", "mouctar", "mouktar", "motard",
+    "moc", "mok", "mokti",
     "moccupe", "m'occupe", "tard", "moccaque", "m'occaque", "jarvis", "elmo",
 }
 
@@ -328,6 +329,12 @@ def is_direct_voice_command(text: str) -> bool:
         return True
     # 8. Transitions collaboratives ("on va passer à ceci", "on continue", "on enchaîne")
     if re.search(r"\b(?:on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|passons\s+[aà]\s+la\s+suite)\b", norm):
+        return True
+    # 9. Interruption vocale prioritaire (Barge-In)
+    if re.search(r"\b(?:tais[- ]toi|ferme[- ]la|chut|silence|stop|pause|attends?\s*(?:voir)?)\b", norm):
+        return True
+    # 10. Présence et surnoms complices ("tu es là", "t'es là", "moc", "mokti")
+    if re.search(r"\b(?:tu\s+es\s+l[aà]|t['’]es\s+l[aà]|es[- ]tu\s+l[aà]|moc|mokti)\b", norm):
         return True
     return False
 
@@ -401,12 +408,47 @@ VOICE_FAST_SYSTEM_PROMPT = (
 )
 
 
-def handle_instant_local_command(text: str) -> str | None:
+def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
     """Intercepteur de commandes locales instantanées (0 ms, sans LLM)."""
     cleaned = (text or "").strip()
     if not cleaned:
         return None
     normalized = _strip_accents_1to1(cleaned).lower()
+
+    # 0a. Commandes d'interruption vocale (Barge-In)
+    if re.search(r"\b(?:tais[- ]toi|ferme[- ]la|chut|silence)\b", normalized) or normalized in ("tais-toi", "tais toi", "stop", "chut", "silence"):
+        return "Pardon, je t'écoute Moctar."
+
+    if re.search(r"\b(?:attends?\s*(?:voir)?|pause)\b", normalized) or normalized in ("attends", "pause"):
+        return "Je vous attends Moctar, prenez votre temps."
+
+    # 0b. Présence complice ("t'es là", "tu es là")
+    if re.search(r"\b(?:t['’]es\s+l[aà]|tu\s+es\s+l[aà]|es[- ]tu\s+l[aà])\b", normalized):
+        hour = datetime.now().hour
+        if hour >= 23 or hour < 6:
+            return "Oui Moctar, je suis là ! Encore au travail ? Je reste avec toi, dis-moi ce qu'on boucle."
+        return "Oui Moctar, je suis là !"
+
+    # 0c. Salutations chaleureuses selon le moment de la journée & continuité épisodique
+    if normalized in ("bonjour", "salut", "bonjour moctar", "salut moctar", "moc", "yo moc", "yo mokti"):
+        hour = datetime.now().hour
+        if memory and hasattr(memory, "build_episodic_greeting"):
+            try:
+                ep_greet = memory.build_episodic_greeting(hour=hour)
+                if ep_greet:
+                    return ep_greet
+            except Exception:
+                pass
+        if 6 <= hour < 12:
+            return "Bonjour Moctar ! Prêt pour cette journée ?"
+        elif 12 <= hour < 14:
+            return "Bonjour Moctar ! Bon appétit ou pause bien méritée, je reste disponible !"
+        elif 14 <= hour < 19:
+            return "Oui Moctar, je suis là ! On avance sur quoi ?"
+        elif 19 <= hour < 23:
+            return "Bonsoir Moctar ! Je suis là, qu'est-ce qu'on fait ?"
+        else:
+            return "Encore au travail Moctar ? Je reste avec toi, dis-moi ce qu'on boucle."
 
     # 1. Identité ("comment t'appelles-tu", "qui es-tu", "c'est quoi ton nom", etc.)
     if re.search(r"\b(?:qui\s+es[- ]tu|comment\s+tu\s+t['’]appelles|comment\s+t['’]appelles[- ]tu|c['’]est\s+quoi\s+ton\s+nom|quel\s+est\s+ton\s+nom|qui\s+tu\s+es|pr[ée]sente[- ]toi)\b", normalized):
@@ -890,8 +932,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         task = asyncio.create_task(runtime.collect_loop(), name="noc-collector")
         runtime.collect_task = task
         try:
+            from native_voice_daemon import NativeVoiceDaemon
+            NativeVoiceDaemon.get_instance().start()
+        except Exception:
+            pass
+        try:
             yield
         finally:
+            try:
+                from native_voice_daemon import NativeVoiceDaemon
+                NativeVoiceDaemon.get_instance().stop()
+            except Exception:
+                pass
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
@@ -1337,9 +1389,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         runtime: Runtime = application.state.runtime
         header_session = request.headers.get("x-voice-session-active", "").strip().lower() in {"1", "true", "yes"}
+        header_barge_in = request.headers.get("x-voice-barge-in", "").strip().lower() in {"1", "true", "yes"}
         query_session = request.query_params.get("session_active", "").strip().lower() in {"1", "true", "yes"}
         runtime_session = getattr(runtime, "voice_session_until", 0.0) > time.monotonic()
-        session_active = header_session or query_session or runtime_session
+        session_active = header_session or header_barge_in or query_session or runtime_session
 
         # 1. Couche de Réparation Phonétique & Correction d'Erreurs STT (< 0.1 ms)
         repaired_transcript, stt_repairs = stt_phonetic_repair.repair_stt_transcript(transcript)
@@ -1435,7 +1488,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         runtime.voice_session_until = time.monotonic() + VOICE_SESSION_DURATION_SECONDS
 
         agent_result: dict[str, Any] = {}
-        instant_reply = handle_instant_local_command(command_text)
+        memory_instance = getattr(getattr(runtime, "jarvis", None), "memory", None)
+        instant_reply = handle_instant_local_command(command_text, memory=memory_instance)
         if command_text == _WAKE_ONLY_SENTINEL or _is_pure_filler_or_wake(command_text):
             display_user_text = transcript
             reply_text = VOICE_BUTLER_GREETINGS[0]
@@ -1569,7 +1623,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "audio_url": audio_url,
                 "audio_chunks": audio_chunks,
                 "first_chunk_audio_url": audio_chunks[0] if audio_chunks else audio_url,
-                "session_active": bool(runtime.voice_session_until > time.monotonic()),
+                "session_active": bool(runtime.voice_session_until > time.monotonic() or (header_session and not attention.get("should_disengage")) or (header_barge_in and not attention.get("should_disengage"))),
                 "wake_word_detected": wake_detected,
                 "action": agent_result.get("action"),
                 "url": agent_result.get("url"),
@@ -1581,6 +1635,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "model_offline": bool(agent_result.get("model_offline")),
             }
         )
+
+    @application.get("/api/voice/proactive")
+    async def get_proactive_speech():
+        """Récupère la suggestion proactive du compagnon si un événement ou rappel bienveillant est opportun."""
+        from proactive_companion import ProactiveCompanion
+        companion = ProactiveCompanion.get_instance()
+        runtime = getattr(application.state, "runtime", None)
+        event = companion.evaluate_proactive_event(runtime)
+        if not event:
+            return {"ok": True, "has_event": False, "event": None}
+        audio_url: str | None = None
+        try:
+            audio_url, _ = await generate_cached_tts_chunks(event["message"], DEFAULT_TTS_VOICE)
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "has_event": True,
+            "event": event,
+            "message": event["message"],
+            "audio_url": audio_url,
+        }
+
+    @application.post("/api/voice/trigger")
+    async def native_voice_trigger():
+        """Point d'entrée pour déclencher l'écoute système native (raccourci clavier, script bash)."""
+        from native_voice_daemon import NativeVoiceDaemon
+        daemon = NativeVoiceDaemon.get_instance()
+        asyncio.create_task(asyncio.to_thread(daemon.trigger_interaction_flow))
+        return {"ok": True, "triggered": True, "message": "Écoute système native démarrée"}
 
     @application.post("/api/voice/simulate", status_code=202)
     async def voice_simulate(request: Request):

@@ -601,6 +601,16 @@ class WhatsAppController:
             )
             if not isinstance(result, dict) or not isinstance(result.get("reply"), str):
                 return "M.O.C.T.A.R n'a pas fourni de réponse exploitable.", False
+            mem = getattr(jarvis, "memory", None)
+            if mem and hasattr(mem, "save_daily_episode"):
+                try:
+                    mem.save_daily_episode(
+                        topic=message["text"][:80],
+                        summary=result["reply"][:140],
+                        source="whatsapp",
+                    )
+                except Exception:
+                    pass
             return result["reply"], result.get("status") != "error"
         return ("Commande système refusée ou non reconnue. Envoyez aide pour la syntaxe exacte et les services autorisés.", False)
 

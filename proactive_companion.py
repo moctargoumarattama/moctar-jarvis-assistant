@@ -1,0 +1,155 @@
+"""Moteur de Proactivité Bienveillante & Compagnon Quotidien pour JARVIS / M.O.C.T.A.R.
+
+Permet à M.O.C.T.A.R d'agir avec l'attention d'un véritable partenaire complice :
+1. Détection des alertes d'infrastructure VPS / Sentinel :
+   "Moctar, j'ai vu une alerte sur le VPS [nom], tu veux que je regarde ?"
+2. Bienveillance sur les sessions de travail prolongées (prévention de la fatigue) :
+   "Moctar, ça fait un bon moment que tu es sur ce code, un petit verre d'eau ou une pause ?"
+3. Régulation stricte anti-spam :
+   Cooldown de 45 minutes minimum, mémoire des alertes déjà notifiées, mode Ne Pas Déranger.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import time
+from typing import Any, Dict, List, Optional, Set
+
+LOGGER = logging.getLogger("moctar.proactive_companion")
+
+_DEFAULT_COOLDOWN_SECONDS = 2700.0  # 45 minutes
+_DEFAULT_FATIGUE_HOURS = 2.5        # Alerte après 2h30 de travail continu
+
+
+class ProactiveCompanion:
+    """Gestionnaire d'intelligence proactive et de bienveillance quotidienne."""
+
+    _instance: Optional[ProactiveCompanion] = None
+
+    def __init__(self, cooldown_seconds: float = _DEFAULT_COOLDOWN_SECONDS) -> None:
+        self.cooldown_seconds = float(os.getenv("MOCTAR_PROACTIVE_COOLDOWN_SECONDS", str(cooldown_seconds)))
+        self.fatigue_threshold_seconds = float(os.getenv("MOCTAR_FATIGUE_HOURS", str(_DEFAULT_FATIGUE_HOURS))) * 3600.0
+        
+        self._last_trigger_time: float = 0.0
+        self._work_session_start: float = time.monotonic()
+        self._last_activity_time: float = time.monotonic()
+        self._seen_alert_hashes: Set[str] = set()
+        self._dnd_until: float = 0.0  # Do Not Disturb timestamp
+        self._pending_suggestion: Optional[Dict[str, Any]] = None
+
+    @classmethod
+    def get_instance(cls) -> ProactiveCompanion:
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def record_activity(self) -> None:
+        """Enregistre une activité utilisateur pour mesurer la durée de session continue."""
+        now = time.monotonic()
+        # Si inactif depuis plus de 45 minutes, nouvelle session
+        if (now - self._last_activity_time) > 2700.0:
+            self._work_session_start = now
+        self._last_activity_time = now
+
+    def set_do_not_disturb(self, duration_minutes: int = 120) -> None:
+        """Active le mode 'Ne pas déranger' pendant la durée spécifiée."""
+        self._dnd_until = time.monotonic() + (duration_minutes * 60.0)
+        LOGGER.info("Mode Ne Pas Déranger activé jusqu'à dans %d minutes.", duration_minutes)
+
+    def is_in_cooldown(self) -> bool:
+        """Vérifie si le compagnon est en période de repos / cooldown."""
+        now = time.monotonic()
+        if now < self._dnd_until:
+            return True
+        return (now - self._last_trigger_time) < self.cooldown_seconds
+
+    def check_infrastructure_alert(self, runtime: Any) -> Optional[Dict[str, Any]]:
+        """Détecte si un serveur VPS ou service critique nécessite l'attention de Moctar."""
+        if not runtime:
+            return None
+
+        # 1. Vérification des VPS
+        vps_list = getattr(runtime, "vps", [])
+        if isinstance(vps_list, list):
+            for vps in vps_list:
+                if not isinstance(vps, dict):
+                    continue
+                vps_name = vps.get("name") or vps.get("ip") or "serveur"
+                status = str(vps.get("status") or "").lower()
+                cpu_load = vps.get("cpu")
+                
+                is_alert = status in ("error", "critical", "down", "unreachable") or (isinstance(cpu_load, (int, float)) and cpu_load >= 95.0)
+                if is_alert:
+                    alert_hash = f"vps_{vps_name}_{status}"
+                    if alert_hash not in self._seen_alert_hashes:
+                        self._seen_alert_hashes.add(alert_hash)
+                        return {
+                            "category": "infra_alert",
+                            "message": f"Moctar, j'ai vu une alerte sur le VPS {vps_name}, tu veux que je regarde ?",
+                            "target": vps_name,
+                            "priority": "high",
+                        }
+
+        # 2. Vérification des anomalies Sentinel / Cyberdéfense
+        cyber = getattr(runtime, "cyber", None)
+        if cyber and hasattr(cyber, "snapshot"):
+            try:
+                snap = cyber.snapshot()
+                recent_bans = snap.get("active_bans_count", 0)
+                if recent_bans >= 5 and "mass_ban_alert" not in self._seen_alert_hashes:
+                    self._seen_alert_hashes.add("mass_ban_alert")
+                    return {
+                        "category": "cyber_alert",
+                        "message": "Moctar, la sentinelle a bloqué plusieurs attaques suspectes récentes sur le réseau, tout est sous cloche.",
+                        "target": "sentinel",
+                        "priority": "normal",
+                    }
+            except Exception:
+                pass
+
+        return None
+
+    def check_fatigue_alert(self) -> Optional[Dict[str, Any]]:
+        """Vérifie si Moctar est sur une session de code continue prolongée."""
+        now = time.monotonic()
+        session_duration = now - self._work_session_start
+        if session_duration >= self.fatigue_threshold_seconds:
+            # Réinitialise la session pour éviter la répétition immédiate
+            self._work_session_start = now
+            return {
+                "category": "wellbeing_break",
+                "message": "Moctar, ça fait un bon moment que tu es sur ce module, tout roule ? Un petit verre d'eau ou une pause ?",
+                "priority": "low",
+            }
+        return None
+
+    def evaluate_proactive_event(self, runtime: Any = None) -> Optional[Dict[str, Any]]:
+        """Évalue l'ensemble des déclencheurs et retourne une suggestion proactive si légitime."""
+        if self.is_in_cooldown():
+            return None
+
+        # Priorité 1 : Alerte infrastructure / VPS
+        infra_event = self.check_infrastructure_alert(runtime)
+        if infra_event:
+            self._last_trigger_time = time.monotonic()
+            self._pending_suggestion = infra_event
+            LOGGER.info("⚡ [PROACTIVE EVENT]: %s", infra_event["message"])
+            return infra_event
+
+        # Priorité 2 : Bienveillance session de travail prolongée
+        fatigue_event = self.check_fatigue_alert()
+        if fatigue_event:
+            self._last_trigger_time = time.monotonic()
+            self._pending_suggestion = fatigue_event
+            LOGGER.info("⚡ [PROACTIVE EVENT]: %s", fatigue_event["message"])
+            return fatigue_event
+
+        return None
+
+    def pop_pending_suggestion(self) -> Optional[Dict[str, Any]]:
+        """Récupère et consomme la suggestion proactive en attente."""
+        sugg = self._pending_suggestion
+        self._pending_suggestion = None
+        return sugg
+

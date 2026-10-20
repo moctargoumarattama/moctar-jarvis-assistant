@@ -149,9 +149,28 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
             "reason": "explicit_disengage",
         }
 
-    # 2. Interpellation explicite avec le nom du copilote
-    has_explicit_wake = bool(re.search(r"\b(?:moctar|jarvis)\b", norm))
+    # 2. Commandes prioritaires d'interruption vocale (Barge-In)
+    is_interruption = bool(re.search(
+        r"\b(?:tais[- ]toi|ferme[- ]la|chut|silence|arr[êe]te(?:\s+de\s+parler)?)\b",
+        norm,
+    ))
+    if is_interruption:
+        return {
+            "intent": "interruption",
+            "is_directed": True,
+            "is_thinking_out_loud": False,
+            "is_incomplete": False,
+            "should_disengage": False,
+            "reason": "explicit_interruption",
+        }
+
+    # 3. Interpellation explicite avec le nom du copilote ou surnom complice
+    has_explicit_wake = bool(re.search(r"\b(?:moctar|jarvis|moc|mokti)\b", norm))
     has_second_person = bool(re.search(r"\b(?:tu\s+|t['’]|peux[- ]tu|pourrais[- ]tu|dis[- ]moi|te\s+)\b", norm))
+    is_wake_call = bool(re.search(
+        r"\b(?:tu\s+es\s+l[aà]|t['’]es\s+l[aà]|es[- ]tu\s+l[aà]|dis[- ]moi|eh\s+viens\s+voir|mon\s+pote)\b",
+        norm,
+    ))
 
     # 3. VAD Sémantique : Détection des phrases inachevées (Turn-Taking Prédictif)
     # Ne JAMAIS couper Moctar s'il est en train de formuler sa pensée ou sa commande.
@@ -209,7 +228,7 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
 
     # 6. Présence d'une question interrogative directe ou interpellation directe au copilote
     has_interrogative = any(norm.startswith(q) or f" {q}" in norm for q in _DIRECTED_INTERROGATIVES)
-    is_direct_query = bool(re.search(
+    is_direct_query = is_wake_call or bool(re.search(
         r"\b(?:tu\s+es\s+qui|t['’]es\s+qui|qui\s+es[- ]tu|qui\s+tu\s+es|c['’]est\s+quoi\s+ton\s+job|quel\s+est\s+ton\s+job|"
         r"ton\s+job|ton\s+r[ôo]le|tu\s+sers\s+[aà]\s+quoi|tu\s+fais\s+quoi|tu\s+sais\s+faire\s+quoi|"
         r"on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|peux[- ]tu|pourrais[- ]tu)\b",
