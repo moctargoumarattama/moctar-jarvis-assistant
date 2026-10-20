@@ -2182,6 +2182,7 @@
       function initialiseBrowserVoice() {
         if (!window.MoctarVoice) return renderBrowserVoice('unsupported');
         window.jarvisVoice = window.MoctarVoice.create({
+          followupMs: 45000,
           mediaDevices: window.navigator?.mediaDevices,
           MediaRecorder: window.MediaRecorder,
           AudioContext: window.AudioContext || window.webkitAudioContext,

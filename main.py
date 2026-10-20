@@ -323,6 +323,12 @@ def is_direct_voice_command(text: str) -> bool:
         return True
     if re.search(r"\b(?:mets?[-\s]le\s+[aà]\s+(?:droite|gauche)|place\s+[aà]\s+(?:droite|gauche)|snap\s+(?:right|left)|plein\s+[ée]cran|maximise|minimise|r[ée]duis)\b", norm):
         return True
+    # 7. Identité, Rôle, Métier & Capacités ("c'est quoi ton job", "tu es qui toi", "tu sers à quoi")
+    if re.search(r"\b(?:c['’]est\s+quoi\s+ton\s+job|quel\s+est\s+ton\s+job|ton\s+job|ton\s+r[ôo]le|tu\s+es\s+qui|t['’]es\s+qui|qui\s+es[- ]tu|qui\s+tu\s+es|tu\s+sers\s+[aà]\s+quoi|tu\s+fais\s+quoi|tu\s+sais\s+faire\s+quoi|peux[- ]tu\s+m['’]aider|aide[- ]moi)\b", norm):
+        return True
+    # 8. Transitions collaboratives ("on va passer à ceci", "on continue", "on enchaîne")
+    if re.search(r"\b(?:on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|passons\s+[aà]\s+la\s+suite)\b", norm):
+        return True
     return False
 
 
@@ -405,6 +411,14 @@ def handle_instant_local_command(text: str) -> str | None:
     # 1. Identité ("comment t'appelles-tu", "qui es-tu", "c'est quoi ton nom", etc.)
     if re.search(r"\b(?:qui\s+es[- ]tu|comment\s+tu\s+t['’]appelles|comment\s+t['’]appelles[- ]tu|c['’]est\s+quoi\s+ton\s+nom|quel\s+est\s+ton\s+nom|qui\s+tu\s+es|pr[ée]sente[- ]toi)\b", normalized):
         return "Je suis M.O.C.T.A.R, votre système autonome de contrôle et d'intelligence opérationnelle, Moctar."
+
+    # 1b. Rôle & Métier d'Ingénieur ("c'est quoi ton job", "tu es qui toi", "quel est ton job", "tu sers à quoi", "tu fais quoi")
+    if re.search(r"\b(?:c['’]est\s+quoi\s+ton\s+job|quel\s+est\s+ton\s+job|ton\s+job|tu\s+es\s+qui\s+toi|t['’]es\s+qui\s+toi|tu\s+sers\s+[aà]\s+quoi|tu\s+fais\s+quoi|tu\s+sais\s+faire\s+quoi|quel\s+est\s+ton\s+r[ôo]le|ton\s+r[ôo]le)\b", normalized):
+        return "Je suis M.O.C.T.A.R, votre copilote d'ingénierie et système d'intelligence opérationnelle sur ce Dell Precision M4800. Je pilote vos environnements de travail, surveille l'infrastructure NOC, exécute vos commandes et assure le suivi de vos projets en temps réel, Moctar."
+
+    # 1c. Transition collaborative ("on va passer à ceci", "on continue", "on enchaîne")
+    if re.search(r"\b(?:on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|passons\s+[aà]\s+la\s+suite)\b", normalized):
+        return "Je vous écoute Moctar, sur quel module ou fichier de Jarvis avançons-nous ?"
 
     # 2. Heure ("quelle heure", "il est quelle heure", etc.)
     if re.search(r"\b(?:quelle?\s+heure|l['’]heure|il\s+est\s+quelle?\s+heure)\b", normalized):

@@ -80,6 +80,13 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     # 7. Nom de Moctar & Phonétique
     (re.compile(r"\b(?:m['’\s]?occupe\s+tard|moccupe\s+tard|m['’\s]?occaque|moccaque)\b", re.I), "Moctar", "wake_moctar_repair"),
     (re.compile(r"\b(?:mokta|moktar|mokhtar|mouctar|mouktar|motard)\b", re.I), "Moctar", "wake_moctar_variants"),
+
+    # 8. Questions directes d'identité, de rôle & transitions (Whisper corrections observées en conditions réelles)
+    (re.compile(r"\b(?:j['’]?ai\s+qui,?\s+toi|rikitoa|t['’]es\s+qui,?\s+toi|t\s+es\s+qui,?\s+toi)\b", re.I), "tu es qui toi", "identity_who_are_you"),
+    (re.compile(r"\b(?:qu['’]en|quand|c['’]est|l[aà],?\s+le\s+nom\s+de\s+ce)(?:\s+quoi)?(?:\s+ton)?\s+job\b", re.I), "c'est quoi ton job", "identity_job_repair"),
+    (re.compile(r"\bc['’]est\s+quoi\s+ton\s+djob\b", re.I), "c'est quoi ton job", "identity_job_spelling"),
+    (re.compile(r"\b(?:active|mets)[-\s]le\s+mode\s+bureau\b", re.I), "active le mode bureau", "activate_desktop_mode"),
+    (re.compile(r"\bet\s+on\s+va\s+passer\s+[aà]\s+ceci\b", re.I), "on va passer à ceci", "transition_next_step"),
 ]
 
 # Remplacements de mots uniques individuels

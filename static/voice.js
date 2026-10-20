@@ -12,7 +12,7 @@
     "m'occupe tard", 'moccupe tard', "m'occaque", 'moccaque', 'jarvis',
     'yo elmo', 'hey elmo', 'hey el mo', 'el mo', 'elmo',
   ];
-  const FOLLOWUP_MS = 0;
+  const DEFAULT_FOLLOWUP_MS = 0;
   const GREETING = 'À vos ordres Moctar, je vous écoute.';
   const WAKE_READY_MESSAGE = "🟢 À l'écoute — Dites « Yo Moctar »";
   const VOICE_DETECTED_MESSAGE = '🎙️ Moctar vous écoute...';
@@ -33,6 +33,7 @@
     const opts = options || {};
     const win = opts.window || (typeof window === 'object' && window ? window : root) || {};
     const clock = opts.timers || {};
+    const FOLLOWUP_MS = typeof opts.followupMs === 'number' ? opts.followupMs : DEFAULT_FOLLOWUP_MS;
     const delay = clock.setTimeout ? clock.setTimeout.bind(clock) : setTimeout;
     const cancel = clock.clearTimeout ? clock.clearTimeout.bind(clock) : clearTimeout;
 
@@ -713,7 +714,7 @@
             emit(phase, {
               rms: 0,
               isSpeaking: false,
-              message: WAKE_READY_MESSAGE,
+              message: phase === 'listening' ? VOICE_DETECTED_MESSAGE : WAKE_READY_MESSAGE,
             });
           }
           return;

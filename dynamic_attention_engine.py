@@ -207,11 +207,17 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
         elif len(tokens) > 1 and tokens[1] in _DIRECTED_IMPERATIVES and first_word in ("moctar", "jarvis", "yo", "dis", "s'il", "stp"):
             has_imperative = True
 
-    # 6. Présence d'une question interrogative directe
+    # 6. Présence d'une question interrogative directe ou interpellation directe au copilote
     has_interrogative = any(norm.startswith(q) or f" {q}" in norm for q in _DIRECTED_INTERROGATIVES)
+    is_direct_query = bool(re.search(
+        r"\b(?:tu\s+es\s+qui|t['’]es\s+qui|qui\s+es[- ]tu|qui\s+tu\s+es|c['’]est\s+quoi\s+ton\s+job|quel\s+est\s+ton\s+job|"
+        r"ton\s+job|ton\s+r[ôo]le|tu\s+sers\s+[aà]\s+quoi|tu\s+fais\s+quoi|tu\s+sais\s+faire\s+quoi|"
+        r"on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|peux[- ]tu|pourrais[- ]tu)\b",
+        norm,
+    ))
 
-    # Si explicitement interpellé (avec 'Moctar' ou 'tu' ou un verbe d'action clair)
-    if has_explicit_wake or (is_session_active and (has_second_person or has_imperative or has_interrogative)):
+    # Si explicitement interpellé (avec 'Moctar', question directe d'identité/rôle ou verbe d'action clair)
+    if has_explicit_wake or is_direct_query or (is_session_active and (has_second_person or has_imperative or has_interrogative)):
         return {
             "intent": "directed_speech",
             "is_directed": True,

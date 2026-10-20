@@ -393,6 +393,98 @@ class DynamicVoiceExperienceTests(unittest.TestCase):
         self.assertIn("bon sens d'ingénieur", VOICE_SEMANTIC_SYSTEM_PROMPT)
         self.assertTrue(VOICE_SEMANTIC_SYSTEM_PROMPT.strip().endswith("'Moctar'."))
 
+    def test_stt_repair_whisper_logs_distortions(self) -> None:
+        """Vérifie la réparation des distorsions réelles capturées dans les logs de Moctar."""
+        # 1. 'J'ai qui, toi ?' / 'Rikitoa.' -> 'tu es qui toi'
+        t1, _ = stt_phonetic_repair.repair_stt_transcript("J'ai qui, toi ?")
+        self.assertIn("tu es qui toi", t1.lower())
+
+        t2, _ = stt_phonetic_repair.repair_stt_transcript("Rikitoa.")
+        self.assertIn("tu es qui toi", t2.lower())
+
+        # 2. 'Qu'en ton job ?' -> 'c'est quoi ton job'
+        t3, _ = stt_phonetic_repair.repair_stt_transcript("Qu'en ton job ?")
+        self.assertIn("c'est quoi ton job", t3.lower())
+
+        # 3. 'Active le mode bureau.' -> 'active le mode bureau'
+        t4, _ = stt_phonetic_repair.repair_stt_transcript("Active le mode bureau.")
+        self.assertEqual(t4, "active le mode bureau.")
+
+        # 4. 'Et on va passer à ceci.' -> 'on va passer à ceci'
+        t5, _ = stt_phonetic_repair.repair_stt_transcript("Et on va passer à ceci.")
+        self.assertIn("on va passer à ceci", t5.lower())
+
+    def test_is_direct_voice_command_identity_and_job(self) -> None:
+        """Vérifie que les questions d'identité et de rôle sont reconnues comme des ordres opérationnels directs."""
+        for phrase in ("C'est quoi ton job ?", "Tu es qui toi ?", "Quel est ton job ?", "Tu sers à quoi ?", "On va passer à ceci"):
+            self.assertTrue(main.is_direct_voice_command(phrase), f"Échec is_direct_voice_command pour '{phrase}'")
+
+    def test_handle_instant_local_command_job_and_transition(self) -> None:
+        """Vérifie les réponses instantanées (0 ms) pour le rôle et la transition collaborative."""
+        # Job / Rôle
+        res_job = main.handle_instant_local_command("c'est quoi ton job ?")
+        self.assertIsNotNone(res_job)
+        self.assertIn("copilote d'ingénierie", res_job)
+        self.assertIn("Dell Precision M4800", res_job)
+        self.assertTrue(res_job.endswith("Moctar."))
+
+        # Tu es qui toi
+        res_who = main.handle_instant_local_command("tu es qui toi ?")
+        self.assertIsNotNone(res_who)
+        self.assertIn("copilote d'ingénierie", res_who)
+
+        # Transition
+        res_trans = main.handle_instant_local_command("on va passer à ceci")
+        self.assertIsNotNone(res_trans)
+        self.assertIn("Je vous écoute Moctar", res_trans)
+
+    def test_dynamic_attention_omni_attention_for_direct_queries(self) -> None:
+        """Vérifie que les questions directes à la 2e personne sont traitées en directed speech même hors session."""
+        for q in ("C'est quoi ton job ?", "Tu es qui toi ?", "On va passer à ceci"):
+            att = dynamic_attention_engine.classify_utterance_attention(q, is_session_active=False)
+            self.assertTrue(att["is_directed"], f"Échec directed pour '{q}'")
+            self.assertEqual(att["intent"], "directed_speech")
+
+    def test_continuous_session_active_default_45_seconds(self) -> None:
+        """Vérifie que la session d'écoute reste active 45s via followupMs et enchaîne les répliques sans wake-word."""
+        index_html = Path("static/index.html").read_text(encoding="utf-8")
+        self.assertIn("followupMs: 45000", index_html)
+
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 1000, -1000, 1000, -1000))
+        fake_mp3 = b"ID3-AUDIO-MP3"
+
+        with patch.object(main, "VOICE_SESSION_DURATION_SECONDS", 45.0):
+            # Tour 1 : activation mode bureau
+            with patch("main.voice_transcribe.transcribe_audio", return_value="Active le mode bureau."), patch(
+                "main.synthesize_edge_tts", new=AsyncMock(return_value=fake_mp3)
+            ):
+                resp1 = self.client.post(
+                    "/api/voice/interact",
+                    content=wav_bytes,
+                    headers={"Content-Type": "audio/wav"},
+                )
+                self.assertEqual(resp1.status_code, 200)
+                data1 = resp1.json()
+                self.assertTrue(data1["ok"])
+                self.assertFalse(data1["ignored"])
+                self.assertTrue(data1["session_active"])
+
+            # Tour 2 : enchaînement immédiat sans mot de réveil ("C'est quoi ton job ?")
+            with patch("main.voice_transcribe.transcribe_audio", return_value="C'est quoi ton job ?"), patch(
+                "main.synthesize_edge_tts", new=AsyncMock(return_value=fake_mp3)
+            ):
+                resp2 = self.client.post(
+                    "/api/voice/interact",
+                    content=wav_bytes,
+                    headers={"Content-Type": "audio/wav", "X-Voice-Session-Active": "true"},
+                )
+                self.assertEqual(resp2.status_code, 200)
+                data2 = resp2.json()
+                self.assertTrue(data2["ok"])
+                self.assertFalse(data2["ignored"])
+                self.assertIn("copilote d'ingénierie", data2["reply_text"])
+                self.assertTrue(data2["session_active"])
+
 
 if __name__ == "__main__":
     unittest.main()
