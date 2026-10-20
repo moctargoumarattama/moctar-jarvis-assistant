@@ -1019,7 +1019,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
         res_bureau = autonomous_library.execute_autonomous_task("M. Mokhtar, mets-toi au mode bureau")
         self.assertTrue(res_bureau["handled"])
         self.assertEqual(res_bureau["action"], "open_app")
-        self.assertEqual(res_bureau["url"], "vscode://file/opt/jarvis")
+        self.assertIsNone(res_bureau["url"])
 
 
 if __name__ == "__main__":

@@ -479,7 +479,7 @@ def open_app(target: str = "", app: str = "", name: str = "", **kwargs: Any) -> 
         app_data: Dict[str, Any] = {"target": chosen_target, "canonical": normalized_target, "command": command}
         if normalized_target in ("vscode", "code"):
             app_data["action"] = "open_app"
-            app_data["url"] = "vscode://file/opt/jarvis"
+            app_data["url"] = None
             app_data["title"] = "Visual Studio Code"
         elif normalized_target in ("chrome", "brave", "edge"):
             app_data["action"] = "open_browser"
@@ -665,6 +665,26 @@ def analyze_screen(
             config.SCREENSHOTS_DIR
             / f"screen_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         )
+        # Configuration X11 Linux (Dell M4800)
+        try:
+            import desktop_window_manager
+            for k, v in desktop_window_manager._get_linux_display_env().items():
+                if k not in os.environ:
+                    os.environ[k] = v
+        except Exception:
+            pass
+
+        # Détection immédiate des fenêtres pour enrichir le résultat
+        active_win_summary = ""
+        try:
+            import desktop_window_manager
+            win_info = desktop_window_manager.get_active_window_info()
+            if win_info.get("available") and win_info.get("window_title"):
+                app_lbl = win_info.get("app_name") or "Application"
+                active_win_summary = f"Fenêtre active au premier plan : {app_lbl} ('{win_info.get('window_title')}')."
+        except Exception:
+            pass
+
         try:
             screenshot = pyautogui_module.screenshot()
             if screenshot is not None:
@@ -705,15 +725,18 @@ def analyze_screen(
                 error=None,
             )
         except Exception as gemini_err:
-            msg = (
-                f"Capture enregistrée ({filename.name}), mais l'analyse Gemini Cloud est indisponible. "
-                "Vérifie la connexion réseau et la configuration Gemini."
-            )
+            if active_win_summary:
+                msg = f"Voici ce qui est ouvert à l'écran : {active_win_summary}"
+            else:
+                msg = (
+                    f"Capture enregistrée ({filename.name}), mais l'analyse Gemini Cloud est indisponible. "
+                    "Vérifie la connexion réseau et la configuration Gemini."
+                )
             return format_action_result(
                 action=action_name,
                 success=True,
                 message=msg,
-                data={"file_path": str(filename), "analysis": None},
+                data={"file_path": str(filename), "analysis": active_win_summary or None},
                 error=str(gemini_err),
             )
     except Exception as exc:
@@ -746,7 +769,7 @@ def optimize_system() -> Dict[str, Any]:
         return format_action_result(
             action=action_name,
             success=True,
-            message=f"Optimisation effectuee Moctar. Caches nettoyes, memoire vive stabilisee a {ram}% et processeur a {cpu}%.",
+            message=f"Optimisation effectuée. Caches nettoyés, mémoire vive stabilisée à {ram}% et processeur à {cpu}%.",
             data={"ram_percent": ram, "cpu_percent": cpu},
             error=None,
         )

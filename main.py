@@ -64,7 +64,12 @@ DIRECT_AUDIO_MIME_TYPES = AUDIO_MIME_TYPES | {
 
 def clean_tts_text(text: str) -> str:
     """Nettoie le Markdown et les symboles techniques pour une diction vocale fluide."""
-    cleaned = re.sub(r"```[\s\S]*?```", " ", str(text or ""))
+    raw = str(text or "")
+    # Purge des en-têtes bureaucratiques et mentions de télémétrie administrative
+    raw = re.sub(r"\[État Opérationnel\]", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\[Recommandations M\.O\.C\.T\.A\.R\]", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"Ce relevé concerne l'hôte\s*;?\s*les services et équipements distants ne sont pas mesurés\.?", "", raw, flags=re.IGNORECASE)
+    cleaned = re.sub(r"```[\s\S]*?```", " ", raw)
     cleaned = re.sub(r"`([^`]+)`", r"\1", cleaned)
     cleaned = re.sub(r"https?://\S+", " ", cleaned)
     cleaned = re.sub(r"[*_#>[\]()~|]", " ", cleaned)
@@ -484,7 +489,7 @@ def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
 
     # 1c. Transition collaborative ("on va passer à ceci", "on continue", "on enchaîne")
     if re.search(r"\b(?:on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|passons\s+[aà]\s+la\s+suite)\b", normalized):
-        return "Je vous écoute Moctar, sur quel module ou fichier de Jarvis avançons-nous ?"
+        return "Je t'écoute Moctar, dis-moi sur quel module ou quel chantier on enchaîne !"
 
     # 2. Heure ("quelle heure", "il est quelle heure", etc.)
     if re.search(r"\b(?:quelle?\s+heure|l['’]heure|il\s+est\s+quelle?\s+heure)\b", normalized):
@@ -1556,7 +1561,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if autonomous_res.get("handled") is True:
                 display_user_text = command_text
                 raw_reply = str(autonomous_res.get("reply") or "").strip()
-                if not re.search(r"\bmoctar[.!?]?$", raw_reply, re.IGNORECASE):
+                if not re.search(r"\bmoctar\b", raw_reply, re.IGNORECASE):
                     raw_reply = f"{raw_reply.rstrip('.')} Moctar."
                 reply_text = raw_reply
                 cat = autonomous_res.get("task_category") or "locale"
@@ -1619,7 +1624,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     or agent_result.get("response")
                     or "À vos ordres Moctar."
                 ).strip()
-                if not re.search(r"\bmoctar[.!?]?$", reply_text, re.IGNORECASE):
+                if not re.search(r"\bmoctar\b", reply_text, re.IGNORECASE):
                     reply_text = f"{reply_text.rstrip('.')} Moctar."
                 agent_result["reply"] = reply_text
 

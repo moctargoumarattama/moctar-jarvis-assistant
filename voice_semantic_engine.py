@@ -386,9 +386,10 @@ def _is_failed_llm_reply(text: str) -> bool:
 def _format_reply_ending(text: str) -> str:
     cleaned = (text or "").strip()
     if not cleaned:
-        return "À vos ordres Moctar."
-    if not re.search(r"\bmoctar[.!?]?$", cleaned, re.IGNORECASE):
-        cleaned = f"{cleaned.rstrip('.')} Moctar."
+        return "Je suis là Moctar, dis-moi tout."
+    if re.search(r"\bmoctar\b", cleaned, re.IGNORECASE):
+        return cleaned
+    cleaned = f"{cleaned.rstrip('.')} Moctar."
     return cleaned
 
 
@@ -593,13 +594,12 @@ def execute_voice_semantic_turn(
             if func_name == "open_app":
                 action_name = "open_app"
                 target_norm = str(args.get("target") or args.get("app_name") or args.get("app") or "").lower()
+                action_url = None
                 if any(w in target_norm for w in ("vscode", "vs code", "code", "bureau", "travail")):
-                    action_url = "vscode://file/opt/jarvis"
                     action_title = "Visual Studio Code"
                     tool_replies.append("Environnement de travail initialisé. VS Code et terminal de supervision prêts")
                 else:
-                    action_url = tool_res.get("data", {}).get("url") if isinstance(tool_res.get("data"), dict) else None
-                    action_title = tool_res.get("data", {}).get("title") if isinstance(tool_res.get("data"), dict) else target_norm.capitalize()
+                    action_title = target_norm.capitalize()
                     tool_replies.append(tool_res.get("message", "Application lancée"))
 
             elif func_name in ("open_site", "search_google", "search_youtube"):
@@ -680,11 +680,21 @@ def execute_voice_semantic_turn(
                         "tool_call_id": c_id,
                         "content": json.dumps({"status": "success", "result": matching_reply}, ensure_ascii=False),
                     })
+                all_tools_ok = all(t.get("success", False) for t in tools_used)
+                if all_tools_ok:
+                    status_instruction = (
+                        "Les outils système ont été exécutés avec succès. Formule une réponse orale concise, limpide, vivante et proactive en 1 ou 2 phrases percutantes pour Moctar.\n"
+                        "Valide les faits essentiels avec naturel et suggère la prochaine étape logique, sans jargon inutile."
+                    )
+                else:
+                    status_instruction = (
+                        "Certaines actions ou commandes ont rencontré une erreur ou un échec. Formule une réponse orale directe, limpide et honnête en 1 ou 2 phrases pour Moctar.\n"
+                        "Explique brièvement ce qui a coincé et ce qu'il convient de faire, sans prétendre que l'opération a réussi."
+                    )
                 synthesis_prompt = (
                     f"{full_system_prompt}\n\n"
                     f"[CONSIGNE DE SYNTHÈSE VOCALE PROACTIVE & INGÉNIEUR]\n"
-                    f"Les outils système ont été exécutés avec succès. Formule une réponse orale concise, limpide, vivante et proactive en 1 ou 2 phrases percutantes pour Moctar.\n"
-                    f"Valide les faits essentiels avec autorité d'ingénieur et suggère avec naturel la prochaine étape logique, sans aucun jargon JSON ou formule creuse.\n"
+                    f"{status_instruction}\n"
                     f"Termine naturellement par 'Moctar'."
                 )
                 t_synth = time.perf_counter()

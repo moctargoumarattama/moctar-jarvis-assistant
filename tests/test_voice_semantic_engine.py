@@ -37,7 +37,7 @@ class VoiceSemanticEngineTests(unittest.TestCase):
             res = execute_voice_semantic_turn(phrase, runtime=mock_runtime)
             self.assertEqual(res["status"], "success")
             self.assertEqual(res["action"], "open_app")
-            self.assertEqual(res["url"], "vscode://file/opt/jarvis")
+            self.assertIsNone(res["url"])
             self.assertEqual(res["title"], "Visual Studio Code")
             self.assertTrue(res["reply"].endswith("Moctar."))
             self.assertTrue(any(t["tool"] == "open_app" for t in res["tools_used"]))

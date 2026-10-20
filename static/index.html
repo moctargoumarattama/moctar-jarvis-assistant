@@ -1883,7 +1883,7 @@
               }
             }
 
-            if (targetUrl) {
+            if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
               try {
                 window.open(targetUrl, '_blank', 'noopener,noreferrer');
               } catch (e) {
@@ -2083,7 +2083,7 @@
           }
         }
         let replyText = data.reply_text || '';
-        if (targetUrl) {
+        if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
           try { window.open(targetUrl, '_blank', 'noopener,noreferrer'); } catch {}
           const openNotice = `🌐 Ouverture de ${targetTitle ? targetTitle + ' (' + targetUrl + ')' : targetUrl} dans un nouvel onglet.`;
           if (!replyText.includes('🌐')) {

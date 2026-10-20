@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional
+
+import config
 
 LOGGER = logging.getLogger("moctar.background_task_manager")
 
@@ -62,8 +65,32 @@ class BackgroundTaskManager:
             daemon=True,
         )
         thread.start()
-        LOGGER.info("⚡ [BG TASK STARTED]: '%s' (%s)", description, command)
+        # Détection ultra-rapide (< 150ms) des commandes qui se terminent ou échouent immédiatement
+        thread.join(timeout=0.15)
+        with self._lock:
+            info = self._tasks.get(tid, {})
+            if not thread.is_alive():
+                if info.get("status") == "success":
+                    LOGGER.info("⚡ [BG TASK COMPLETED FAST]: '%s'", description)
+                    return {
+                        "success": True,
+                        "task_id": tid,
+                        "status": "completed",
+                        "output": info.get("output", ""),
+                        "message": f"Tâche '{description}' terminée avec succès : {info.get('output', '')[:200]}",
+                    }
+                else:
+                    LOGGER.warning("⚡ [BG TASK FAILED FAST]: '%s' (code %s)", description, info.get("exit_code"))
+                    return {
+                        "success": False,
+                        "task_id": tid,
+                        "status": "failed",
+                        "exit_code": info.get("exit_code"),
+                        "output": info.get("output", ""),
+                        "message": f"Échec immédiat de la tâche '{description}' (code {info.get('exit_code')}) : {info.get('output', '')[:200]}",
+                    }
 
+        LOGGER.info("⚡ [BG TASK STARTED]: '%s' (%s)", description, command)
         return {
             "success": True,
             "task_id": tid,
@@ -75,11 +102,30 @@ class BackgroundTaskManager:
         """Exécute la commande de façon isolée et capture le compte-rendu."""
         out = ""
         code = -1
+        cwd = str(config.APP_ROOT)
+        env = os.environ.copy()
+        run_cmd = command
+
+        # Gestion des droits Linux / Ubuntu sur le serveur Dell Precision M4800
+        if os.name != "nt":
+            if hasattr(os, "getuid") and os.getuid() == 0 and os.path.isdir("/home/moctar"):
+                env["HOME"] = "/home/moctar"
+                env["USER"] = "moctar"
+                # Prévention des erreurs Git dubious ownership
+                try:
+                    subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], timeout=2)
+                except Exception:
+                    pass
+                if "git " in command or command.startswith("git"):
+                    run_cmd = f"sudo -u moctar bash -c {shlex.quote('cd ' + cwd + ' && ' + command)}"
+
         try:
-            # Sécurité : utilisation de shell avec timeout
+            # Sécurité : exécution dans le répertoire de l'application avec timeout
             proc = subprocess.run(
-                command,
+                run_cmd,
                 shell=True,
+                cwd=cwd,
+                env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -135,3 +181,4 @@ def run_background_task(command: str, description: str = "") -> Dict[str, Any]:
     """Outil standard pour lancer une commande système en tâche de fond."""
     manager = BackgroundTaskManager.get_instance()
     return manager.start_task(command=command, description=description or command)
+

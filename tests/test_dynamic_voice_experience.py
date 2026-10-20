@@ -282,7 +282,7 @@ class DynamicVoiceExperienceTests(unittest.TestCase):
             self.assertIn("VS Code", data["reply_text"])
             self.assertTrue(data["reply_text"].endswith("Moctar."))
             self.assertEqual(data["action"], "open_app")
-            self.assertEqual(data["url"], "vscode://file/opt/jarvis")
+            self.assertIsNone(data["url"])
 
     def test_dynamic_stt_acoustic_biasing_prompt(self) -> None:
         """Vérifie que build_dynamic_stt_prompt amorce Whisper avec le glossaire actif et le contexte du Dell M4800."""
@@ -436,7 +436,7 @@ class DynamicVoiceExperienceTests(unittest.TestCase):
         # Transition
         res_trans = main.handle_instant_local_command("on va passer à ceci")
         self.assertIsNotNone(res_trans)
-        self.assertIn("Je vous écoute Moctar", res_trans)
+        self.assertIn("Je t'écoute Moctar", res_trans)
 
     def test_dynamic_attention_omni_attention_for_direct_queries(self) -> None:
         """Vérifie que les questions directes à la 2e personne sont traitées en directed speech même hors session."""

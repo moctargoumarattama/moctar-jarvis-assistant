@@ -90,7 +90,7 @@ class NextGenIntelligenceTests(unittest.TestCase):
         mgr = BackgroundTaskManager.get_instance()
         res = mgr.start_task(command="echo 'Test OK'", description="Vérification unitaire")
         self.assertTrue(res["success"])
-        self.assertEqual(res["status"], "running")
+        self.assertIn(res["status"], ("running", "completed"))
         tid = res["task_id"]
 
         # Attendre la fin de la tâche (ultra rapide)
@@ -116,6 +116,63 @@ class NextGenIntelligenceTests(unittest.TestCase):
         # Alerte ou urgence
         rate_alert, _ = main.get_dynamic_tts_prosody("Alerte système critique", hour=14)
         self.assertEqual(rate_alert, "+22%")
+
+    def test_background_task_fast_failure_detection(self) -> None:
+        """Vérifie que les commandes échouant immédiatement (code != 0) sont détectées sans halluciner."""
+        mgr = BackgroundTaskManager.get_instance()
+        # Commande qui échoue immédiatement avec code 128
+        res = mgr.start_task(command='python -c "import sys; sys.exit(128)"', description="Commit test")
+        self.assertFalse(res["success"])
+        self.assertEqual(res["status"], "failed")
+        self.assertEqual(res["exit_code"], 128)
+        self.assertIn("Échec immédiat", res["message"])
+
+    def test_whisper_video_hallucinations_purged(self) -> None:
+        """Vérifie le rejet des hallucinations YouTube de Whisper sur le bruit du ventilateur/silence."""
+        import voice_transcribe
+        for hallu in (
+            "Merci d'avoir regardé cette vidéo !",
+            "merci d'avoir suivi cette vidéo",
+            "Merci de votre attention.",
+            "À bientôt pour une nouvelle vidéo !",
+            "Bon visionnage à tous.",
+        ):
+            filtered = voice_transcribe.filter_whisper_hallucinations(hallu)
+            self.assertEqual(filtered, "", f"L'hallucination '{hallu}' aurait dû être filtrée !")
+
+    def test_spoken_telemetry_clean_and_friendly(self) -> None:
+        """Vérifie que l'état matériel est formulé de manière vivante et que clean_tts_text purge les en-têtes bureaucratiques."""
+        import autonomous_library
+        res = autonomous_library.execute_autonomous_task("Quel est l'état du système ?")
+        self.assertTrue(res["handled"])
+        self.assertNotIn("[État Opérationnel]", res["reply"])
+        self.assertNotIn("[Recommandations M.O.C.T.A.R]", res["reply"])
+        self.assertIn("vert Moctar", res["reply"])
+
+        # Vérification du nettoyage TTS
+        bureaucratic_text = "[État Opérationnel]\nStatut matériel VERT. CPU 2 %.\n[Recommandations M.O.C.T.A.R]\n1. Conserver une marge."
+        cleaned = main.clean_tts_text(bureaucratic_text)
+        self.assertNotIn("État Opérationnel", cleaned)
+        self.assertNotIn("Recommandations", cleaned)
+
+    def test_network_status_companion_reply(self) -> None:
+        """Vérifie que 'Quel est l'état du réseau ?' déclenche un contrôle de connectivité fluide."""
+        import autonomous_library
+        res = autonomous_library.execute_autonomous_task("Quel est l'état du réseau ?")
+        self.assertTrue(res["handled"])
+        self.assertEqual(res["task_category"], "network")
+        self.assertIn("réseau", res["reply"].lower())
+        self.assertNotIn("[État Opérationnel]", res["reply"])
+
+    def test_no_duplicate_moctar_in_reply(self) -> None:
+        """Vérifie que 'Moctar' n'est jamais répété deux fois si déjà présent dans la phrase."""
+        from voice_semantic_engine import _format_reply_ending
+        reply1 = _format_reply_ending("Oui Moctar, je m'en occupe.")
+        self.assertEqual(reply1.count("Moctar"), 1)
+        self.assertFalse(reply1.endswith("Moctar. Moctar."))
+
+        reply2 = _format_reply_ending("Tout est prêt.")
+        self.assertTrue(reply2.endswith("Moctar."))
 
 
 if __name__ == "__main__":

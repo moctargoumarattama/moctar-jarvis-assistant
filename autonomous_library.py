@@ -190,9 +190,8 @@ def execute_autonomous_task(
         return {
             "handled": True,
             "reply": (
-                "Je suis **M.O.C.T.A.R**, votre copilote d'ingénierie et de supervision technique personnel.\n"
-                "Je gère votre infrastructure (serveur Dell Precision M4800, serveurs VPS, domotique et projets) "
-                "avec une rigueur opérationnelle et une disponibilité continue."
+                "Je suis **M.O.C.T.A.R**, ton copilote d'ingénierie et ton bras droit technique sur ce Dell Precision M4800 ! "
+                "Je veille sur tes serveurs, tes projets et ton infrastructure, et j'exécute tout ce que tu me demandes en un clin d'œil, Moctar."
             ),
             "tools_used": [],
             "task_category": "identity",
@@ -248,7 +247,7 @@ def execute_autonomous_task(
             "handled": True,
             "reply": "Environnement de travail initialisé. VS Code et terminal de supervision prêts, Moctar.",
             "action": "open_app",
-            "url": "vscode://file/opt/jarvis",
+            "url": None,
             "title": "Visual Studio Code",
             "tools_used": [{"tool": "open_app", "arguments": {"app_name": "vscode"}, "success": True}],
             "task_category": "system_tools",
@@ -431,7 +430,7 @@ def execute_autonomous_task(
                     app_res = actions.execute_tool("open_app", {"app_name": canonical})
                     tools_used.append({"tool": "open_app", "arguments": {"app_name": canonical}, "success": bool(app_res.get("success"))})
                     msg = app_res.get("message") if isinstance(app_res, dict) else str(app_res)
-                    url_app = "vscode://file/opt/jarvis" if canonical == "vscode" else None
+                    url_app = None
                     title_app = "Visual Studio Code" if canonical == "vscode" else None
                     return {
                         "handled": True,
@@ -524,7 +523,22 @@ def execute_autonomous_task(
         tools_used.append({"tool": "change_volume", "arguments": {"level": level}, "success": True})
         return {"handled": True, "reply": rep, "tools_used": tools_used, "task_category": "system_tools"}
 
-    # 8. TÉLÉMÉTRIE MATÉRIELLE & INFRASTRUCTURE
+    # 8. TÉLÉMÉTRIE MATÉRIELLE, RÉSEAU & INFRASTRUCTURE
+    is_network_query = any(w in norm for w in ("reseau", "réseau", "connexion", "internet", "ping", "wifi", "debit", "débit", "debits"))
+    if is_network_query:
+        import socket
+        online = False
+        try:
+            socket.create_connection(("8.8.8.8", 53), timeout=1.5)
+            online = True
+        except Exception:
+            pass
+        if online:
+            rep = "Le réseau est impeccable Moctar : la connexion Internet est active, le DNS répond et l'infrastructure est parfaitement joignable."
+        else:
+            rep = "Attention Moctar, je constate des pertes ou une coupure de la connexion Internet externe."
+        return {"handled": True, "reply": rep, "tools_used": [{"tool": "check_network", "arguments": {}, "success": online}], "task_category": "network"}
+
     is_service_management = bool(words.intersection({"service", "services", "systemctl", "docker", "vps", "processus", "demon", "daemon", "restart", "redemarre", "redémarre"}))
     is_telemetry = (
         bool(words.intersection({
@@ -538,9 +552,18 @@ def execute_autonomous_task(
     if is_telemetry:
         res = actions.execute_tool("get_system_telemetry", {})
         tools_used.append({"tool": "get_system_telemetry", "arguments": {}, "success": bool(res.get("success"))})
-        from headless_bridge import _format_telemetry_report
-        report = _format_telemetry_report(res)
-        return {"handled": True, "reply": report, "tools_used": tools_used, "task_category": "telemetry"}
+        data = res.get("data") if isinstance(res.get("data"), dict) else {}
+        cpu = data.get("cpu_percent", 0)
+        mem = data.get("memory") if isinstance(data.get("memory"), dict) else {}
+        ram = mem.get("percent", 0)
+        ram_used = mem.get("used_gb", 0)
+        disk = data.get("disk") if isinstance(data.get("disk"), dict) else {}
+        disk_free = disk.get("free_gb", 0)
+        spoken_summary = (
+            f"Tout est au vert Moctar : processeur à {cpu}%, mémoire vive à {ram}% "
+            f"({ram_used} Go utilisés) et {disk_free} Go d'espace libre sur le disque. Tout tourne parfaitement !"
+        )
+        return {"handled": True, "reply": spoken_summary, "tools_used": tools_used, "task_category": "telemetry"}
 
     # 9. TÂCHES & NOTES (PRODUCTIVITÉ)
     has_weather_intent = is_weather or any(w in norm for w in ("degre", "degré", "meteo", "météo", "pluie", "temperature", "température", "soleil", "chaleur", "froid"))
