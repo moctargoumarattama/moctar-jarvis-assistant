@@ -40,6 +40,7 @@ from .iot_actions import (
 )
 
 # 3. System Actions
+from background_task_manager import run_background_task
 from .system_actions import (
     analyze_screen,
     capture_screenshot,
@@ -142,6 +143,7 @@ TOOL_DISPATCHER: Dict[str, Callable[..., Any]] = {
     "optimize_system": optimize_system,
     "close_active_window": close_active_window,
     "snap_active_window": snap_active_window,
+    "run_background_task": run_background_task,
 
     # Web Actions
     "open_site": open_site,

@@ -667,11 +667,22 @@ def analyze_screen(
         )
         try:
             screenshot = pyautogui_module.screenshot()
-            screenshot.save(filename)
+            if screenshot is not None:
+                screenshot.save(filename)
         except Exception:
             from PIL import ImageGrab
-            screenshot = ImageGrab.grab()
-            screenshot.save(filename)
+            try:
+                from PIL import ImageGrab
+                screenshot = ImageGrab.grab()
+            except Exception:
+                import subprocess
+                try:
+                    subprocess.run(["scrot", str(filename)], check=True, timeout=5)
+                except Exception:
+                    subprocess.run(["import", "-window", "root", str(filename)], check=True, timeout=5)
+                screenshot = None
+            if screenshot is not None:
+                screenshot.save(filename)
 
         import ai_brain
         try:

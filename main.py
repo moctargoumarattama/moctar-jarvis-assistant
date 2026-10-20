@@ -209,6 +209,30 @@ def split_speech_sentences(text: str) -> list[str]:
     return merged if merged else [cleaned]
 
 
+def get_dynamic_tts_prosody(text: str, hour: Optional[int] = None) -> tuple[str, str]:
+    """Calcule une prosodie vocale vivante (rate, pitch) adaptée à l'heure et au ton de l'échange."""
+    if hour is None:
+        try:
+            hour = datetime.now().hour
+        except Exception:
+            hour = 14
+    cleaned = (text or "").lower()
+
+    # Nuit tardive (> 23h ou avant 6h) : ton plus doux, feutré et apaisant
+    if hour >= 23 or hour < 6:
+        return "+6%", "-1Hz"
+
+    # Matin (6h - 11h59) : ton enthousiaste, vif et énergique
+    if 6 <= hour < 12:
+        return "+22%", "+3Hz"
+
+    # Excitation ou alerte rapide
+    if any(w in cleaned for w in ("alerte", "erreur", "lance", "go", "hop", "succes", "succès")):
+        return "+22%", "+2Hz"
+
+    return DEFAULT_TTS_RATE, DEFAULT_TTS_PITCH
+
+
 async def generate_cached_tts_chunks(
     text: str,
     voice: str = DEFAULT_TTS_VOICE,

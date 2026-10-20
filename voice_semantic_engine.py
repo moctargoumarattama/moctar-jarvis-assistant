@@ -265,6 +265,67 @@ VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_screen",
+            "description": "Capture l'écran ou la fenêtre active et l'analyse visuellement via l'IA multimodale (ex: 'regarde mon écran', 'qu'est-ce qu'il y a d'affiché ?', 'lis ce bug', 'analyse mon écran').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "Question d'analyse visuelle spécifique ou instruction sur ce qu'il faut observer.",
+                    }
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "store_memory_fact",
+            "description": "Mémorise durablement une information, préférence ou fait important dans la mémoire permanente (ex: 'retiens que...', 'souviens-toi que...', 'mon serveur principal est...').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "description": "Catégorie du fait (ex: 'preferences', 'system', 'network', 'personal')"},
+                    "key": {"type": "string", "description": "Identifiant concis ou mot-clé du fait"},
+                    "fact": {"type": "string", "description": "Contenu complet de l'information à retenir"},
+                },
+                "required": ["key", "fact"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_memory_facts",
+            "description": "Recherche un fait ou souvenir dans la mémoire permanente de Moctar (ex: 'quel est mon port ssh ?', 'qu'est-ce que je t'avais dit sur mon serveur ?').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Mots-clés ou question de recherche dans les souvenirs"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_background_task",
+            "description": "Lance une tâche ou commande en arrière-plan sans bloquer la voix (ex: 'lance les tests en tâche de fond', 'fais un git pull en arrière-plan').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Commande shell exacte à exécuter en arrière-plan"},
+                    "description": {"type": "string", "description": "Description orale conviviale de la tâche pour Moctar"},
+                },
+                "required": ["command"],
+            },
+        },
+    },
 ]
 
 VOICE_FAST_SYSTEM_PROMPT = (
@@ -301,11 +362,25 @@ VOICE_SEMANTIC_SYSTEM_PROMPT = (
     "- Si Moctar demande d'ajouter ou lister ses tâches/rappels -> appelle 'add_todo', 'list_todos', 'schedule_reminder'.\n"
     "- Si Moctar demande 'on en était où ?', 'qu'est-ce qu'on faisait ?', 'rappelle-moi ce qu'on fait', 'l'état du travail' ou la prochaine étape -> appelle 'get_active_task'.\n"
     "- Si Moctar fixe un nouvel objectif ou demande de noter une étape/vérification -> appelle 'update_active_task'.\n"
+    "- Si Moctar demande de regarder son écran, d'analyser ce qui est affiché ou d'inspecter un bug visible (ex: 'regarde mon écran', 'analyse mon écran') -> appelle 'analyze_screen'.\n"
+    "- Si Moctar demande de retenir ou mémoriser une information ou préférence (ex: 'retiens que...', 'souviens-toi que...') -> appelle 'store_memory_fact'.\n"
+    "- Si Moctar demande de rappeler un souvenir ou un fait (ex: 'rappelle-moi...', 'quel est mon...') -> appelle 'search_memory_facts'.\n"
+    "- Si Moctar demande de lancer une tâche ou des tests en arrière-plan (ex: 'lance les tests en tâche de fond') -> appelle 'run_background_task'.\n"
     "- Si Moctar pose une question factuelle, d'actualité, de culture, de sciences ou discute amicalement sans action requise -> "
     "réponds directement avec rigueur, profondeur et perspicacité d'ingénieur, sans appeler d'outil inutilement.\n"
     "\n"
     "Termine toujours naturellement par 'Moctar'."
 )
+
+
+def _is_failed_llm_reply(text: str) -> bool:
+    """Détecte si la réponse du LLM est un message d'échec technique du backend."""
+    low = (text or "").lower().strip()
+    if not low:
+        return True
+    return low.startswith(("erreur:", "erreur api", "erreur backend", "error:")) or any(
+        phrase in low for phrase in ("modèle indisponible", "service indisponible", "fournisseur offline", "tous les modèles sont hors-ligne")
+    )
 
 
 def _format_reply_ending(text: str) -> str:
@@ -566,6 +641,20 @@ def execute_voice_semantic_turn(
             elif func_name == "update_active_task":
                 tool_replies.append(tool_res.get("message", "Mémoire de travail active mise à jour"))
 
+            elif func_name == "analyze_screen":
+                msg = tool_res.get("message")
+                tool_replies.append(msg if msg else "Écran analysé avec succès.")
+
+            elif func_name == "store_memory_fact":
+                tool_replies.append(tool_res.get("message", "Fait enregistré dans la mémoire permanente."))
+
+            elif func_name == "search_memory_facts":
+                msg = tool_res.get("message")
+                tool_replies.append(msg if msg else "Informations retrouvées dans la mémoire.")
+
+            elif func_name == "run_background_task":
+                tool_replies.append(tool_res.get("message", "Tâche lancée en arrière-plan."))
+
             else:
                 msg = tool_res.get("message")
                 if msg:
@@ -607,7 +696,7 @@ def execute_voice_semantic_turn(
                 )
                 t_synth_ms = int((time.perf_counter() - t_synth) * 1000)
                 synth_text = (synth_res.get("content") or "").strip() if synth_res else ""
-                if synth_text and not any(m in synth_text.lower() for m in ("indisponible", "erreur", "offline")):
+                if synth_text and not _is_failed_llm_reply(synth_text):
                     final_reply = _format_reply_ending(synth_text)
                     LOGGER.info("⚡ [VOICE TOOL SYNTHESIS] (%dms): '%s'", t_synth_ms, final_reply)
             except Exception as synth_exc:
@@ -615,7 +704,7 @@ def execute_voice_semantic_turn(
 
         if not final_reply:
             llm_text = (llm_res.get("content") or "").strip()
-            if llm_text and not any(m in llm_text.lower() for m in ("indisponible", "erreur", "offline")):
+            if llm_text and not _is_failed_llm_reply(llm_text):
                 final_reply = _format_reply_ending(llm_text)
             elif tool_replies:
                 final_reply = _format_reply_ending(" ".join(r for r in tool_replies if r))
