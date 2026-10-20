@@ -211,13 +211,16 @@ def is_direct_voice_command(text: str) -> bool:
     if not text or len(text.strip()) < 3:
         return False
     norm = _strip_accents_1to1(text).lower().strip()
-    # 1. Bureau & Environnement de Travail
+    # 1. Bureau, VS Code & Lancement d'Applications
     if any(k in norm for k in (
         "au bureau", "mode bureau", "mets-toi a mon bureau", "mets-toi au bureau",
         "mets toi a mon bureau", "mets toi au bureau", "mode travail", "au travail",
         "espace de travail", "lance l'environnement", "lance le travail", "bonne bureau",
-        "ouvre le bureau", "ouvre mon bureau",
+        "ouvre le bureau", "ouvre mon bureau", "mets-toi au mode bureau", "mets toi au mode bureau",
+        "vs code", "vscode", "vscod", "visual studio", "visuel studio", "studio code",
     )):
+        return True
+    if re.search(r"\b(?:ouvre|ouvrir|lance|lancer|active|activer|demarre|d[ée]marre|open)\b", norm):
         return True
     # 2. Heure & Date
     if re.search(r"\b(?:quelle?\s+heure|il\s+est\s+quelle?\s+heure|donne\s+l['’]heure|quel\s+jour|quelle?\s+date|on\s+est\s+le\s+combien)\b", norm):

@@ -239,14 +239,18 @@ def execute_autonomous_task(
         "mode travail", "je me mets au travail", "au travail", "espace de travail",
         "lance l'environnement", "lance le travail", "au bureau", "mode bureau",
         "mets-toi a mon bureau", "mets-toi au bureau", "mets toi a mon bureau", "mets toi au bureau",
+        "mets-toi au mode bureau", "mets toi au mode bureau",
         "sur mon bureau", "bureau de travail", "bonne bureau", "ouvre le bureau", "ouvre mon bureau",
+        "visual studio code", "visuel studio code", "vs code", "vscode", "vscod", "ou vscod",
     ]):
-        actions.execute_tool("open_app", {"app_name": "code"})
+        actions.execute_tool("open_app", {"app_name": "vscode"})
         return {
             "handled": True,
             "reply": "Environnement de travail initialisé. VS Code et terminal de supervision prêts, Moctar.",
             "action": "open_app",
-            "tools_used": [{"tool": "open_app", "arguments": {"app_name": "code"}, "success": True}],
+            "url": "vscode://file/opt/jarvis",
+            "title": "Visual Studio Code",
+            "tools_used": [{"tool": "open_app", "arguments": {"app_name": "vscode"}, "success": True}],
             "task_category": "system_tools",
         }
 
@@ -419,11 +423,25 @@ def execute_autonomous_task(
                 target_norm = _normalize(target)
 
                 # Application locale
-                if any(app in target_norm for app in ["terminal", "cmd", "invite de commande", "powershell", "calculatrice", "notepad", "bloc notes", "bloc-notes"]):
-                    app_res = actions.execute_tool("open_app", {"app_name": target})
-                    tools_used.append({"tool": "open_app", "arguments": {"app_name": target}, "success": bool(app_res.get("success"))})
+                if any(app in target_norm for app in [
+                    "terminal", "cmd", "invite de commande", "powershell", "calculatrice", "notepad", "bloc notes", "bloc-notes",
+                    "vscode", "vs code", "code", "visual studio", "visuel studio", "vscod", "studio code",
+                ]):
+                    canonical = "vscode" if any(c in target_norm for c in ["code", "visual", "visuel", "vscod"]) else target
+                    app_res = actions.execute_tool("open_app", {"app_name": canonical})
+                    tools_used.append({"tool": "open_app", "arguments": {"app_name": canonical}, "success": bool(app_res.get("success"))})
                     msg = app_res.get("message") if isinstance(app_res, dict) else str(app_res)
-                    return {"handled": True, "reply": f"🚀 {msg}", "tools_used": tools_used, "task_category": "system_tools"}
+                    url_app = "vscode://file/opt/jarvis" if canonical == "vscode" else None
+                    title_app = "Visual Studio Code" if canonical == "vscode" else None
+                    return {
+                        "handled": True,
+                        "reply": f"🚀 {msg}",
+                        "action": "open_app",
+                        "url": url_app,
+                        "title": title_app,
+                        "tools_used": tools_used,
+                        "task_category": "system_tools",
+                    }
 
                 # Dossier local
                 if any(folder in target_norm for folder in ["dossier", "repertoire", "telechargements", "documents"]):

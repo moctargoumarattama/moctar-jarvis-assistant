@@ -653,7 +653,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertEqual(call_kwargs["data"]["model"], "whisper-large-v3")
             self.assertEqual(call_kwargs["data"]["language"], "fr")
             self.assertEqual(call_kwargs["data"]["temperature"], "0.0")
-            self.assertEqual(call_kwargs["data"]["prompt"], "")
+            self.assertIn("Moctar", call_kwargs["data"]["prompt"])
 
     def test_filter_whisper_hallucinations_rejects_hallucinatory_patterns(self) -> None:
         """Vérifie le rejet systématique des hallucinations (oui, is that you, assistant vocal, anglais)."""
@@ -929,6 +929,15 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
         self.assertTrue(acc)
         self.assertIn("bureau", cmd.lower())
 
+        acc, cmd, wake = extract_voice_interact_command("Ouvre le visuel studio code.", session_active=False)
+        self.assertTrue(acc)
+
+        acc, cmd, wake = extract_voice_interact_command("ou VSCOD ?", session_active=False)
+        self.assertTrue(acc)
+
+        acc, cmd, wake = extract_voice_interact_command("Google Visual Studio Code", session_active=False)
+        self.assertTrue(acc)
+
         acc, cmd, wake = extract_voice_interact_command("Quelle heure est-il ?", session_active=False)
         self.assertTrue(acc)
         self.assertIn("heure", cmd.lower())
@@ -985,8 +994,32 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
                 self.assertIn("mixtral-8x7b-32768", discovered)
                 self.assertNotIn("whisper-large-v3", discovered)
                 self.assertNotIn("distil-whisper-large-v3-en", discovered)
+
+            # Simulation d'une clé n'ayant que des modèles non approuvés comme allam-2-7b
+            mock_regional_data = {
+                "data": [
+                    {"id": "allam-2-7b"},
+                    {"id": "canopylabs/orpheus-v1-english"},
+                ]
+            }
+            mock_resp_reg = MagicMock()
+            mock_resp_reg.status = 200
+            mock_resp_reg.read.return_value = json.dumps(mock_regional_data).encode("utf-8")
+            mock_resp_reg.__enter__.return_value = mock_resp_reg
+
+            with patch("urllib.request.urlopen", return_value=mock_resp_reg):
+                ai_brain._GROQ_MODELS_CACHE = (0.0, [])
+                discovered_reg = ai_brain.get_available_groq_chat_models("gsk_fake_regional_key")
+                self.assertEqual(discovered_reg, [])
         finally:
             ai_brain._GROQ_MODELS_CACHE = old_cache
+
+        # Test mode bureau avec URL VS Code
+        import autonomous_library
+        res_bureau = autonomous_library.execute_autonomous_task("M. Mokhtar, mets-toi au mode bureau")
+        self.assertTrue(res_bureau["handled"])
+        self.assertEqual(res_bureau["action"], "open_app")
+        self.assertEqual(res_bureau["url"], "vscode://file/opt/jarvis")
 
 
 if __name__ == "__main__":

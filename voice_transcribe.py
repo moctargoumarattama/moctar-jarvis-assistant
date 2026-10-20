@@ -335,7 +335,11 @@ def transcribe_groq_api(audio_path: str | os.PathLike[str], api_key: str | None 
     url = "https://api.groq.com/openai/v1/audio/transcriptions"
     model = os.environ.get("GROQ_WHISPER_MODEL", "whisper-large-v3")
 
-    prompt_fr = ""
+    prompt_fr = (
+        "Bonjour Moctar, ici JARVIS. Ouvre Visual Studio Code, VS Code, code, terminal, "
+        "système, serveur, météo, degrés, Niamey, Maroc, mode bureau, mode travail, "
+        "Docker, Python, Git status, WhatsApp, volume, musique."
+    )
 
     # Essai 1 : SDK groq si présent
     try:

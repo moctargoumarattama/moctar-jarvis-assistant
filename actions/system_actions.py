@@ -453,10 +453,34 @@ def open_app(target: str = "", app: str = "", name: str = "", **kwargs: Any) -> 
         )
 
     try:
-        subprocess.Popen(command, shell=True)
+        import platform
+        if platform.system() != "Windows":
+            target_user = "moctar" if os.path.exists("/home/moctar") else os.environ.get("USER", "root")
+            display = os.environ.get("DISPLAY", ":0")
+            xauth = os.environ.get("XAUTHORITY") or f"/home/{target_user}/.Xauthority"
+            bus = os.environ.get("DBUS_SESSION_BUS_ADDRESS") or "/run/user/1000/bus"
+
+            env = os.environ.copy()
+            env["DISPLAY"] = display
+            if os.path.exists(xauth):
+                env["XAUTHORITY"] = xauth
+            if os.path.exists(bus):
+                env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus}"
+
+            if hasattr(os, "getuid") and os.getuid() == 0 and target_user != "root":
+                full_cmd = f"sudo -u {target_user} DISPLAY={display} XAUTHORITY={xauth} {command} >/dev/null 2>&1 &"
+                subprocess.Popen(full_cmd, shell=True, env=env)
+            else:
+                subprocess.Popen(f"{command} >/dev/null 2>&1 &", shell=True, env=env)
+        else:
+            subprocess.Popen(command, shell=True)
         display_name = chosen_target.replace("_", " ")
         app_data: Dict[str, Any] = {"target": chosen_target, "canonical": normalized_target, "command": command}
-        if normalized_target in ("chrome", "brave", "edge"):
+        if normalized_target in ("vscode", "code"):
+            app_data["action"] = "open_app"
+            app_data["url"] = "vscode://file/opt/jarvis"
+            app_data["title"] = "Visual Studio Code"
+        elif normalized_target in ("chrome", "brave", "edge"):
             app_data["action"] = "open_browser"
             app_data["url"] = "https://www.google.com"
             app_data["title"] = normalized_target.capitalize()

@@ -70,25 +70,31 @@ BROWSER_LABELS = {
     "default": "navigateur par defaut",
 }
 
+import platform as _platform
+
+_is_win = _platform.system() == "Windows"
+
 APP_COMMANDS = {
-    "chrome": "start chrome",
-    "brave": "start brave",
-    "edge": "start msedge",
-    "calculator": "start calc",
-    "notepad": "start notepad",
-    "cmd": "start cmd",
-    "explorer": "start explorer",
-    "vscode": "start code",
+    "chrome": "start chrome" if _is_win else "google-chrome",
+    "brave": "start brave" if _is_win else "brave-browser",
+    "edge": "start msedge" if _is_win else "microsoft-edge",
+    "calculator": "start calc" if _is_win else "gnome-calculator",
+    "notepad": "start notepad" if _is_win else "gedit",
+    "cmd": "start cmd" if _is_win else "gnome-terminal",
+    "explorer": "start explorer" if _is_win else "xdg-open /opt/jarvis",
+    "vscode": "start code" if _is_win else "code /opt/jarvis",
+    "code": "start code" if _is_win else "code /opt/jarvis",
 }
 
 APP_PROCESS_NAMES = {
-    "chrome": "chrome.exe",
-    "brave": "brave.exe",
-    "edge": "msedge.exe",
-    "calculator": "CalculatorApp.exe",
-    "notepad": "notepad.exe",
-    "cmd": "cmd.exe",
-    "vscode": "Code.exe",
+    "chrome": "chrome.exe" if _is_win else "chrome",
+    "brave": "brave.exe" if _is_win else "brave",
+    "edge": "msedge.exe" if _is_win else "msedge",
+    "calculator": "CalculatorApp.exe" if _is_win else "gnome-calculator",
+    "notepad": "notepad.exe" if _is_win else "gedit",
+    "cmd": "cmd.exe" if _is_win else "gnome-terminal",
+    "vscode": "Code.exe" if _is_win else "code",
+    "code": "Code.exe" if _is_win else "code",
 }
 
 FOLDER_PATHS = {
@@ -104,9 +110,16 @@ APP_ALIASES = {
     "edge": ["edge", "microsoft edge"],
     "calculator": ["calculatrice", "calculator", "calculette"],
     "notepad": ["bloc-notes", "bloc note", "notepad"],
-    "cmd": ["cmd", "terminal", "invite de commande"],
-    "explorer": ["explorer", "explorateur"],
-    "vscode": ["vscode", "visual studio code", "code"],
+    "cmd": ["cmd", "terminal", "invite de commande", "invite de commandes", "console"],
+    "explorer": ["explorer", "explorateur", "gestionnaire de fichiers"],
+    "vscode": [
+        "vscode", "visual studio code", "visuel studio code", "visuel studio",
+        "visual studio", "studio code", "vscod", "code", "ou vscod", "ouvre vscode",
+    ],
+    "code": [
+        "vscode", "visual studio code", "visuel studio code", "visuel studio",
+        "visual studio", "studio code", "vscod", "code", "ou vscod", "ouvre vscode",
+    ],
 }
 
 SITE_ALIASES = {

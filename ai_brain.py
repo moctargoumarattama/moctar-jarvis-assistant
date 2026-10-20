@@ -1949,17 +1949,22 @@ def get_available_groq_chat_models(api_key: str) -> list[str]:
                         i for i in raw_ids
                         if not any(k in i.lower() for k in ("whisper", "guard", "embed", "tts", "audio", "moderation"))
                     ]
+                    APPROVED_FAMILIES = ("llama", "mixtral", "gemma", "qwen", "deepseek", "gpt")
                     for pref in candidates:
                         if pref in chat_ids and pref not in discovered:
                             discovered.append(pref)
                     for cid in chat_ids:
-                        if cid not in discovered:
-                            discovered.append(cid)
-                    logger.info("⚡ [GROQ DISCOVERY]: %d modèles de chat détectés (%s...)", len(discovered), discovered[:3])
+                        if any(fam in cid.lower() for fam in APPROVED_FAMILIES):
+                            if cid not in discovered:
+                                discovered.append(cid)
+                    if discovered:
+                        logger.info("⚡ [GROQ DISCOVERY]: %d modèles de chat approuvés (%s...)", len(discovered), discovered[:3])
+                    else:
+                        logger.warning("⚡ [GROQ DISCOVERY]: Aucun modèle de chat général approuvé sur cette clé (reçus: %s). Repli sur Gemini.", chat_ids[:3])
         except Exception as exc:
             logger.debug("Découverte dynamique des modèles Groq indisponible (%s), repli sur la liste par défaut.", exc)
 
-    final_list = discovered or candidates
+    final_list = discovered if api_key else candidates
     _GROQ_MODELS_CACHE = (now, final_list)
     return final_list
 
@@ -2049,7 +2054,7 @@ def voice_fast_llm_reply(
     if web_context:
         prompt_sections.append(web_context)
     prompt_sections.append(telemetry)
-    full_system_prompt = "\n\n".join(s for s in prompt_sections if s)
+    full_system_prompt = "\n\n".join(str(s) for s in prompt_sections if s)
 
     # Construction ordonnée des messages avec historique multi-tours
     messages: list[dict[str, str]] = [{"role": "system", "content": full_system_prompt}]

@@ -9,7 +9,7 @@ User=root
 Group=root
 WorkingDirectory=/opt/jarvis
 EnvironmentFile=/opt/jarvis/.env
-Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 DISPLAY=:0
 ExecStart=/opt/jarvis/venv/bin/python /opt/jarvis/main.py
 Restart=always
 RestartSec=5
