@@ -733,7 +733,13 @@
             message: `🔊 Moctar : "${replyText}"`,
           });
           let played = false;
-          if (payload.audio_url) {
+          if (Array.isArray(payload.audio_chunks) && payload.audio_chunks.length > 1) {
+            for (const chunkUrl of payload.audio_chunks) {
+              if (generation !== current.generation || destroyed || suspended) break;
+              const ok = await playAudioUrl(chunkUrl);
+              played = ok || played;
+            }
+          } else if (payload.audio_url) {
             played = await playAudioUrl(payload.audio_url);
           }
           if (!played && replyText) {

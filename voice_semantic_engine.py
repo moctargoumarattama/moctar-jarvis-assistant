@@ -238,6 +238,33 @@ VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_active_task",
+            "description": "Consulte l'état de la tâche active, l'objectif en cours, la sous-tâche et les vérifications en attente (Task State Tracking).",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_active_task",
+            "description": "Définit ou met à jour la tâche active, l'objectif en cours, la sous-tâche ou ajoute un point à vérifier.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {"type": "string", "description": "Nouvel objectif principal"},
+                    "subtask": {"type": "string", "description": "Sous-tâche ou étape actuelle"},
+                    "status": {"type": "string", "description": "Statut (in_progress, completed, verifying)"},
+                    "add_pending": {"type": "string", "description": "Point ou élément à vérifier"},
+                },
+            },
+        },
+    },
 ]
 
 VOICE_FAST_SYSTEM_PROMPT = (
@@ -272,6 +299,8 @@ VOICE_SEMANTIC_SYSTEM_PROMPT = (
     "- Si Moctar demande où en est le projet, ce qu'on a fait, les derniers commits ou l'avancement -> appelle 'get_project_context'.\n"
     "- Si Moctar demande d'optimiser le système ou libérer la RAM -> appelle 'optimize_system'.\n"
     "- Si Moctar demande d'ajouter ou lister ses tâches/rappels -> appelle 'add_todo', 'list_todos', 'schedule_reminder'.\n"
+    "- Si Moctar demande 'on en était où ?', 'qu'est-ce qu'on faisait ?', 'rappelle-moi ce qu'on fait', 'l'état du travail' ou la prochaine étape -> appelle 'get_active_task'.\n"
+    "- Si Moctar fixe un nouvel objectif ou demande de noter une étape/vérification -> appelle 'update_active_task'.\n"
     "- Si Moctar pose une question factuelle, d'actualité, de culture, de sciences ou discute amicalement sans action requise -> "
     "réponds directement avec rigueur, profondeur et perspicacité d'ingénieur, sans appeler d'outil inutilement.\n"
     "\n"
@@ -371,6 +400,15 @@ def execute_voice_semantic_turn(
         except Exception:
             pass
 
+    # Injection de la mémoire de travail active (Task State Tracking)
+    try:
+        import active_task_tracker
+        task_prompt = active_task_tracker.format_active_task_prompt()
+        if task_prompt:
+            prompt_sections.append(task_prompt)
+    except Exception:
+        pass
+
     if telemetry and isinstance(telemetry, str):
         prompt_sections.append(telemetry)
     full_system_prompt = "\n\n".join(str(s) for s in prompt_sections if s)
@@ -439,8 +477,35 @@ def execute_voice_semantic_turn(
 
             LOGGER.info("⚡ [VOICE TOOL DISPATCH]: %s(%s)", func_name, args)
             t_exec = time.perf_counter()
-            tool_res = execute_tool(func_name, args)
+            if func_name == "get_active_task":
+                import active_task_tracker
+                state = active_task_tracker.get_active_task_state()
+                msg = active_task_tracker.format_active_task_speech()
+                tool_res = {"success": True, "action": "get_active_task", "data": state, "message": msg}
+            elif func_name == "update_active_task":
+                import active_task_tracker
+                state = active_task_tracker.update_active_task_state(
+                    goal=args.get("goal"),
+                    subtask=args.get("subtask"),
+                    status=args.get("status"),
+                    add_pending=args.get("add_pending"),
+                )
+                tool_res = {"success": True, "action": "update_active_task", "data": state, "message": "Mémoire de travail active mise à jour"}
+            else:
+                tool_res = execute_tool(func_name, args)
             t_diff = int((time.perf_counter() - t_exec) * 1000)
+
+            # Enregistrement automatique dans la mémoire de travail active
+            try:
+                import active_task_tracker
+                if func_name == "open_app":
+                    active_task_tracker.record_task_action(f"Lancement de {args.get('target', 'application')}")
+                elif func_name == "optimize_system":
+                    active_task_tracker.record_task_action("Optimisation mémoire RAM et processus")
+                elif func_name == "get_project_context":
+                    active_task_tracker.record_task_action("Consultation avancement projet et Git")
+            except Exception:
+                pass
 
             tools_used.append({
                 "tool": func_name,
@@ -493,6 +558,13 @@ def execute_voice_semantic_turn(
             elif func_name == "snap_active_window":
                 action_name = "snap_window"
                 tool_replies.append(tool_res.get("message", "Disposition de fenêtre appliquée"))
+
+            elif func_name == "get_active_task":
+                msg = tool_res.get("message")
+                tool_replies.append(msg if msg else "État de la tâche active récupéré")
+
+            elif func_name == "update_active_task":
+                tool_replies.append(tool_res.get("message", "Mémoire de travail active mise à jour"))
 
             else:
                 msg = tool_res.get("message")

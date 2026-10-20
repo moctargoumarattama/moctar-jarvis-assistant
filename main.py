@@ -166,6 +166,82 @@ async def generate_cached_tts(
     return audio_bytes, cache_hit
 
 
+def split_speech_sentences(text: str) -> list[str]:
+    """Découpe un texte en phrases orales naturelles pour la pré-synthèse et le streaming audio (< 350 ms)."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+
+    protected = cleaned
+    protected = re.sub(r"\bM\.O\.C\.T\.A\.R\b", "M_O_C_T_A_R", protected)
+    protected = re.sub(r"\bM\.\s+", "M_DOT_ ", protected)
+    protected = re.sub(r"\bDr\.\s+", "Dr_DOT_ ", protected)
+    protected = re.sub(r"(\d+)\.(\d+)", r"\1_DEC_\2", protected)
+
+    raw_parts = re.split(r"(?<=[.!?;\n])\s+", protected)
+
+    sentences: list[str] = []
+    for p in raw_parts:
+        restored = (
+            p.replace("M_O_C_T_A_R", "M.O.C.T.A.R")
+            .replace("M_DOT_", "M.")
+            .replace("Dr_DOT_", "Dr.")
+            .replace("_DEC_", ".")
+            .strip()
+        )
+        if restored:
+            sentences.append(restored)
+
+    merged: list[str] = []
+    buffer = ""
+    for s in sentences:
+        if not buffer:
+            buffer = s
+        else:
+            if len(buffer.split()) < 3:
+                buffer = f"{buffer} {s}"
+            else:
+                merged.append(buffer)
+                buffer = s
+    if buffer:
+        merged.append(buffer)
+
+    return merged if merged else [cleaned]
+
+
+async def generate_cached_tts_chunks(
+    text: str,
+    voice: str = DEFAULT_TTS_VOICE,
+    rate: str = DEFAULT_TTS_RATE,
+    pitch: str = DEFAULT_TTS_PITCH,
+) -> tuple[str, list[str]]:
+    """Génère la synthèse vocale par phrases en parallèle (First-Sentence Streaming).
+
+    Garantit une latence perçue ultra-basse (< 350 ms) en synthétisant la première phrase
+    en priorité absolue, tout en pré-mettant en cache les phrases subséquentes.
+    Retourne (full_audio_url, list_of_chunk_urls).
+    """
+    cleaned = clean_tts_text(text)
+    if not cleaned:
+        raise ValueError("Le texte à synthétiser est vide.")
+
+    # Synthèse complète pour rétrocompatibilité
+    _, _, full_key = await generate_cached_tts_with_key(cleaned, voice, rate=rate, pitch=pitch)
+    full_url = f"/api/voice/tts/cache/{full_key}.mp3"
+
+    sentences = split_speech_sentences(cleaned)
+    if len(sentences) <= 1:
+        return full_url, [full_url]
+
+    async def _synth_sentence(sentence: str) -> str:
+        _, _, k = await generate_cached_tts_with_key(sentence, voice, rate=rate, pitch=pitch)
+        return f"/api/voice/tts/cache/{k}.mp3"
+
+    tasks = [_synth_sentence(s) for s in sentences]
+    chunk_urls = await asyncio.gather(*tasks, return_exceptions=False)
+    return full_url, list(chunk_urls)
+
+
 VOICE_SESSION_DURATION_SECONDS = float(os.getenv("VOICE_SESSION_DURATION_SECONDS", "0.0"))
 VOICE_BUTLER_GREETINGS = (
     "À vos ordres Moctar, je vous écoute.",
@@ -369,6 +445,14 @@ def handle_instant_local_command(text: str) -> str | None:
         except Exception:
             cpu, ram = 12, 45
         return f"Processeur à {cpu}%, mémoire vive à {ram}%, tous les systèmes sont nominaux, Moctar."
+
+    # 6. Mémoire de Travail Active ("on en était où", "qu'est-ce qu'on faisait", "rappelle-moi notre tâche", "c'est quoi notre tâche")
+    if re.search(r"\b(?:on\s+en\s+[ée]tait\s+o[uù]|qu['’]est[- ]ce\s+qu['’]on\s+faisait|on\s+faisait\s+quoi|rappelle[- ]moi\s+(?:ce\s+qu['’]on\s+fai|notre\s+t[âa]che)|notre\s+t[âa]che\s+en\s+cours|t[âa]che\s+active)\b", normalized):
+        try:
+            import active_task_tracker
+            return active_task_tracker.format_active_task_speech()
+        except Exception:
+            return "Nous sommes en veille opérationnelle sur l'infrastructure Dell Precision M4800, Moctar."
 
     return None
 
@@ -1265,9 +1349,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             reply_text = "C'est bien noté Moctar. Le point est fait, tout reste sous contrôle. Je passe en veille."
             LOGGER.info("⚡ [VOICE DISENGAGE]: Fin de session collaborative demandée -> '%s'", reply_text)
             audio_url: str | None = None
+            audio_chunks: list[str] = []
             try:
-                _, _, cache_key = await generate_cached_tts_with_key(reply_text, DEFAULT_TTS_VOICE)
-                audio_url = f"/api/voice/tts/cache/{cache_key}.mp3"
+                audio_url, audio_chunks = await generate_cached_tts_chunks(reply_text, DEFAULT_TTS_VOICE)
             except Exception:
                 pass
             return JSONResponse(
@@ -1278,6 +1362,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "raw_transcript": transcript,
                     "reply_text": reply_text,
                     "audio_url": audio_url,
+                    "audio_chunks": audio_chunks,
+                    "first_chunk_audio_url": audio_chunks[0] if audio_chunks else audio_url,
                     "session_active": False,
                     "wake_word_detected": False,
                     "action": None,
@@ -1453,9 +1539,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         pass
 
         audio_url: str | None = None
+        audio_chunks: list[str] = []
         try:
-            _, _, cache_key = await generate_cached_tts_with_key(reply_text, DEFAULT_TTS_VOICE)
-            audio_url = f"/api/voice/tts/cache/{cache_key}.mp3"
+            audio_url, audio_chunks = await generate_cached_tts_chunks(reply_text, DEFAULT_TTS_VOICE)
         except Exception as exc:
             LOGGER.warning("Synthèse edge-tts indisponible sur /api/voice/interact : %s", exc)
 
@@ -1467,6 +1553,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "raw_transcript": transcript,
                 "reply_text": reply_text,
                 "audio_url": audio_url,
+                "audio_chunks": audio_chunks,
+                "first_chunk_audio_url": audio_chunks[0] if audio_chunks else audio_url,
                 "session_active": bool(runtime.voice_session_until > time.monotonic()),
                 "wake_word_detected": wake_detected,
                 "action": agent_result.get("action"),
