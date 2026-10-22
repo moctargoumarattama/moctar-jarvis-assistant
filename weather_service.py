@@ -121,7 +121,7 @@ def extract_city_from_query(query: str, default: str = DEFAULT_CITY) -> str:
         r"\b(?:temps\s+fait-il\s+[aà]|temps\s+[aà]|pleut-il\s+[aà]|fait-il\s+beau\s+[aà])\s+([A-Za-zÀ-ÿ\- ]{2,30})\b",
         r"\b(?:m[ée]t[ée]o\s+(?:[aà]|pour|sur|de|vers|en|au|du)\s+|ville\s+de\s+)([A-Za-zÀ-ÿ\- ]{2,30})\b",
         r"\b(?:degr[ée]s?|temp[ée]rature|temps|climat)\s+(?:[aà]|au|en|pour|sur|du)\s+([A-Za-zÀ-ÿ\- ]{2,30})\b",
-        r"\b(?:[aà]|au|en)\s+([A-Za-zÀ-ÿ\- ]{2,30})\s*[,.]?\s+(?:il\s+fait|quel\s+degr[ée]|combien\s+de\s+degr[ée]s?|quelle\s+temp[ée]rature)\b",
+        r"\b(?:[aà]|au|en|du)\s+([A-Za-zÀ-ÿ\- ]{2,30})\s*[,.]?\s+(?:il\s+fait|quel\s+degr[ée]|combien\s+de\s+degr[ée]s?|quelle\s+temp[ée]rature|il\s+fait\s+chaud|il\s+fait\s+froid)\b",
         r"\b(?:m[ée]t[ée]o|[aà]|pour|sur|de|vers|au|du)\s+([A-Za-zÀ-ÿ\- ]{2,30})\b",
     ]
     for pat in patterns:
@@ -129,7 +129,7 @@ def extract_city_from_query(query: str, default: str = DEFAULT_CITY) -> str:
         if m:
             candidate = m.group(1).strip().strip(" ?.!:,;\"'")
             # Supprimer d'éventuelles prépositions restantes en début de chaîne
-            candidate = re.sub(r"^(?:[aà]|pour|sur|de|vers|en)\s+", "", candidate, flags=re.IGNORECASE).strip()
+            candidate = re.sub(r"^(?:[aà]|pour|sur|de|vers|en|du)\s+", "", candidate, flags=re.IGNORECASE).strip()
             # Nettoyer les faux positifs (adverbes, dates...)
             lowered = candidate.lower()
             stop_words = {"demain", "aujourd'hui", "aujourd hui", "ce matin", "ce soir", "actuellement", "dehors", "le monde"}

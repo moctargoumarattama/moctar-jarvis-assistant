@@ -71,7 +71,8 @@ def _speak_with_edge_tts(text: str) -> bool:
     if not _EDGE_TTS_AVAILABLE or not _PYGAME_AVAILABLE:
         return False
 
-    voice = config.TTS_SETTINGS.get("voice", "fr-FR-HenriNeural")
+    primary_voice = config.TTS_SETTINGS.get("voice", "fr-FR-RemyMultilingualNeural")
+    fallback_voice = config.TTS_SETTINGS.get("fallback_voice", "fr-FR-HenriNeural")
     rate = config.TTS_SETTINGS.get("rate", "+0%")
     pitch = config.TTS_SETTINGS.get("pitch", "+0Hz")
 
@@ -79,27 +80,35 @@ def _speak_with_edge_tts(text: str) -> bool:
     if not clean_text:
         return True
 
-    temp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-            temp_path = tmp.name
+    # Essai 1 : Voix masculine moderne principale, puis repli sur la voix secondaire
+    candidate_voices = [primary_voice]
+    if fallback_voice and fallback_voice != primary_voice:
+        candidate_voices.append(fallback_voice)
 
-        async def _synthesize():
-            communicate = edge_tts.Communicate(clean_text, voice, rate=rate, pitch=pitch)
-            await communicate.save(temp_path)
+    for candidate in candidate_voices:
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                temp_path = tmp.name
 
-        asyncio.run(_synthesize())
-        _play_audio_file(temp_path)
-        return True
-    except Exception as exc:
-        logger.warning("Edge-TTS synthesis failed (%s), falling back to pyttsx3", exc)
-        return False
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
+            async def _synthesize():
+                communicate = edge_tts.Communicate(clean_text, candidate, rate=rate, pitch=pitch)
+                await communicate.save(temp_path)
+
+            asyncio.run(_synthesize())
+            _play_audio_file(temp_path)
+            return True
+        except Exception as exc:
+            logger.warning("Edge-TTS (%s) synthesis failed (%s)", candidate, exc)
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+
+    logger.warning("All Edge-TTS voice candidates failed, falling back to pyttsx3")
+    return False
 
 
 def text2speech(engine, text):

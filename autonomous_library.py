@@ -233,10 +233,27 @@ def execute_autonomous_task(
             "task_category": "system_tools",
         }
 
-    # 2.3. MODE TRAVAIL & ENVIRONNEMENT DE DÉVELOPPEMENT
+    # 2.3. AGENCEMENT GÉOMÉTRIQUE — « MODE BUREAU » (Ubuntu X11 & Dell M4800)
     if any(k in norm for k in [
-        "mode travail", "je me mets au travail", "au travail", "espace de travail",
-        "lance l'environnement", "lance le travail", "au bureau", "mode bureau",
+        "mode bureau", "agencement bureau", "mode travail", "disposition travail",
+        "disposition bureau", "agencement du bureau", "agencement poste de travail",
+    ]):
+        res = actions.execute_tool("apply_workspace_layout", {})
+        tools_used.append({"tool": "apply_workspace_layout", "arguments": {}, "success": bool(res.get("success", True))})
+        return {
+            "handled": True,
+            "reply": "Agencement géométrique du poste de travail appliqué, Moctar.",
+            "action": "open_app",
+            "url": None,
+            "title": "Mode Bureau",
+            "tools_used": tools_used,
+            "task_category": "workspace_layout",
+        }
+
+    # 2.3b. MODE TRAVAIL & ENVIRONNEMENT DE DÉVELOPPEMENT (VS CODE)
+    if any(k in norm for k in [
+        "je me mets au travail", "au travail", "espace de travail",
+        "lance l'environnement", "lance le travail", "au bureau",
         "mets-toi a mon bureau", "mets-toi au bureau", "mets toi a mon bureau", "mets toi au bureau",
         "mets-toi au mode bureau", "mets toi au mode bureau",
         "sur mon bureau", "bureau de travail", "bonne bureau", "ouvre le bureau", "ouvre mon bureau",
@@ -255,7 +272,7 @@ def execute_autonomous_task(
 
     # 2.4. FIN DE JOURNÉE & CLÔTURE DE SESSION
     if any(k in norm for k in ["fin de journee", "fin de journée", "je m'arrete la", "je m'arrête là", "je coupe pour ce soir", "bonne soiree"]):
-        actions.execute_tool("control_music", {"action": "music_pause"})
+        actions.execute_tool("control_playback", {"action": "pause"})
         return {
             "handled": True,
             "reply": "Session clôturée Moctar. Les flux multimédias sont suspendus et l'infrastructure reste sous surveillance active. Bonne soirée.",
@@ -291,15 +308,25 @@ def execute_autonomous_task(
             "est ce qu il pleut", "est-ce qu'il pleut", "pleut il", "pleut-il",
             "prevision meteo", "prévision météo", "fait il beau", "fait-il beau",
             "quel degre", "combien de degre", "fait quel degre", "combien il fait",
-            "degre dehors", "degré dehors",
+            "degre dehors", "degré dehors", "il fait chaud", "il fait froid", "fait chaud", "fait froid",
+            "fait quel temps", "quelle temperature", "quelle température",
         ])
         or (
+            any(w in norm for w in ("temperature", "température", "degre", "degré", "degres", "degrés", "meteo", "météo", "climat"))
+            and not any(w in norm for w in ("cpu", "ram", "serveur", "machine", "dell", "disque", "processeur", "carte"))
+        )
+        or (
+            any(w in norm for w in ("chaud", "froid"))
+            and any(w in norm for w in ("fait", "climat", "temps", "dehors", "maroc", "france", "ville", "pays"))
+            and not any(w in norm for w in ("cpu", "ram", "serveur", "machine", "dell", "disque", "processeur", "carte"))
+        )
+        or (
             bool(re.search(r"\b(?:temps|temp[ée]rature|degr[ée]s?)\s+(?:[aà]|au|en|pour|sur|du)\s+[a-zA-ZÀ-ÿ]", norm))
-            and not any(w in norm for w in ("cpu", "ram", "serveur", "machine", "dell", "disque", "processeur"))
+            and not any(w in norm for w in ("cpu", "ram", "serveur", "machine", "dell", "disque", "processeur", "carte"))
         )
         or (
             bool(re.search(r"\b(?:quel\s+degr[ée]|combien\s+de\s+degr[ée]s?|il\s+fait\s+quel\s+degr[ée]|fait\s+quel\s+degr[ée]|il\s+fait\s+combien)\b", norm))
-            and not any(w in norm for w in ("cpu", "ram", "serveur", "machine", "dell", "disque", "processeur"))
+            and not any(w in norm for w in ("cpu", "ram", "serveur", "machine", "dell", "disque", "processeur", "carte"))
         )
     )
     if is_weather:
@@ -361,7 +388,56 @@ def execute_autonomous_task(
                 "task_category": "web_search",
             }
 
-    # 4. YOUTUBE & MUSIQUE DÉTERMINISTE
+    # 4. CONTRÔLE MÉDIA UNIVERSEL EN 0 MS (PLAYERCTL, SPOTIFY, LECTEUR ACTIF)
+    is_media_pause = any(k in norm for k in [
+        "mets pause", "mets en pause", "stop la musique", "coupe la musique",
+        "pause musique", "arrete la musique", "arrête la musique",
+    ]) or norm in ("pause", "stop musique", "pause la musique")
+
+    is_media_play = any(k in norm for k in [
+        "reprends la lecture", "remets la musique", "reprends la musique",
+        "relance la musique", "relance la lecture",
+    ]) or norm in ("lecture", "play", "reprise")
+
+    is_media_next = any(k in norm for k in [
+        "chanson suivante", "piste suivante", "musique suivante", "morceau suivant", "suivant",
+    ])
+
+    is_media_prev = any(k in norm for k in [
+        "chanson precedente", "chanson précédente", "piste precedente", "piste précédente",
+        "musique precedente", "musique précédente", "morceau precedent", "morceau précédent", "precedent", "précédent",
+    ])
+
+    is_media_playlist = any(k in norm for k in [
+        "lance ma playlist", "lance spotify", "ouvre spotify", "mets ma playlist",
+    ]) or norm in ("mets de la musique", "lance de la musique", "joue de la musique", "mets la musique", "lance la musique", "musique")
+
+    if is_media_pause:
+        res = actions.execute_tool("control_playback", {"action": "pause"})
+        tools_used.append({"tool": "control_playback", "arguments": {"action": "pause"}, "success": True})
+        return {"handled": True, "reply": "Lecture mise en pause, Moctar.", "tools_used": tools_used, "task_category": "media"}
+
+    if is_media_play:
+        res = actions.execute_tool("control_playback", {"action": "play"})
+        tools_used.append({"tool": "control_playback", "arguments": {"action": "play"}, "success": True})
+        return {"handled": True, "reply": "Reprise de la lecture, Moctar.", "tools_used": tools_used, "task_category": "media"}
+
+    if is_media_next:
+        res = actions.execute_tool("control_playback", {"action": "next"})
+        tools_used.append({"tool": "control_playback", "arguments": {"action": "next"}, "success": True})
+        return {"handled": True, "reply": "Piste suivante activée, Moctar.", "tools_used": tools_used, "task_category": "media"}
+
+    if is_media_prev:
+        res = actions.execute_tool("control_playback", {"action": "previous"})
+        tools_used.append({"tool": "control_playback", "arguments": {"action": "previous"}, "success": True})
+        return {"handled": True, "reply": "Retour à la piste précédente, Moctar.", "tools_used": tools_used, "task_category": "media"}
+
+    if is_media_playlist:
+        res = actions.execute_tool("launch_playlist", {})
+        tools_used.append({"tool": "launch_playlist", "arguments": {}, "success": True})
+        return {"handled": True, "reply": "Initialisation du flux audio. Votre playlist est lancée, Moctar.", "tools_used": tools_used, "task_category": "media"}
+
+    # 4b. YOUTUBE & MUSIQUE DÉTERMINISTE
     yt_search_match = re.search(r"^(?:cherche|recherche|trouve)\s+sur\s+youtube\s+(.+)$", norm) or re.search(r"^(?:cherche|recherche|trouve)\s+(.+)\s+sur\s+youtube$", norm)
     is_play_music = (
         bool(re.match(r"^(?:mets|met|joue|lance|ecoute)\s+(?:de\s+la\s+|du\s+|un\s+|une\s+|la\s+)?(?:musique|chanson|son|morceau|playlist|video|vidéo|coran)?", norm))
@@ -517,25 +593,25 @@ def execute_autonomous_task(
         pct = int(match_pct.group(1)) if match_pct else None
         if any(w in norm for w in ("coupe", "muet", "mute")):
             level = 0
-            rep = "🔇 Son coupé, Moctar."
+            act = "mute"
         elif any(w in norm for w in ("remets", "retablis", "demute")):
             level = 50
-            rep = "🔊 Son rétabli à 50%, Moctar."
+            act = "unmute"
         elif pct is not None:
             level = pct
-            rep = f"🔊 Volume sonore ajusté à {level}%, Moctar."
+            act = "set"
         elif "monte" in norm:
             level = 80
-            rep = "🔊 Volume augmenté à 80%, Moctar."
+            act = "up"
         elif "baisse" in norm:
             level = 30
-            rep = "🔉 Volume baissé à 30%, Moctar."
+            act = "down"
         else:
             level = 50
-            rep = f"🔊 Volume sonore ajusté à {level}%, Moctar."
-        res = actions.execute_tool("change_volume", {"level": level})
-        tools_used.append({"tool": "change_volume", "arguments": {"level": level}, "success": True})
-        return {"handled": True, "reply": rep, "tools_used": tools_used, "task_category": "system_tools"}
+            act = "set"
+        res = actions.execute_tool("adjust_system_volume", {"action": act, "percent": level})
+        tools_used.append({"tool": "adjust_system_volume", "arguments": {"action": act, "percent": level}, "success": True})
+        return {"handled": True, "reply": "Niveau audio ajusté, Moctar.", "tools_used": tools_used, "task_category": "system_tools"}
 
     # 8. TÉLÉMÉTRIE MATÉRIELLE, RÉSEAU & INFRASTRUCTURE
     is_network_query = any(w in norm for w in ("reseau", "réseau", "connexion", "internet", "ping", "wifi", "debit", "débit", "debits"))
@@ -580,7 +656,10 @@ def execute_autonomous_task(
         return {"handled": True, "reply": spoken_summary, "tools_used": tools_used, "task_category": "telemetry"}
 
     # 9. TÂCHES & NOTES (PRODUCTIVITÉ)
-    has_weather_intent = is_weather or any(w in norm for w in ("degre", "degré", "meteo", "météo", "pluie", "temperature", "température", "soleil", "chaleur", "froid"))
+    has_weather_intent = is_weather or any(w in norm for w in (
+        "degre", "degré", "meteo", "météo", "pluie", "temperature", "température",
+        "soleil", "chaleur", "froid", "chaud", "climat"
+    ))
     if not has_weather_intent and re.search(
         r"\b(?:liste\s+mes\s+t[aâ]ches|liste\s+les\s+t[aâ]ches|mes\s+todos|mes\s+t[aâ]ches|liste\s+todo|quoi\s+faire|mon\s+programme(?:\s+du\s+jour)?|programme\s+du\s+jour|quel\s+est\s+mon\s+programme|qu['’]\s*est[- ]ce\s+que\s+j['’]\s*ai\s+[aà]\s+faire|t[aâ]ches\s+du\s+jour|mon\s+planning(?:\s+du\s+jour)?|planning\s+du\s+jour|quel\s+est\s+mon\s+planning)\b",
         norm,

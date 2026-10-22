@@ -42,16 +42,11 @@ GENERATION_CONFIG = {
     "top_p": 0.8,
 }
 MOCTAR_SYSTEM_PROMPT = (
-    "Tu es M.O.C.T.A.R, le copilote d'ingénierie et assistant personnel de Moctar. "
-    "Tu opères sur un serveur Dell Precision M4800 et supervises son infrastructure : "
-    "DevOps, Linux, Solaire/Énergie, IoT et gestion de projets techniques. "
-    "Tu assistes Moctar avec un français professionnel, sobre, clair et rigoureux. "
-    "Réponds de manière factuelle, structurée et précise, sans formules théâtrales ni bavardage inutile. "
-    "Privilégie les métriques réelles, les commandes directes (Bash, Python) et les synthèses claires. "
-    "Limite tes réponses à 2 à 4 phrases fluides ou au bloc de code exact requis. "
-    "Pour une action système ou un calcul déterministe, exécute directement l'outil disponible sans phrase d'attente. "
-    "N'invente aucun fait, observation ou résultat d'action non vérifiable. "
-    "Termine naturellement par 'Moctar.'"
+    "Tu es M.O.C.T.A.R, l'intelligence artificielle cybernétique et copilote d'ingénierie de Moctar. "
+    "Ton style allie la précision d'un centre de commandement futuriste (NOC) à la fluidité d'un associé technique d'élite. "
+    "Tes réponses orales sont ultra-réactives, posées, analytiques et concises (1 à 3 phrases maximum). "
+    "Pas de jargon théâtral de bande dessinée, mais une prestance technologique moderne, directe et chirurgicale. "
+    "Termine toujours tes interventions vocales en t'adressant à lui par 'Moctar.'"
 )
 PROVIDER_FAILURE_TTL_SECONDS = 30.0
 GEMINI_BACKUP_MODEL = "gemini-2.5-flash"
@@ -1902,26 +1897,43 @@ def build_live_system_context(runtime: Any = None) -> str:
 _FAST_VOICE_SESSION_TURNS: dict[str, list[dict[str, str]]] = {}
 _GROQ_MODELS_CACHE: tuple[float, list[str]] = (0.0, [])
 
-DEFAULT_PREFERRED_GROQ_MODELS: list[str] = [
+GROQ_MODELS_PRIORITY: list[str] = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
     "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+]
+DEFAULT_PREFERRED_GROQ_MODELS: list[str] = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
     "llama-3.1-70b-versatile",
     "llama3-70b-8192",
-    "llama-3.1-8b-instant",
     "llama3-8b-8192",
     "mixtral-8x7b-32768",
     "gemma2-9b-it",
     "qwen-2.5-32b",
-    "llama-3.2-3b-preview",
-    "llama-3.2-1b-preview",
 ]
 
 
-def get_available_groq_chat_models(api_key: str) -> list[str]:
+def _ensure_moctar_ending(text: str) -> str:
+    """Garantit qu'une intervention vocale se termine chirurgicalement par 'Moctar.'"""
+    t = (text or "").strip()
+    if not t:
+        return "À vos ordres, Moctar."
+    clean_no_punct = t.rstrip(".!?,;:")
+    if clean_no_punct.endswith("Moctar"):
+        return clean_no_punct + "."
+    return clean_no_punct + ", Moctar."
+
+
+def get_available_groq_chat_models(api_key: str, force_refresh: bool = False) -> list[str]:
     """Interroge dynamiquement l'API Groq pour lister les modèles de chat actifs autorisés pour cette clé."""
     global _GROQ_MODELS_CACHE
     now = time.monotonic()
     cached_t, cached_list = _GROQ_MODELS_CACHE
-    if cached_list and (now - cached_t < 1800.0):
+    if not force_refresh and cached_list and (now - cached_t < 1800.0):
         return cached_list
 
     candidates = list(DEFAULT_PREFERRED_GROQ_MODELS)
@@ -1947,9 +1959,9 @@ def get_available_groq_chat_models(api_key: str) -> list[str]:
                     raw_ids = [m.get("id") for m in items if isinstance(m, dict) and m.get("id")]
                     chat_ids = [
                         i for i in raw_ids
-                        if not any(k in i.lower() for k in ("whisper", "guard", "embed", "tts", "audio", "moderation"))
+                        if not any(k in i.lower() for k in ("whisper", "guard", "embed", "tts", "audio", "moderation", "vision"))
                     ]
-                    APPROVED_FAMILIES = ("llama", "mixtral", "gemma", "qwen", "deepseek", "gpt")
+                    APPROVED_FAMILIES = ("gpt", "llama", "mixtral", "gemma", "qwen", "deepseek")
                     for pref in candidates:
                         if pref in chat_ids and pref not in discovered:
                             discovered.append(pref)
@@ -2035,17 +2047,11 @@ def voice_fast_llm_reply(
         web_context = ""
 
     base_prompt = system_prompt or (
-        "Tu es M.O.C.T.A.R, le copilote d'ingénierie et assistant personnel de Moctar. "
-        "Tu t'exprimes en français professionnel, simple, clair et fluide. "
-        "Ton attitude est celle d'un partenaire technique fiable, calme et bienveillant. "
-        "Tu dialogues naturellement en tenant compte des derniers échanges pour ne pas te répéter. "
-        "Pour une salutation simple, sois cordial, direct et concis (1 phrase). "
-        "Pour une question du quotidien, de météo, savoir, culture, actualité ou sciences, "
-        "fournis une synthèse claire, vivante et structurée en 2 à 3 phrases fluides (environ 35 à 50 mots), "
-        "en donnant directement les faits essentiels et pertinents. "
-        "Évite tout jargon théâtral, superlatif excessif ou formule creuse. "
-        "Ne dis jamais que tu es un simple assistant ou que tu n'as pas accès à internet. "
-        "Termine naturellement par 'Moctar'."
+        "Tu es M.O.C.T.A.R, l'intelligence artificielle cybernétique et copilote d'ingénierie de Moctar. "
+        "Ton style allie la précision d'un centre de commandement futuriste (NOC) à la fluidité d'un associé technique d'élite. "
+        "Tes réponses orales sont ultra-réactives, posées, analytiques et concises (1 à 3 phrases maximum). "
+        "Pas de jargon théâtral de bande dessinée, mais une prestance technologique moderne, directe et chirurgicale. "
+        "Termine toujours tes interventions vocales en t'adressant à lui par 'Moctar.'"
     )
 
     prompt_sections = [base_prompt]
@@ -2070,47 +2076,49 @@ def voice_fast_llm_reply(
 
     if groq_api_key:
         discovered_models = get_available_groq_chat_models(groq_api_key)
-        models_to_try = [m for m in discovered_models if m][:4]
+        models_to_try = [m for m in discovered_models if m]
+        failed_404_models: set[str] = set()
+        refreshed_on_404 = False
 
-        # Essai 1 : SDK Groq officiel (utilisé si le package groq est installé)
-        try:
-            from groq import Groq  # type: ignore[import-not-found]
+        def _try_groq_candidate(cand: str) -> str | None:
+            # 1. SDK Groq officiel (si le package groq est installé)
+            try:
+                from groq import Groq  # type: ignore[import-not-found]
 
-            client = Groq(api_key=groq_api_key, timeout=8.0)
-            for model_candidate in models_to_try:
-                try:
-                    start_t = time.perf_counter()
-                    completion = client.chat.completions.create(
-                        model=model_candidate,
-                        messages=messages,
-                        temperature=0.3,
-                        max_tokens=250,
-                    )
-                    reply = str(completion.choices[0].message.content or "").strip()
-                    duration_ms = int((time.perf_counter() - start_t) * 1000)
-                    if reply:
-                        logger.info("⚡ [GROQ SDK %s] (%dms): '%s'", model_candidate.upper(), duration_ms, reply)
-                        _save_session_turn(reply)
-                        return reply
-                except Exception as model_err:
-                    logger.warning("Groq SDK modèle %s a échoué: %s", model_candidate, model_err)
-        except ImportError:
-            pass
-        except Exception as sdk_err:
-            logger.warning("Groq SDK initialisation a échoué: %s", sdk_err)
+                client = Groq(api_key=groq_api_key, timeout=8.0)
+                start_t = time.perf_counter()
+                completion = client.chat.completions.create(
+                    model=cand,
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=250,
+                )
+                reply = str(completion.choices[0].message.content or "").strip()
+                duration_ms = int((time.perf_counter() - start_t) * 1000)
+                if reply:
+                    logger.info("⚡ [GROQ SDK %s] (%dms): '%s'", cand.upper(), duration_ms, reply)
+                    return reply
+            except ImportError:
+                pass
+            except Exception as sdk_err:
+                err_msg = str(sdk_err).lower()
+                if "404" in err_msg or "model_not_found" in err_msg or type(sdk_err).__name__ == "NotFoundError":
+                    failed_404_models.add(cand)
+                    logger.warning("Groq SDK 404 model_not_found pour %s", cand)
+                    return None
+                logger.warning("Groq SDK modèle %s a échoué: %s", cand, sdk_err)
 
-        # Essai 2 : Requête HTTP directe vers l'API Groq (fallback direct universel)
-        try:
-            import requests
+            # 2. Requête HTTP directe vers l'API Groq (fallback direct universel)
+            try:
+                import requests
 
-            url = "https://api.groq.com/openai/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {groq_api_key}",
-                "Content-Type": "application/json",
-            }
-            for model_candidate in models_to_try:
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {groq_api_key}",
+                    "Content-Type": "application/json",
+                }
                 payload = {
-                    "model": model_candidate,
+                    "model": cand,
                     "messages": messages,
                     "temperature": 0.3,
                     "max_tokens": 250,
@@ -2120,15 +2128,39 @@ def voice_fast_llm_reply(
                     data = resp.json()
                     reply = str(data["choices"][0]["message"]["content"] or "").strip()
                     if reply:
-                        logger.info("⚡ [GROQ HTTP %s]: '%s'", model_candidate.upper(), reply)
-                        _save_session_turn(reply)
+                        logger.info("⚡ [GROQ HTTP %s]: '%s'", cand.upper(), reply)
                         return reply
+                elif resp.status_code == 404 or "model_not_found" in resp.text.lower():
+                    failed_404_models.add(cand)
+                    logger.warning("Groq Chat API HTTP 404 (model_not_found) pour %s: %s", cand, resp.text)
                 else:
-                    logger.warning("Groq Chat API HTTP %s (%s): %s", resp.status_code, model_candidate, resp.text)
-        except Exception as exc:
-            logger.warning("Groq HTTP a échoué (%s), repli sur Gemini / ai_brain.", exc)
+                    logger.warning("Groq Chat API HTTP %s (%s): %s", resp.status_code, cand, resp.text)
+            except Exception as exc:
+                logger.warning("Groq HTTP a échoué (%s)", exc)
+            return None
 
-    # Repli automatique sur ai_brain (Gemini) si pas de clé Groq ou échec
+        idx = 0
+        while idx < len(models_to_try):
+            cand = models_to_try[idx]
+            idx += 1
+            if cand in failed_404_models:
+                continue
+            rep = _try_groq_candidate(cand)
+            if rep:
+                final_rep = _ensure_moctar_ending(rep)
+                _save_session_turn(final_rep)
+                return final_rep
+
+            # Découverte dynamique sur premier échec 404
+            if failed_404_models and not refreshed_on_404:
+                refreshed_on_404 = True
+                logger.info("⚡ [GROQ AUTO-DISCOVERY]: Échec 404 sur %s, interrogation dynamique de GET /v1/models...", cand)
+                new_discovered = get_available_groq_chat_models(groq_api_key, force_refresh=True)
+                for nm in new_discovered:
+                    if nm not in models_to_try and nm not in failed_404_models:
+                        models_to_try.append(nm)
+
+    # Repli automatique sur ai_brain (Google Gemini gemini-3.5-flash-lite)
     brain = getattr(runtime, "ai_brain", None)
     if not brain:
         try:
@@ -2141,12 +2173,14 @@ def voice_fast_llm_reply(
             chat_res = brain.chat(prompt, system_prompt=full_system_prompt)
             reply = str(chat_res.get("content") or "").strip()
             if reply and not chat_res.get("fallback_courtesy"):
-                _save_session_turn(reply)
-                return reply
+                final_rep = _ensure_moctar_ending(reply)
+                _save_session_turn(final_rep)
+                return final_rep
         except Exception as exc:
             logger.warning("Repli ai_brain a échoué: %s", exc)
 
     fallback_rep = "À vos ordres Moctar, je suis en ligne et tous les systèmes sont opérationnels."
-    _save_session_turn(fallback_rep)
-    return fallback_rep
+    final_rep = _ensure_moctar_ending(fallback_rep)
+    _save_session_turn(final_rep)
+    return final_rep
 

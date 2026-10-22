@@ -74,6 +74,20 @@ from .music_actions import (
     play_music,
 )
 
+# 5b. Media Actions Universel (0 ms)
+from .media_actions import (
+    adjust_system_volume,
+    control_playback,
+    launch_playlist,
+)
+
+# 5c. Workspace Layout (Mode Bureau Géométrique)
+from .workspace_layout import (
+    apply_workspace_layout,
+    calculate_workspace_layout,
+    get_screen_resolution,
+)
+
 # 6. Personal Actions
 from .personal_actions import (
     add_todo,
@@ -153,10 +167,16 @@ TOOL_DISPATCHER: Dict[str, Callable[..., Any]] = {
     "get_weather": get_weather,
     "search_web_instant": search_web_instant,
 
-    # Music Actions
+    # Music & Media Actions (0ms)
     "play_music": play_music,
     "control_music": control_music,
     "open_playlist": open_playlist,
+    "control_playback": control_playback,
+    "launch_playlist": launch_playlist,
+    "adjust_system_volume": adjust_system_volume,
+
+    # Workspace Layout (Mode Bureau Géométrique)
+    "apply_workspace_layout": apply_workspace_layout,
 
     # Energy Actions
     "calculate_consumption": calculate_consumption,

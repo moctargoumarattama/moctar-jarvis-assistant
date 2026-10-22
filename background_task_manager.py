@@ -65,8 +65,8 @@ class BackgroundTaskManager:
             daemon=True,
         )
         thread.start()
-        # Détection ultra-rapide (< 450ms) des commandes qui se terminent ou échouent immédiatement
-        thread.join(timeout=0.45)
+        # Détection ultra-rapide (< 850ms) des commandes qui se terminent ou échouent immédiatement
+        thread.join(timeout=0.85)
         with self._lock:
             info = self._tasks.get(tid, {})
             if not thread.is_alive():

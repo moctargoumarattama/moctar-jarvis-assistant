@@ -42,7 +42,7 @@ from whatsapp import AUDIO_MIME_TYPES, WhatsAppController
 LOGGER = logging.getLogger("noc-dashboard")
 BASE_DIR = Path(__file__).resolve().parent
 
-DEFAULT_TTS_VOICE = "fr-FR-HenriNeural"
+DEFAULT_TTS_VOICE = os.getenv("JARVIS_TTS_VOICE", os.getenv("JARVIS_EDGE_TTS_VOICE", "fr-FR-RemyMultilingualNeural")).strip() or "fr-FR-RemyMultilingualNeural"
 DEFAULT_TTS_RATE = "+20%"
 DEFAULT_TTS_PITCH = "+2Hz"
 ALLOWED_TTS_VOICES = {
@@ -428,17 +428,11 @@ except Exception:
         AGENT_SYSTEM_PROMPT = "Tu es M.O.C.T.A.R, le copilote d'ingénierie et assistant personnel de Moctar. Réponds avec concision, clarté et précision en français professionnel."
 
 VOICE_FAST_SYSTEM_PROMPT = (
-    "Tu es M.O.C.T.A.R, le copilote d'ingénierie et assistant personnel de Moctar. "
-    "Tu t'exprimes en français professionnel, simple, clair et fluide. "
-    "Ton attitude est celle d'un partenaire technique fiable, calme et bienveillant. "
-    "Tu prends toujours en compte l'historique récent de la discussion pour rebondir naturellement sans te répéter. "
-    "Pour une salutation simple, sois cordial, direct et concis (1 phrase). "
-    "Pour une question du quotidien, de météo, savoir, culture, actualité ou sciences, "
-    "fournis une synthèse claire, vivante et structurée en 2 à 3 phrases fluides (environ 35 à 50 mots), "
-    "en donnant directement les faits essentiels et pertinents. "
-    "Évite tout jargon théâtral, superlatif excessif ou formule creuse. "
-    "Ne dis jamais que tu es un simple assistant ou que tu n'as pas accès à internet. "
-    "Termine naturellement par 'Moctar'."
+    "Tu es M.O.C.T.A.R, l'intelligence artificielle cybernétique et copilote d'ingénierie de Moctar. "
+    "Ton style allie la précision d'un centre de commandement futuriste (NOC) à la fluidité d'un associé technique d'élite. "
+    "Tes réponses orales sont ultra-réactives, posées, analytiques et concises (1 à 3 phrases maximum). "
+    "Pas de jargon théâtral de bande dessinée, mais une prestance technologique moderne, directe et chirurgicale. "
+    "Termine toujours tes interventions vocales en t'adressant à lui par 'Moctar.'"
 )
 
 
@@ -453,7 +447,7 @@ def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
     if re.search(r"\b(?:tais[- ]toi|ferme[- ]la|chut|silence)\b", normalized) or normalized in ("tais-toi", "tais toi", "stop", "chut", "silence"):
         return "Pardon, je t'écoute Moctar."
 
-    if re.search(r"\b(?:attends?\s*(?:voir)?|pause)\b", normalized) or normalized in ("attends", "pause"):
+    if re.search(r"\b(?:attends?\s*(?:voir)?)\b", normalized) or normalized in ("attends", "attends voir"):
         return "Je vous attends Moctar, prenez votre temps."
 
     # 0b. Présence complice ("t'es là", "tu es là")

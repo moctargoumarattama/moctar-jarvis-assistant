@@ -243,7 +243,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             )
             tts_mock.assert_awaited_once_with(
                 "Tous les services du Dell Precision sont actifs, Moctar.",
-                "fr-FR-HenriNeural",
+                main.DEFAULT_TTS_VOICE,
             )
 
             # Le dashboard peut télécharger directement l'audio généré via data["audio_url"]
@@ -563,7 +563,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             call_kwargs = post_mock.call_args.kwargs
             self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer gsk_test_mock_key")
             payload = call_kwargs["json"]
-            self.assertEqual(payload["model"], "llama-3.3-70b-versatile")
+            self.assertEqual(payload["model"], ai_brain.DEFAULT_PREFERRED_GROQ_MODELS[0])
             self.assertEqual(payload["temperature"], 0.3)
             self.assertEqual(payload["max_tokens"], 250)
             self.assertEqual(call_kwargs["timeout"], 8.0)
@@ -896,7 +896,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
         res_travail = autonomous_library.execute_autonomous_task("mode travail")
         self.assertTrue(res_travail["handled"])
         self.assertEqual(res_travail["action"], "open_app")
-        self.assertIn("VS Code", res_travail["reply"])
+        self.assertTrue("VS Code" in res_travail["reply"] or "poste de travail" in res_travail["reply"])
 
         # 4. Fin de journée
         res_fin = autonomous_library.execute_autonomous_task("fin de journée")
