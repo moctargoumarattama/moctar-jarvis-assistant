@@ -216,6 +216,9 @@ HALLUCINATION_SUBSTRINGS = (
     "amara.org",
     "merci d'avoir regardé",
     "merci d avoir regarde",
+    "merci de regarder cette vidéo",
+    "regardé cette vidéo",
+    "regarde cette video",
     "merci d'avoir écouté",
     "merci d'avoir suivi",
     "merci d avoir suivi",
@@ -229,8 +232,14 @@ HALLUCINATION_SUBSTRINGS = (
     "au revoir youtube",
     "abonnez-vous",
     "abonnez vous",
+    "abonnez-vous à la chaîne",
+    "abonnez vous a la chaine",
+    "laissez un pouce bleu",
+    "activez la cloche",
     "likez et partagez",
     "n'oubliez pas de vous abonner",
+    "n'hésitez pas à vous abonner",
+    "n hesitez pas a vous abonner",
     "traduit par",
     "transcription par",
     "subtitles by",
@@ -242,6 +251,11 @@ HALLUCINATION_SUBSTRINGS = (
     "thanks for",
     "au revoir",
     "are you there",
+    "[musique]",
+    "(musique)",
+    "[applaudissements]",
+    "[rires]",
+    "[silence]",
 )
 
 HALLUCINATION_EXACT_PHRASES = {
@@ -266,6 +280,14 @@ HALLUCINATION_EXACT_PHRASES = {
     "thank you.",
     "...",
     ".",
+    "musique",
+    "musique.",
+    "[musique]",
+    "(musique)",
+    "applaudissements",
+    "[applaudissements]",
+    "bruit",
+    "silence",
 }
 
 

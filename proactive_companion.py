@@ -110,6 +110,43 @@ class ProactiveCompanion:
 
         return None
 
+    def register_initiative(
+        self,
+        message: str,
+        category: str = "custom",
+        priority: str = "normal",
+        target: Optional[str] = None,
+    ) -> None:
+        """Enregistre une initiative proactive personnalisée pour la boucle vocale."""
+        if not message or not message.strip():
+            return
+        self._pending_suggestion = {
+            "category": category,
+            "message": message.strip(),
+            "target": target,
+            "priority": priority,
+        }
+        LOGGER.info("⚡ [PROACTIVE INITIATIVE REGISTERED]: %s", message.strip())
+
+    def check_system_resources(self) -> Optional[Dict[str, Any]]:
+        """Détecte une saturation critique de la RAM sur le Dell Precision M4800."""
+        try:
+            import psutil
+            ram = psutil.virtual_memory().percent
+            if ram >= 90.0:
+                alert_hash = f"ram_high_{int(ram // 5) * 5}"
+                if alert_hash not in self._seen_alert_hashes:
+                    self._seen_alert_hashes.add(alert_hash)
+                    return {
+                        "category": "system_resource_alert",
+                        "message": f"Moctar, la mémoire vive est à {int(ram)}%. Tu veux que je libère les caches et optimise le système ?",
+                        "target": "ram",
+                        "priority": "normal",
+                    }
+        except Exception:
+            pass
+        return None
+
     def check_fatigue_alert(self) -> Optional[Dict[str, Any]]:
         """Vérifie si Moctar est sur une session de code continue prolongée."""
         now = time.monotonic()
@@ -126,6 +163,13 @@ class ProactiveCompanion:
 
     def evaluate_proactive_event(self, runtime: Any = None) -> Optional[Dict[str, Any]]:
         """Évalue l'ensemble des déclencheurs et retourne une suggestion proactive si légitime."""
+        # Priorité 0 : Initiative explicite enregistrée (ex: tâche d'arrière-plan terminée)
+        if self._pending_suggestion:
+            event = self.pop_pending_suggestion()
+            self._last_trigger_time = time.monotonic()
+            LOGGER.info("⚡ [PROACTIVE EVENT POPPED]: %s", event.get("message"))
+            return event
+
         if self.is_in_cooldown():
             return None
 
@@ -133,15 +177,20 @@ class ProactiveCompanion:
         infra_event = self.check_infrastructure_alert(runtime)
         if infra_event:
             self._last_trigger_time = time.monotonic()
-            self._pending_suggestion = infra_event
             LOGGER.info("⚡ [PROACTIVE EVENT]: %s", infra_event["message"])
             return infra_event
 
-        # Priorité 2 : Bienveillance session de travail prolongée
+        # Priorité 2 : Alerte ressources locales Dell M4800
+        res_event = self.check_system_resources()
+        if res_event:
+            self._last_trigger_time = time.monotonic()
+            LOGGER.info("⚡ [PROACTIVE EVENT]: %s", res_event["message"])
+            return res_event
+
+        # Priorité 3 : Bienveillance session de travail prolongée
         fatigue_event = self.check_fatigue_alert()
         if fatigue_event:
             self._last_trigger_time = time.monotonic()
-            self._pending_suggestion = fatigue_event
             LOGGER.info("⚡ [PROACTIVE EVENT]: %s", fatigue_event["message"])
             return fatigue_event
 

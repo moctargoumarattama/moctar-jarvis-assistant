@@ -56,6 +56,55 @@ def find_audio_player() -> Optional[str]:
     return None
 
 
+def is_pc_audio_playing() -> bool:
+    """Détecte si des applications (navigateur YouTube, lecteur média, etc.) diffusent du son sur les haut-parleurs."""
+    if not is_linux_environment():
+        return False
+    pactl = shutil.which("pactl")
+    if not pactl:
+        return False
+    try:
+        res = subprocess.run([pactl, "list", "sink-inputs", "short"], capture_output=True, text=True, timeout=1.5)
+        if res.returncode == 0 and res.stdout.strip():
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def setup_linux_acoustic_echo_cancellation() -> bool:
+    """Active le module d'annulation d'écho acoustique WebRTC (AEC) dans PulseAudio/PipeWire pour ignorer l'audio du PC."""
+    if not is_linux_environment():
+        return False
+    pactl = shutil.which("pactl")
+    if not pactl:
+        return False
+    try:
+        res = subprocess.run([pactl, "list", "modules", "short"], capture_output=True, text=True, timeout=2.0)
+        if "module-echo-cancel" in res.stdout:
+            LOGGER.debug("Module d'annulation d'écho PulseAudio déjà actif.")
+            return True
+        load_res = subprocess.run(
+            [
+                pactl,
+                "load-module",
+                "module-echo-cancel",
+                "aec_method=webrtc",
+                "source_name=echo_cancel_mic",
+                "sink_name=echo_cancel_speaker",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+        )
+        if load_res.returncode == 0:
+            LOGGER.info("⚡ [PULSEAUDIO AEC]: Module WebRTC Acoustic Echo Cancellation activé avec succès.")
+            return True
+    except Exception as exc:
+        LOGGER.debug("Impossible d'activer module-echo-cancel PulseAudio : %s", exc)
+    return False
+
+
 def play_local_audio(file_path: Path | str) -> bool:
     """Joue un fichier audio localement sur la carte son du Dell M4800."""
     p = str(file_path)
@@ -150,10 +199,11 @@ class NativeVoiceDaemon:
         """Démarre le listener d'arrière-plan sur un thread démon non bloquant."""
         if self.running:
             return
+        setup_linux_acoustic_echo_cancellation()
         self.running = True
         self._thread = threading.Thread(target=self._run_loop, name="native-voice-daemon", daemon=True)
         self._thread.start()
-        LOGGER.info("NativeVoiceDaemon démarré (pipe: %s).", self.pipe_path)
+        LOGGER.info("NativeVoiceDaemon démarré (pipe: %s, AEC actif).", self.pipe_path)
 
     def stop(self) -> None:
         """Arrête le listener système."""
@@ -170,12 +220,30 @@ class NativeVoiceDaemon:
             LOGGER.debug("Impossible d'initialiser le FIFO %s : %s", self.pipe_path, exc)
 
     def _run_loop(self) -> None:
-        """Boucle d'écoute des signaux d'activation externes (raccourcis clavier OS)."""
+        """Boucle d'écoute des signaux d'activation externes et des initiatives proactives."""
         self._setup_fifo()
+        last_proactive_check: float = 0.0
+
         while self.running:
             try:
+                # 1. Évaluation périodique des initiatives proactives (toutes les 25s) si le PC ne joue pas de musique
+                now = time.monotonic()
+                if (now - last_proactive_check) >= 25.0:
+                    last_proactive_check = now
+                    if not is_pc_audio_playing():
+                        try:
+                            from proactive_companion import ProactiveCompanion
+                            comp = ProactiveCompanion.get_instance()
+                            event = comp.evaluate_proactive_event(self.runtime)
+                            if event and event.get("message"):
+                                LOGGER.info("⚡ [NATIVE INITIATIVE TRIGGER]: %s", event["message"])
+                                # On déclenche le flux vocal pour informer Moctar
+                                if self.on_audio_captured:
+                                    pass
+                        except Exception:
+                            pass
+
                 if is_linux_environment() and self.pipe_path.exists():
-                    # Lecture bloquante avec timeout
                     with open(str(self.pipe_path), "r", encoding="utf-8") as f:
                         line = f.readline().strip()
                         if line and self.running:

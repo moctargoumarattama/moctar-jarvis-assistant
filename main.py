@@ -1650,6 +1650,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             )
 
+        # Filtrage acoustique : si le PC joue du son (YouTube, musique), ignorer les bruits sans mot-clé explicite
+        pc_playing = False
+        try:
+            import native_voice_daemon
+            pc_playing = native_voice_daemon.is_pc_audio_playing()
+        except Exception:
+            pass
+
+        if pc_playing and not wake_detected and not header_barge_in and not header_session:
+            LOGGER.info("🔇 [PC AUDIO BLEED IGNORED]: Son PC en cours et mot-clé absent ('%s')", transcript)
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "ignored": True,
+                    "reason": "pc_audio_bleed_ignored",
+                    "user_text": transcript,
+                    "reply_text": "",
+                    "audio_url": None,
+                    "session_active": False,
+                }
+            )
+
         runtime.voice_session_until = time.monotonic() + VOICE_SESSION_DURATION_SECONDS
 
         agent_result: dict[str, Any] = {}
@@ -1769,6 +1791,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             runtime.jarvis.memory.record_conversation_turn_for_profile(command_text, reply_text)
                     except Exception:
                         pass
+
+        # Raccordement des initiatives proactives dans la boucle vocale
+        try:
+            from proactive_companion import ProactiveCompanion
+            comp = ProactiveCompanion.get_instance()
+            proactive_event = comp.evaluate_proactive_event(runtime)
+            if proactive_event and not attention.get("should_disengage"):
+                init_msg = proactive_event.get("message")
+                if init_msg and not reply_text.endswith("?"):
+                    reply_text = f"{reply_text} Au fait, {init_msg}"
+                    runtime.voice_session_until = time.monotonic() + 15.0
+        except Exception:
+            pass
 
         audio_url: str | None = None
         audio_chunks: list[str] = []

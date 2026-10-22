@@ -124,6 +124,9 @@
     let activeAudioPlaybackFinish = null;
     let userBargedIn = false;
     let bargeInStreak = 0;
+    let ambientNoiseFloor = 0.005;
+    let proactiveCheckTimer = null;
+    const PROACTIVE_POLL_INTERVAL_MS = 25000;
 
     function triggerBargeIn() {
       userBargedIn = true;
@@ -547,6 +550,7 @@
 
     function cleanupWebAudio() {
       stopRafLoop();
+      stopProactiveInitiativePoller();
       clearMaxSpeechTimer();
       isSpeaking = false;
       isPushToTalk = false;
@@ -988,6 +992,21 @@
         const rmsLevel = computeRmsLevel();
         currentRms = rmsLevel;
 
+        // Détection de son diffusé par le PC (musique, vidéo, YouTube ou synthèse vocale)
+        const isPcAudioPlaying = Boolean(
+          (win.MoctarSpeaker && !win.MoctarSpeaker.paused && win.MoctarSpeaker.currentTime > 0) ||
+          (typeof document !== 'undefined' && document.querySelector('audio:not([paused]), video:not([paused])'))
+        );
+
+        // Suivi adaptatif de l'empreinte sonore du PC et du bruit ambiant
+        if (!isSpeaking) {
+          ambientNoiseFloor = ambientNoiseFloor * 0.95 + rmsLevel * 0.05;
+        }
+
+        // Seuil VAD dynamique : s'élève si de la musique ou un son joue sur le PC pour ignorer l'audio
+        const baseThreshold = isPcAudioPlaying ? Math.max(vadThreshold * 1.8, 0.065) : vadThreshold;
+        const dynamicVadThreshold = Math.max(baseThreshold, ambientNoiseFloor * 2.2);
+
         if (isPushToTalk) {
           recordingElapsedMs += frameIntervalMs;
           updateSolarActivity(Math.max(rmsLevel, 0.08), true);
@@ -997,7 +1016,7 @@
             message: VOICE_DETECTED_MESSAGE,
           });
         } else {
-          const voiceDetected = rmsLevel > vadThreshold;
+          const voiceDetected = rmsLevel > dynamicVadThreshold;
           updateSolarActivity(rmsLevel, voiceDetected);
 
           if (voiceDetected) {
@@ -1017,7 +1036,8 @@
             recordingElapsedMs += frameIntervalMs;
             const currentNow = (typeof timestamp === 'number' && timestamp > 0) ? timestamp : getNow();
             const elapsed = Math.max(recordingElapsedMs, phraseStartTime > 0 ? (currentNow - phraseStartTime) : 0);
-            if (silenceElapsedMs >= vadSilenceMs && elapsed >= minRecordingMs) {
+            const silenceThreshold = Math.max(dynamicVadThreshold * 0.75, ambientNoiseFloor * 1.3);
+            if (rmsLevel < silenceThreshold && silenceElapsedMs >= vadSilenceMs && elapsed >= minRecordingMs) {
               stopPhraseAndSend();
             }
           }
@@ -1133,6 +1153,7 @@
             message: WAKE_READY_MESSAGE,
           });
           rafId = requestFrame(stepVuMeterFrame);
+          startProactiveInitiativePoller();
         })
         .catch((err) => {
           if (destroyed || startGen !== generation) return;
@@ -1250,6 +1271,72 @@
         return;
       }
       stopPhraseAndSend();
+    }
+
+    async function pollProactiveInitiative() {
+      if (destroyed || suspended || !wanted() || isAssistantSpeaking || processingAudio || job || isSpeaking) return;
+      if (phase !== 'wake') return;
+      if (!fetchImpl) return;
+
+      try {
+        const res = await fetchImpl('/api/voice/proactive');
+        if (!res || !res.ok) return;
+        const data = await res.json();
+        if (!data || !data.has_event || !data.message) return;
+
+        if (isSpeaking || isAssistantSpeaking || processingAudio || job || phase !== 'wake') return;
+
+        const initiativeText = String(data.message || '').trim();
+        if (!initiativeText) return;
+
+        const current = { generation };
+        job = current;
+        isAssistantSpeaking = true;
+        clearPreRollBuffer();
+        updateSolarVoiceState('speaking');
+
+        emit('speaking', {
+          transcript: '',
+          reply: initiativeText,
+          audioUrl: data.audio_url || null,
+          message: `💡 Initiative M.O.C.T.A.R : "${initiativeText}"`,
+        });
+
+        let played = false;
+        if (data.audio_url && !userBargedIn) {
+          played = await playAudioUrl(data.audio_url);
+        }
+        if (!played && initiativeText && !userBargedIn) {
+          await speakWithNativeSpeechSynthesis(initiativeText);
+        }
+
+        releaseEchoLock();
+        if (generation !== current.generation || destroyed || suspended) return;
+
+        // Ouvre automatiquement la fenêtre d'écoute pour la réponse de Moctar (ex: "Oui", "Non merci")
+        openFollowup();
+      } catch {
+        // En cas d'erreur réseau, ignorer silencieusement
+      } finally {
+        if (job === current) job = null;
+        reconcile();
+      }
+    }
+
+    function startProactiveInitiativePoller() {
+      stopProactiveInitiativePoller();
+      proactiveCheckTimer = setInterval(() => {
+        if (!destroyed && !suspended && wanted() && phase === 'wake' && !job && !isAssistantSpeaking && !isSpeaking) {
+          pollProactiveInitiative().catch(() => {});
+        }
+      }, PROACTIVE_POLL_INTERVAL_MS);
+    }
+
+    function stopProactiveInitiativePoller() {
+      if (proactiveCheckTimer !== null) {
+        clearInterval(proactiveCheckTimer);
+        proactiveCheckTimer = null;
+      }
     }
 
     return {

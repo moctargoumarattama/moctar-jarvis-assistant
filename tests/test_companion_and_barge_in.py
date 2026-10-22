@@ -30,7 +30,10 @@ import proactive_companion
 import stt_phonetic_repair
 from config import Settings
 from main import create_app
-from test_api import local_snapshot
+try:
+    from test_api import local_snapshot
+except ModuleNotFoundError:
+    from tests.test_api import local_snapshot
 
 
 def encode_pcm16_wav(pcm_bytes: bytes, sample_rate: int = 16000) -> bytes:
