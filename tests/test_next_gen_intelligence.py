@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import time
 import unittest
@@ -121,7 +122,7 @@ class NextGenIntelligenceTests(unittest.TestCase):
         """Vérifie que les commandes échouant immédiatement (code != 0) sont détectées sans halluciner."""
         mgr = BackgroundTaskManager.get_instance()
         # Commande qui échoue immédiatement avec code 128
-        res = mgr.start_task(command='python -c "import sys; sys.exit(128)"', description="Commit test")
+        res = mgr.start_task(command=f'"{sys.executable}" -c "import sys; sys.exit(128)"', description="Commit test")
         self.assertFalse(res["success"])
         self.assertEqual(res["status"], "failed")
         self.assertEqual(res["exit_code"], 128)
