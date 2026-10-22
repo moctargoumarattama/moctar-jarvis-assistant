@@ -271,7 +271,53 @@ def execute_autonomous_task(
             "task_category": "system_tools",
         }
 
-    # 2.3c. INTERFACE HUD 3D (ORBE & GLOBE TERRESTRE)
+    # 2.3c. INTERFACE HUD 3D (ORBE, GLOBE TERRESTRE, PLASMA & QUANTUM)
+    if any(k in norm for k in [
+        "mode hud 3d", "hud 3d", "ouvre le hud 3d", "active le hud 3d", "lance le hud 3d",
+        "mode hud", "ouvre le hud", "active le hud", "mode hope 3d",
+    ]):
+        actions.execute_tool("switch_hud_view", {"view": "plasma", "locate": False})
+        tools_used.append({"tool": "switch_hud_view", "arguments": {"view": "plasma", "locate": False}, "success": True})
+        return {
+            "handled": True,
+            "reply": "Interface HUD 3D cybernétique activée, Moctar.",
+            "action": "open_app",
+            "url": "/hud",
+            "title": "HUD 3D Cybernétique",
+            "tools_used": tools_used,
+            "task_category": "hud_3d",
+        }
+
+    if any(k in norm for k in [
+        "mode plasma", "reacteur plasma", "arc plasma", "plasma arc",
+    ]):
+        actions.execute_tool("switch_hud_view", {"view": "plasma", "locate": False})
+        tools_used.append({"tool": "switch_hud_view", "arguments": {"view": "plasma", "locate": False}, "success": True})
+        return {
+            "handled": True,
+            "reply": "Mode Réacteur Plasma activé sur l'interface 3D, Moctar.",
+            "action": "open_app",
+            "url": "/hud",
+            "title": "Réacteur Plasma 3D",
+            "tools_used": tools_used,
+            "task_category": "hud_3d",
+        }
+
+    if any(k in norm for k in [
+        "mode quantum", "coeur quantique", "neural core", "noyau quantique",
+    ]):
+        actions.execute_tool("switch_hud_view", {"view": "quantum", "locate": False})
+        tools_used.append({"tool": "switch_hud_view", "arguments": {"view": "quantum", "locate": False}, "success": True})
+        return {
+            "handled": True,
+            "reply": "Noyau neural quantique déployé sur le HUD 3D, Moctar.",
+            "action": "open_app",
+            "url": "/hud",
+            "title": "Noyau Quantique 3D",
+            "tools_used": tools_used,
+            "task_category": "hud_3d",
+        }
+
     if any(k in norm for k in [
         "affiche la terre", "montre la terre", "montre le globe", "affiche le globe",
         "globe terrestre", "vue depuis l espace", "vue de l espace", "mode globe", "ouvre le globe",
@@ -511,7 +557,8 @@ def execute_autonomous_task(
     is_media_pause = any(k in norm for k in [
         "mets pause", "mets en pause", "mets sur pause", "en pause", "on pause",
         "stop la musique", "coupe la musique", "pause la musique", "arrete la musique", "arrête la musique",
-        "pause musique", "pause youtube", "mets youtube en pause", "youtube en pause",
+        "pause musique", "pause youtube", "mets youtube en pause", "met youtube en pause", "youtube en pause",
+        "j ai youtube en pause", "j'ai youtube en pause", "jai youtube en pause",
         "pause la video", "pause la vidéo", "pause le son",
     ]) or norm_stripped in ("pause", "stop", "stop musique", "pause la musique") or bool(re.search(r"\b(?:pause|en\s+pause|on\s+pause|pause\s+youtube|youtube\s+en\s+pause)\b", norm))
 

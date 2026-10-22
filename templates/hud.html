@@ -7,17 +7,17 @@
   <link rel="icon" type="image/png" href="/static/icons/moctar-192.png">
   <style>
     :root {
-      --bg-deep: #02060d;
-      --bg-panel: rgba(8, 20, 36, 0.75);
+      --bg-deep: #02060e;
       --cyan: #00f3ff;
       --cyan-glow: rgba(0, 243, 255, 0.45);
       --blue: #0066ff;
       --green: #00ff88;
       --gold: #ffb700;
       --magenta: #d900ff;
-      --text: #e0f4ff;
-      --muted: #64829f;
-      --line: rgba(0, 243, 255, 0.22);
+      --text: #e2f4ff;
+      --muted: #62829e;
+      --chip-bg: rgba(6, 18, 34, 0.65);
+      --chip-border: rgba(0, 243, 255, 0.25);
       --font-mono: "SF Mono", "Fira Code", "Courier New", monospace;
       --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
@@ -27,6 +27,7 @@
       margin: 0;
       padding: 0;
       user-select: none;
+      -webkit-user-select: none;
     }
 
     body, html {
@@ -38,13 +39,17 @@
       font-family: var(--font-ui);
     }
 
-    /* --- Canvas 3D Viewport --- */
+    /* --- Viewport 3D Plein Écran --- */
     #hud-viewport {
       position: absolute;
       inset: 0;
       width: 100%;
       height: 100%;
       z-index: 1;
+      cursor: grab;
+    }
+    #hud-viewport:active {
+      cursor: grabbing;
     }
 
     #hud-canvas {
@@ -53,7 +58,7 @@
       display: block;
     }
 
-    /* --- UI Overlay Layer --- */
+    /* --- Couche Holographique Flottante --- */
     .hud-overlay {
       position: absolute;
       inset: 0;
@@ -65,142 +70,153 @@
       padding: 18px 24px;
     }
 
-    .hud-interactive {
+    .interactive {
       pointer-events: auto;
     }
 
-    /* --- Bandeau Supérieur Cybernétique (HUD Header) --- */
-    .hud-header {
+    /* --- Bandeau Supérieur Minimaliste & Holographique --- */
+    .hud-top-bar {
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      padding: 12px 20px;
-      background: var(--bg-panel);
-      backdrop-filter: blur(14px);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      box-shadow: 0 0 25px rgba(0, 243, 255, 0.12);
-    }
-
-    .header-left, .header-right {
-      display: flex;
       align-items: center;
       gap: 16px;
     }
 
-    .btn-noc-return {
+    .pill-btn {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 14px;
-      background: rgba(0, 243, 255, 0.08);
-      border: 1px solid var(--cyan);
-      border-radius: 8px;
+      padding: 8px 16px;
+      background: var(--chip-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--chip-border);
+      border-radius: 24px;
       color: var(--cyan);
       font-family: var(--font-mono);
       font-size: 11px;
       font-weight: 700;
       letter-spacing: 0.08em;
       text-decoration: none;
-      transition: all 0.25s ease;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
       cursor: pointer;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
     }
 
-    .btn-noc-return:hover {
-      background: var(--cyan);
-      color: var(--bg-deep);
+    .pill-btn:hover {
+      background: rgba(0, 243, 255, 0.18);
+      border-color: var(--cyan);
       box-shadow: 0 0 16px var(--cyan-glow);
+      color: #fff;
     }
 
-    .telemetry-chip {
+    .pill-btn.active {
+      background: rgba(0, 243, 255, 0.25);
+      border-color: var(--cyan);
+      box-shadow: 0 0 16px var(--cyan-glow);
+      color: #fff;
+    }
+
+    /* Horloge Centrale */
+    .hud-center-clock {
+      text-align: center;
+      background: var(--chip-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--chip-border);
+      padding: 6px 20px;
+      border-radius: 20px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+
+    .clock-time {
+      font-family: var(--font-mono);
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: 3px;
+      color: var(--cyan);
+      text-shadow: 0 0 14px var(--cyan-glow);
+      line-height: 1.1;
+    }
+
+    .clock-date {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* Puce Télémétrie Supérieure Droite */
+    .telemetry-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      padding: 8px 16px;
+      background: var(--chip-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--chip-border);
+      border-radius: 24px;
       font-family: var(--font-mono);
       font-size: 11px;
-      color: var(--muted);
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
     }
 
-    .telemetry-chip strong {
+    .telemetry-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--muted);
+    }
+
+    .telemetry-item strong {
       color: var(--cyan);
       font-weight: 700;
     }
 
-    /* Horloge Numérique Centrale Géante */
-    .header-center {
-      text-align: center;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    .giant-clock {
-      font-family: var(--font-mono);
-      font-size: 28px;
-      font-weight: 800;
-      letter-spacing: 2px;
-      color: var(--cyan);
-      text-shadow: 0 0 12px var(--cyan-glow);
-      line-height: 1;
-    }
-
-    .giant-date {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      letter-spacing: 0.15em;
-      color: var(--muted);
-      margin-top: 4px;
-    }
-
-    .online-indicator {
+    .status-online {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      font-family: var(--font-mono);
-      font-size: 10px;
-      font-weight: 700;
       color: var(--green);
-      letter-spacing: 0.1em;
+      font-weight: 700;
+      font-size: 10px;
     }
 
-    .online-dot {
+    .pulse-dot {
       width: 7px;
       height: 7px;
       border-radius: 50%;
       background: var(--green);
       box-shadow: 0 0 8px var(--green);
-      animation: pulse-dot 1.8s infinite;
+      animation: pulse-ring 1.8s infinite;
     }
 
-    @keyframes pulse-dot {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(0.85); }
+    @keyframes pulse-ring {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(0.8); opacity: 0.4; }
     }
 
-    /* --- Sélecteur de Vues Flottant (Haut Droite) --- */
-    .hud-controls-bar {
-      position: absolute;
-      top: 96px;
-      right: 24px;
+    /* --- Sélecteur de Modes 3D Flottant (Haut Centre / Gauche) --- */
+    .hud-modes-row {
       display: flex;
-      gap: 8px;
-      background: var(--bg-panel);
-      backdrop-filter: blur(12px);
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 6px;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 10px;
     }
 
-    .hud-btn {
-      padding: 8px 14px;
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: 6px;
-      color: var(--muted);
+    .mode-pill {
+      padding: 6px 14px;
+      background: var(--chip-bg);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--chip-border);
+      border-radius: 18px;
       font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.05em;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--muted);
       cursor: pointer;
       transition: all 0.2s ease;
       display: inline-flex;
@@ -208,258 +224,244 @@
       gap: 6px;
     }
 
-    .hud-btn:hover {
-      color: var(--text);
-      background: rgba(0, 243, 255, 0.06);
-    }
-
-    .hud-btn.active {
+    .mode-pill:hover {
       color: var(--cyan);
-      background: rgba(0, 243, 255, 0.14);
       border-color: var(--cyan);
-      box-shadow: 0 0 12px rgba(0, 243, 255, 0.2);
+      background: rgba(0, 243, 255, 0.1);
     }
 
-    /* Badge d'État Vocal (Haut Gauche) */
-    .voice-badge-container {
+    .mode-pill.active {
+      color: #fff;
+      background: rgba(0, 243, 255, 0.22);
+      border-color: var(--cyan);
+      box-shadow: 0 0 14px rgba(0, 243, 255, 0.35);
+    }
+
+    /* État Vocal Badge Flottant */
+    .voice-state-pill {
       position: absolute;
-      top: 96px;
+      top: 86px;
       left: 24px;
-    }
-
-    .voice-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 7px 14px;
-      background: var(--bg-panel);
-      backdrop-filter: blur(12px);
-      border: 1px solid var(--line);
-      border-radius: 20px;
+      padding: 6px 14px;
+      background: var(--chip-bg);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--chip-border);
+      border-radius: 18px;
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.1em;
       color: var(--cyan);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+      transition: all 0.3s ease;
     }
 
-    .voice-badge[data-state="listening"] {
+    .voice-state-pill[data-state="listening"] {
       color: var(--gold);
       border-color: var(--gold);
-      box-shadow: 0 0 15px rgba(255, 183, 0, 0.3);
+      box-shadow: 0 0 15px rgba(255, 183, 0, 0.4);
     }
 
-    .voice-badge[data-state="thinking"] {
+    .voice-state-pill[data-state="thinking"] {
       color: var(--magenta);
       border-color: var(--magenta);
-      box-shadow: 0 0 15px rgba(217, 0, 255, 0.3);
+      box-shadow: 0 0 15px rgba(217, 0, 255, 0.4);
     }
 
-    .voice-badge[data-state="speaking"] {
+    .voice-state-pill[data-state="speaking"] {
       color: var(--cyan);
       border-color: var(--cyan);
       box-shadow: 0 0 15px var(--cyan-glow);
     }
 
-    /* --- Bandeau Inférieur Cybernétique (Transcription & Contrôles) --- */
-    .hud-bottom-panel {
-      background: var(--bg-panel);
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 16px 22px;
-      box-shadow: 0 0 25px rgba(0, 243, 255, 0.1);
+    /* --- Ruban Inférieur Flottant Holographique --- */
+    .hud-bottom-ribbon {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
     }
 
-    .dialogue-box {
+    .transcript-box {
+      background: var(--chip-bg);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--chip-border);
+      border-radius: 16px;
+      padding: 12px 20px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      min-height: 48px;
+      gap: 4px;
+      min-height: 52px;
+      transition: all 0.3s ease;
     }
 
-    .user-line {
+    .transcript-user {
       font-family: var(--font-mono);
-      font-size: 13px;
+      font-size: 12px;
       color: var(--gold);
-      letter-spacing: 0.04em;
+      font-weight: 600;
     }
 
-    .assistant-line {
+    .transcript-assistant {
       font-family: var(--font-mono);
       font-size: 13px;
       color: var(--cyan);
-      font-weight: 500;
-      letter-spacing: 0.04em;
-      line-height: 1.5;
+      line-height: 1.45;
+      text-shadow: 0 0 8px rgba(0, 243, 255, 0.25);
     }
 
-    .bottom-bar {
+    .bottom-bar-controls {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-top: 1px solid rgba(0, 243, 255, 0.12);
-      padding-top: 10px;
+      padding: 0 6px;
     }
 
-    .gps-readout {
+    .gps-chip {
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: 10px;
       color: var(--green);
       letter-spacing: 0.08em;
+      background: rgba(0, 255, 136, 0.08);
+      border: 1px solid rgba(0, 255, 136, 0.25);
+      padding: 4px 12px;
+      border-radius: 12px;
     }
 
-    .action-buttons {
+    .action-pills {
       display: flex;
-      gap: 10px;
+      gap: 8px;
     }
 
-    .btn-action {
-      padding: 8px 16px;
-      border-radius: 8px;
+    .btn-action-small {
+      padding: 6px 14px;
+      background: var(--chip-bg);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--chip-border);
+      border-radius: 16px;
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
       letter-spacing: 0.08em;
+      color: var(--cyan);
       cursor: pointer;
+      transition: all 0.2s ease;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      transition: all 0.2s ease;
+      gap: 5px;
     }
 
-    .btn-action.mic {
-      background: rgba(0, 243, 255, 0.12);
-      border: 1px solid var(--cyan);
-      color: var(--cyan);
-    }
-    .btn-action.mic:hover {
+    .btn-action-small:hover {
       background: var(--cyan);
       color: var(--bg-deep);
-      box-shadow: 0 0 15px var(--cyan-glow);
+      box-shadow: 0 0 12px var(--cyan-glow);
     }
 
-    .btn-action.stop {
-      background: rgba(255, 59, 48, 0.12);
-      border: 1px solid #ff3b30;
-      color: #ff3b30;
+    .btn-action-small.stop {
+      color: #ff4d4d;
+      border-color: rgba(255, 77, 77, 0.3);
     }
-    .btn-action.stop:hover {
-      background: #ff3b30;
+    .btn-action-small.stop:hover {
+      background: #ff4d4d;
       color: #fff;
-      box-shadow: 0 0 15px rgba(255, 59, 48, 0.4);
+      box-shadow: 0 0 12px rgba(255, 77, 77, 0.5);
     }
 
-    /* Responsive */
-    @media (max-width: 768px) {
-      .hud-header {
-        flex-direction: column;
-        gap: 10px;
-        padding: 10px 14px;
-      }
-      .giant-clock { font-size: 22px; }
-      .hud-controls-bar { top: auto; bottom: 175px; right: 14px; }
-      .voice-badge-container { top: auto; bottom: 175px; left: 14px; }
-      .hud-overlay { padding: 12px; }
+    /* Masquer le ruban de transcription si aucun dialogue récent */
+    .transcript-box:empty {
+      opacity: 0.4;
     }
   </style>
 </head>
 <body>
-
-  <!-- Conteneur WebGL Three.js -->
+  <!-- Conteneur 3D WebGL (Three.js) -->
   <div id="hud-viewport">
     <canvas id="hud-canvas"></canvas>
   </div>
 
-  <!-- Couche d'Interface Cybernétique -->
+  <!-- Couche Holographique Flottante -->
   <div class="hud-overlay">
-    
-    <!-- Header Supérieur -->
-    <header class="hud-header hud-interactive">
-      <div class="header-left">
-        <a href="/" class="btn-noc-return" id="hud-return-noc" title="Retourner au Dashboard NOC Mission Control">
-          <span>⬅ RETOUR NOC</span>
+    <!-- 1. En-tête Supérieur -->
+    <div>
+      <div class="hud-top-bar">
+        <a href="/" class="pill-btn interactive" id="hud-return-noc" title="Retour au Centre de Commandement NOC">
+          <span>◀</span> RETOUR NOC
         </a>
-        <div class="telemetry-chip">
-          <span>CPU :</span> <strong id="hud-cpu-val">—%</strong>
+
+        <div class="hud-center-clock">
+          <div class="clock-time" id="hud-clock-time">--:--:--</div>
+          <div class="clock-date" id="hud-clock-date">SYSTEM CONNECTED</div>
         </div>
-        <div class="telemetry-chip">
-          <span>SYS_CLOCK :</span> <strong id="hud-sys-clock">SYNC</strong>
+
+        <div class="telemetry-badge">
+          <div class="telemetry-item">
+            HOST: <strong id="hud-host-val">PRECISION-M4800</strong>
+          </div>
+          <div class="telemetry-item">
+            CPU: <strong id="hud-cpu-val">--%</strong>
+          </div>
+          <div class="telemetry-item">
+            RAM: <strong id="hud-ram-val">--%</strong>
+          </div>
+          <div class="status-online">
+            <span class="pulse-dot"></span> EN LIGNE
+          </div>
         </div>
       </div>
 
-      <div class="header-center">
-        <div class="giant-clock" id="hud-clock-time">--:--:--</div>
-        <div class="giant-date" id="hud-clock-date">--/--/----</div>
-      </div>
-
-      <div class="header-right">
-        <div class="telemetry-chip">
-          <span>RAM :</span> <strong id="hud-ram-val">—%</strong>
-        </div>
-        <div class="online-indicator">
-          <span class="online-dot"></span>
-          <span>ONLINE</span>
-        </div>
-      </div>
-    </header>
-
-    <!-- Badge d'État Vocal (Flottant Haut Gauche) -->
-    <div class="voice-badge-container hud-interactive">
-      <div class="voice-badge" id="voice-state-badge" data-state="idle">
-        <span>SYSTÈME NOMINAL</span>
+      <!-- 2. Sélecteur de Modes 3D Cinématiques -->
+      <div class="hud-modes-row interactive">
+        <button class="mode-pill active" id="btn-view-plasma" title="Réacteur à Arc Plasma Fluide (Torus)">
+          ⚛️ ARC PLASMA
+        </button>
+        <button class="mode-pill" id="btn-view-quantum" title="Cœur Neuronal Quantique (Filaments & Nébuleuse)">
+          🌌 QUANTUM CORE
+        </button>
+        <button class="mode-pill" id="btn-view-globe" title="Globe Terrestre Réaliste NASA 3D">
+          🌐 GLOBE 3D
+        </button>
+        <button class="mode-pill" id="btn-action-locate" title="Pointer sur la position de Moctar">
+          🎯 LOCALISER
+        </button>
       </div>
     </div>
 
-    <!-- Contrôles de Vue 3D (Flottant Haut Droite) -->
-    <div class="hud-controls-bar hud-interactive">
-      <button type="button" class="hud-btn active" id="btn-view-orb" title="Afficher l'Orbe de Particules">
-        <span>🔮 ORBE 3D</span>
-      </button>
-      <button type="button" class="hud-btn" id="btn-view-globe" title="Afficher le Globe Terrestre 3D">
-        <span>🌍 GLOBE TERRESTRE</span>
-      </button>
-      <button type="button" class="hud-btn" id="btn-action-locate" title="Centrer le globe sur votre position GPS">
-        <span>📍 MA POSITION</span>
-      </button>
+    <!-- Badge d'État Vocal Flottant -->
+    <div class="voice-state-pill" id="voice-state-badge" data-state="idle">
+      ● VEILLE ACTIVE
     </div>
 
-    <!-- Bandeau Inférieur de Transcription & Télémétrie -->
-    <footer class="hud-bottom-panel hud-interactive">
-      <div class="dialogue-box">
-        <div class="user-line" id="hud-user-transcript">VOUS > En attente d'instruction vocale...</div>
-        <div class="assistant-line" id="hud-assistant-reply">M.O.C.T.A.R > Systèmes cybernétiques armés. À votre écoute, Moctar.</div>
+    <!-- 3. Ruban Inférieur Flottant -->
+    <div class="hud-bottom-ribbon">
+      <div class="transcript-box" id="hud-dialogue-box">
+        <div class="transcript-user" id="hud-user-transcript">« Parlez librement ou cliquez pour interagir... »</div>
+        <div class="transcript-assistant" id="hud-assistant-reply">M.O.C.T.A.R prêt et à l'écoute, Moctar.</div>
       </div>
 
-      <div class="bottom-bar">
-        <div class="gps-readout" id="hud-gps-coords">
-          LAT: 34.0208° N | LON: 6.8416° W | GPS_LOCK
+      <div class="bottom-bar-controls interactive">
+        <div class="gps-chip" id="hud-gps-coords">
+          GPS : 34.0209°N, -6.8417°E (Rabat / Dell M4800)
         </div>
-        <div class="action-buttons">
-          <button type="button" class="btn-action mic" id="hud-mic-btn" title="Activer l'écoute micro">
-            <span>🎙️ MICRO</span>
+
+        <div class="action-pills">
+          <button class="btn-action-small" id="hud-mic-btn" title="Basculer l'écoute micro">
+            🎙️ MICRO
           </button>
-          <button type="button" class="btn-action stop" id="hud-stop-btn" title="Interrompre M.O.C.T.A.R">
-            <span>🛑 STOP</span>
+          <button class="btn-action-small stop" id="hud-stop-btn" title="Interrompre la synthèse vocale">
+            ⏹️ STOP
           </button>
         </div>
       </div>
-    </footer>
-
+    </div>
   </div>
 
-  <!-- Three.js (Local prioritaire, CDN de secours) -->
+  <!-- Bibliothèque Three.js Locale (Offline) -->
   <script src="/static/js/three.min.js"></script>
-  <script>
-    if (typeof THREE === "undefined") {
-      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>');
-    }
-  </script>
-
   <!-- Moteur Graphique HUD 3D -->
-  <script src="/static/js/hud_3d.js?v=1.0"></script>
+  <script src="/static/js/hud_3d.js"></script>
 </body>
 </html>

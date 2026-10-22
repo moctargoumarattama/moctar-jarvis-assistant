@@ -343,13 +343,13 @@ def is_direct_voice_command(text: str) -> bool:
     if re.search(r"\b(?:m[ée]t[ée]o|quel\s+temps|quel\s+degr[ée]|combien\s+de\s+degr[ée]s?|pleut[- ]il|est[- ]ce\s+qu['’]il\s+pleut|il\s+fait\s+quel\s+degr[ée]|fait\s+quel\s+degr[ée])\b", norm):
         return True
     # 4. Multimédia & Audio (Lecture, Pause, Volume, Spotify, YouTube)
-    if re.search(r"\b(?:arr[êe]te\s+la\s+musique|stop\s+la\s+musique|pause\s+la\s+musique|pause\s+youtube|mets\s+youtube\s+en\s+pause|youtube\s+en\s+pause|pause\s+la\s+vid[ée]o|mets\s+en\s+pause|mets\s+sur\s+pause|en\s+pause|on\s+pause|pause)\b", norm):
+    if re.search(r"\b(?:arr[êe]te\s+la\s+musique|stop\s+la\s+musique|pause\s+la\s+musique|pause\s+youtube|mets\s+youtube\s+en\s+pause|youtube\s+en\s+pause|j['’]?ai\s+youtube\s+en\s+pause|pause\s+la\s+vid[ée]o|mets\s+en\s+pause|mets\s+sur\s+pause|en\s+pause|on\s+pause|pause)\b", norm):
         return True
     if re.search(r"\b(?:mets\s+la\s+musique|mets\s+de\s+la\s+musique|lance\s+la\s+musique|lance\s+de\s+la\s+musique|joue\s+de\s+la\s+musique|joue\s+la\s+musique|lance\s+ma\s+playlist|lance\s+spotify|ouvre\s+spotify|reprends?\s+la\s+lecture|remets\s+la\s+musique|relance\s+la\s+musique)\b", norm):
         return True
     if re.search(r"\b(?:chanson\s+suivante|piste\s+suivante|musique\s+suivante|morceau\s+suivant|suivant|chanson\s+pr[ée]c[ée]dente|piste\s+pr[ée]c[ée]dente|musique\s+pr[ée]c[ée]dente|pr[ée]c[ée]dent)\b", norm):
         return True
-    if re.search(r"\b(?:coupe\s+le\s+son|mute|remets\s+le\s+son|monte\s+le\s+son|baisse\s+le\s+son|diminue\s+le\s+son|augmente\s+le\s+son|diminue\s+le\s+volume|augmente\s+le\s+volume|baisse\s+le\s+volume|monte\s+le\s+volume|coupe\s+le\s+volume|r[èe]gle\s+le\s+volume|mets\s+le\s+volume)\b", norm):
+    if re.search(r"\b(?:coupe\s+le\s+son|mute|remets\s+le\s+son|monte\s+le\s+son|baisse\s+le\s+son|diminue\s+le\s+son|augmente\s+le\s+son|diminue\s+le\s+volume|augmente\s+le\s+volume|baisse\s+le\s+volume|monte\s+le\s+volume|coupe\s+le\s+volume|laisse\s+le\s+volume|r[èe]gle\s+le\s+volume|mets\s+le\s+volume)\b", norm):
         return True
     # 5. Gestion Système, Contexte & Organisation
     if re.search(r"\b(?:briefing|o[uù]\s+en\s+est[- ]on|optimise\s+le\s+syst[èe]me|mode\s+optimisation|fin\s+de\s+journ[ée]e|bonne\s+nuit|liste\s+mes\s+t[aâ]ches|mes\s+todos)\b", norm):
@@ -376,8 +376,8 @@ def is_direct_voice_command(text: str) -> bool:
     # 11. Vision et Analyse d'Écran ("qu'est-ce que tu vois sur mon écran", "regarde mon écran", "analyse mon écran", "regarde les erreurs")
     if re.search(r"\b(?:qu['’]est[- ]ce\s+que\s+tu\s+vois|que\s+vois[- ]tu|regarde|analyse|lis|d[ée]cris)\s+(?:sur\s+|[aà]\s+)?(?:mon\s+|l['’])?[ée]cran\b", norm) or re.search(r"\b(?:regarde\s+les\s+erreurs|analyse\s+les\s+erreurs|vois[- ]tu\s+des\s+erreurs|qu['’]y\s+a[- ]t[- ]il\s+[aà]\s+l['’][ée]cran)\b", norm):
         return True
-    # 12. Interface HUD 3D & Globe Terrestre ("affiche la terre", "montre le globe", "affiche ma position", "mode orbe")
-    if re.search(r"\b(?:affiche\s+(?:la\s+terre|le\s+globe|ma\s+position|l['’]orbe)|montre\s+(?:la\s+terre|le\s+globe|ma\s+position)|globe\s+terrestre|localise[- ]moi|mode\s+orbe|ferme\s+le\s+globe|retourne\s+[aà]\s+l['’]orbe)\b", norm):
+    # 12. Interface HUD 3D & Globe Terrestre ("mode hud 3d", "affiche la terre", "montre le globe", "affiche ma position", "mode orbe", "mode plasma", "mode quantum")
+    if re.search(r"\b(?:mode\s+)?hud(?:\s*3\s*d)?\b", norm) or re.search(r"\b(?:mode\s+)?(?:hope|hop|up|hot|hub)\s*3\s*d\b", norm) or re.search(r"\b(?:affiche\s+(?:la\s+terre|le\s+globe|ma\s+position|l['’]orbe|le\s+hud)|montre\s+(?:la\s+terre|le\s+globe|ma\s+position|le\s+hud)|globe\s+terrestre|localise[- ]moi|mode\s+orbe|mode\s+globe|mode\s+plasma|mode\s+quantum|ferme\s+le\s+globe|retourne\s+[aà]\s+l['’]orbe|ouvre\s+(?:le\s+)?hud)\b", norm):
         return True
     # 13. Sport en temps réel ("résultats ligue 1", "classement premier league", "score real madrid")
     if re.search(r"\b(?:r[ée]sultats?|classement|score|scores|matchs?)\s+(?:de\s+la\s+|du\s+|en\s+)?(?:ligue\s*1|champions\s*league|ligue\s*des\s*champions|liga|la\s+liga|premier\s*league|serie\s*a|bundesliga|foot)\b", norm):
@@ -1033,6 +1033,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/static/js/three.min.js")
     async def three_js_script():
         return FileResponse(BASE_DIR / "static" / "js" / "three.min.js", media_type="application/javascript")
+
+    @application.get("/static/textures/{filename}")
+    async def texture_file(filename: str):
+        safe_name = os.path.basename(filename)
+        tex_path = BASE_DIR / "static" / "textures" / safe_name
+        if not tex_path.is_file():
+            raise HTTPException(404, "Texture non trouvée")
+        media = "image/jpeg" if safe_name.endswith((".jpg", ".jpeg")) else "image/png"
+        return FileResponse(tex_path, media_type=media)
 
     @application.get("/api/hud/state")
     async def get_hud_state_endpoint():

@@ -205,7 +205,66 @@ class TestPhaseBCHudAndServices(unittest.TestCase):
                 self.assertTrue(res["reply"].endswith("Moctar."))
 
     # -------------------------------------------------------------------------
-    # 5. Règle d'Or Absolue : Aucun modèle externe non autorisé
+    # 5. Textures 3D Réalistes NASA & Métriques Matérielles
+    # -------------------------------------------------------------------------
+    def test_hud_textures_and_metrics(self):
+        """Vérifie le chargement des textures satellite NASA et les métriques matérielles."""
+        # 1. Texture Satellite Terre
+        resp_earth = self.client.get("/static/textures/earth_atmos_2048.jpg")
+        self.assertEqual(resp_earth.status_code, 200)
+        self.assertIn(resp_earth.headers.get("content-type", ""), ["image/jpeg", "image/jpg"])
+
+        # 2. Texture Nuages Dynamiques
+        resp_clouds = self.client.get("/static/textures/earth_clouds_1024.png")
+        self.assertEqual(resp_clouds.status_code, 200)
+        self.assertEqual(resp_clouds.headers.get("content-type"), "image/png")
+
+        # 3. Métriques système réelles dans /api/hud/state
+        resp_state = self.client.get("/api/hud/state")
+        self.assertEqual(resp_state.status_code, 200)
+        data = resp_state.json()
+        self.assertIn("cpu_percent", data)
+        self.assertIn("ram_percent", data)
+        self.assertIn("hostname", data)
+        self.assertIsInstance(data["cpu_percent"], (int, float))
+        self.assertIsInstance(data["ram_percent"], (int, float))
+
+    # -------------------------------------------------------------------------
+    # 6. Réparations Phonétiques STT & Commandes Médias / HUD 3D
+    # -------------------------------------------------------------------------
+    def test_stt_repairs_and_autonomous_execution(self):
+        """Vérifie les réparations des transcriptions Whisper réelles."""
+        import stt_phonetic_repair
+
+        # 1. "C'est tout en mode Hope 3D." -> "mode HUD 3D"
+        repaired_hud, _ = stt_phonetic_repair.repair_stt_transcript("C'est tout en mode Hope 3D.")
+        self.assertIn("mode HUD 3D", repaired_hud)
+        self.assertTrue(main.is_direct_voice_command(repaired_hud))
+
+        # 2. "J'ai YouTube en pause." -> "mets YouTube en pause"
+        repaired_yt, _ = stt_phonetic_repair.repair_stt_transcript("J'ai YouTube en pause.")
+        self.assertIn("mets YouTube en pause", repaired_yt)
+        self.assertTrue(main.is_direct_voice_command(repaired_yt))
+
+        # 3. Exécution 0 ms de la commande média réparée
+        res_pause = autonomous_library.execute_autonomous_task("J'ai YouTube en pause")
+        self.assertTrue(res_pause["handled"])
+        self.assertEqual(res_pause["task_category"], "media")
+        self.assertTrue(res_pause["reply"].endswith("Moctar."))
+
+        # 4. Modes 3D Plasma et Quantum
+        res_plasma = autonomous_library.execute_autonomous_task("mode plasma")
+        self.assertTrue(res_plasma["handled"])
+        self.assertEqual(res_plasma["task_category"], "hud_3d")
+        self.assertEqual(hud_state_manager.get_hud_state()["view"], "plasma")
+
+        res_quantum = autonomous_library.execute_autonomous_task("mode quantum")
+        self.assertTrue(res_quantum["handled"])
+        self.assertEqual(res_quantum["task_category"], "hud_3d")
+        self.assertEqual(hud_state_manager.get_hud_state()["view"], "quantum")
+
+    # -------------------------------------------------------------------------
+    # 7. Règle d'Or Absolue : Aucun modèle externe non autorisé
     # -------------------------------------------------------------------------
     def test_strict_forbidden_models_absence(self):
         """Vérifie qu'aucun modèle tiers non approuvé n'est introduit."""

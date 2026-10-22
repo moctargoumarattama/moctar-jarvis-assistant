@@ -23,3 +23,4 @@ def switch_hud_view(view: str, locate: bool = False) -> Dict[str, Any]:
         data=state,
         error=None,
     )
+

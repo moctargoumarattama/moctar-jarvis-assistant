@@ -67,11 +67,17 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     (re.compile(r"\bjournal\s+(?:ces?\s*tl|ctl)\b", re.I), "journalctl", "journalctl_repair"),
 
     # 5. Multimédia & Audio
+    (re.compile(r"\b(?:j['’]?ai|j['’]?avais|je\s+mets?|mets?)\s+you\s*tube\s+en\s+pause\b", re.I), "mets YouTube en pause", "youtube_pause_repair"),
     (re.compile(r"\b(?:coupe|stop|arr[êe]te)\s+(?:la\s+)?(?:zik|sic|musik)\b", re.I), "coupe la musique", "music_stop"),
     (re.compile(r"\b(?:pause\s+(?:la\s+)?(?:zik|musique)|mets?\s+pause)\b", re.I), "mets la musique en pause", "music_pause"),
     (re.compile(r"\b(?:reprends?|remets?|relance)\s+(?:la\s+)?(?:zik|musique)\b", re.I), "reprends la musique", "music_resume"),
     (re.compile(r"\b(?:morceau|zik)\s+suivant[es]?\b", re.I), "morceau suivant", "music_next"),
     (re.compile(r"\b(?:morceau|zik)\s+pr[ée]c[ée]dant[es]?\b", re.I), "morceau précédent", "music_prev"),
+
+    # 5b. Interface HUD 3D & Globe (Whisper réparations phonétiques)
+    (re.compile(r"\b(?:c['’]?est\s+tout\s+en\s+)?(?:mode\s+)?(?:hope|hop|up|hot|hub|eude|ude)\s*3\s*d\b", re.I), "mode HUD 3D", "hud_3d_repair"),
+    (re.compile(r"\b(?:mode\s+)?(?:hope|hop|up|hot|hub)\s*3\s*d\b", re.I), "mode HUD 3D", "hud_3d_short"),
+    (re.compile(r"\b(?:ouvre|lance|affiche|active)\s+(?:le\s+)?(?:hope|hop|up|hot|hub)\s*3\s*d\b", re.I), "ouvre le HUD 3D", "hud_3d_open"),
 
     # 6. Météo & Villes courantes
     (re.compile(r"\b(?:[aà]|au)\s+casat?\b", re.I), "à Casablanca", "city_casa"),
@@ -111,6 +117,8 @@ _PHONETIC_WORD_MAP: Dict[str, str] = {
     "systemctl": "systemctl",
     "journalctl": "journalctl",
     "terminaux": "terminal",
+    "eude": "HUD",
+    "ude": "HUD",
 }
 
 

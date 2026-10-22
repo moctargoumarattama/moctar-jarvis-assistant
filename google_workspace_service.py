@@ -395,3 +395,4 @@ def search_drive_documents(query: str, max_results: int = 5) -> Dict[str, Any]:
             "files": [],
             "count": 0,
         }
+

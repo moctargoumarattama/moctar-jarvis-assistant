@@ -347,3 +347,4 @@ def get_sports_update(query: str) -> Dict[str, Any]:
         "reply": _ensure_moctar_ending(fallback_msg),
         "data": {"league": league_name, "status": "nominal"},
     }
+
