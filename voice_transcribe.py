@@ -208,6 +208,11 @@ def read_wav_pcm(path: str | os.PathLike[str]) -> np.ndarray | None:
 HALLUCINATION_SUBSTRINGS = (
     "sous-titres",
     "sous titres",
+    "sous-titrage",
+    "sous titrage",
+    "radio-canada",
+    "société radio-canada",
+    "societe radio-canada",
     "amara.org",
     "merci d'avoir regardé",
     "merci d avoir regarde",

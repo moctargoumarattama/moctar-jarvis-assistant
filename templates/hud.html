@@ -68,7 +68,7 @@
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      padding: 16px 22px;
+      padding: 14px 20px;
     }
 
     .interactive {
@@ -87,7 +87,7 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 16px;
+      padding: 7px 15px;
       background: var(--chip-bg);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
@@ -118,14 +118,14 @@
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
       border: 1px solid var(--chip-border);
-      padding: 6px 22px;
+      padding: 5px 20px;
       border-radius: 20px;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     }
 
     .clock-time {
       font-family: var(--font-mono);
-      font-size: 24px;
+      font-size: 22px;
       font-weight: 800;
       letter-spacing: 3px;
       color: var(--cyan);
@@ -135,7 +135,7 @@
 
     .clock-date {
       font-family: var(--font-mono);
-      font-size: 10px;
+      font-size: 9px;
       letter-spacing: 0.16em;
       color: var(--muted);
       margin-top: 2px;
@@ -145,8 +145,8 @@
     .telemetry-badge {
       display: inline-flex;
       align-items: center;
-      gap: 14px;
-      padding: 8px 16px;
+      gap: 12px;
+      padding: 7px 15px;
       background: var(--chip-bg);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
@@ -201,7 +201,7 @@
     }
 
     .mode-pill {
-      padding: 7px 16px;
+      padding: 6px 15px;
       background: var(--chip-bg);
       backdrop-filter: blur(12px);
       border: 1px solid var(--chip-border);
@@ -228,17 +228,17 @@
 
     .mode-pill.active {
       color: #fff;
-      background: rgba(0, 243, 255, 0.25);
+      background: rgba(0, 243, 255, 0.28);
       border-color: var(--cyan);
-      box-shadow: 0 0 16px rgba(0, 243, 255, 0.45);
+      box-shadow: 0 0 16px rgba(0, 243, 255, 0.5);
     }
 
     /* Badge d'État Vocal Flottant */
     .voice-state-pill {
       position: absolute;
-      top: 86px;
-      left: 22px;
-      padding: 6px 14px;
+      top: 80px;
+      left: 20px;
+      padding: 5px 14px;
       background: var(--chip-bg);
       backdrop-filter: blur(12px);
       border: 1px solid var(--chip-border);
@@ -255,62 +255,62 @@
     .voice-state-pill[data-state="listening"] {
       color: var(--gold);
       border-color: var(--gold);
-      box-shadow: 0 0 15px rgba(255, 183, 0, 0.4);
+      box-shadow: 0 0 16px rgba(255, 183, 0, 0.45);
     }
 
     .voice-state-pill[data-state="processing"] {
       color: var(--magenta);
       border-color: var(--magenta);
-      box-shadow: 0 0 15px rgba(217, 0, 255, 0.4);
+      box-shadow: 0 0 16px rgba(217, 0, 255, 0.45);
     }
 
     .voice-state-pill[data-state="speaking"] {
       color: var(--cyan);
       border-color: var(--cyan);
-      box-shadow: 0 0 15px var(--cyan-glow);
+      box-shadow: 0 0 16px var(--cyan-glow);
     }
 
-    /* --- Ruban Inférieur Flottant --- */
+    /* --- Ruban Inférieur Flottant Compact --- */
     .hud-bottom-ribbon {
       display: flex;
       flex-direction: column;
-      gap: 10px;
-      max-width: 920px;
+      gap: 6px;
+      max-width: 840px;
       margin: 0 auto;
       width: 100%;
     }
 
     .transcript-box {
-      background: var(--chip-bg);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
+      background: rgba(4, 14, 28, 0.5);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       border: 1px solid var(--chip-border);
-      border-radius: 16px;
-      padding: 12px 20px;
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+      border-radius: 12px;
+      padding: 8px 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
       display: flex;
       flex-direction: column;
-      gap: 4px;
-      min-height: 52px;
+      gap: 3px;
+      min-height: 40px;
       transition: all 0.3s ease;
     }
 
     .transcript-user {
       font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: 11px;
       color: var(--gold);
       font-weight: 600;
     }
 
     .transcript-assistant {
       font-family: var(--font-mono);
-      font-size: 13px;
+      font-size: 12px;
       color: var(--cyan);
-      line-height: 1.45;
+      line-height: 1.4;
       text-shadow: 0 0 8px rgba(0, 243, 255, 0.3);
     }
 
-    /* Ligne de Commande Hybride Flottante (Voice & Text) */
+    /* Ligne de Commande Hybride Compacte */
     .hud-cmd-form {
       display: flex;
       gap: 8px;
@@ -320,11 +320,11 @@
 
     .hud-cmd-input {
       flex: 1;
-      background: rgba(4, 14, 28, 0.75);
-      backdrop-filter: blur(12px);
+      background: rgba(4, 14, 28, 0.65);
+      backdrop-filter: blur(10px);
       border: 1px solid var(--chip-border);
-      border-radius: 20px;
-      padding: 8px 18px;
+      border-radius: 16px;
+      padding: 6px 14px;
       color: #fff;
       font-family: var(--font-mono);
       font-size: 11px;
@@ -334,8 +334,8 @@
 
     .hud-cmd-input:focus {
       border-color: var(--cyan);
-      box-shadow: 0 0 14px rgba(0, 243, 255, 0.35);
-      background: rgba(6, 20, 38, 0.9);
+      box-shadow: 0 0 12px rgba(0, 243, 255, 0.35);
+      background: rgba(6, 20, 38, 0.85);
     }
 
     .hud-cmd-input::placeholder {
@@ -343,10 +343,10 @@
     }
 
     .hud-cmd-submit {
-      padding: 8px 16px;
+      padding: 6px 14px;
       background: rgba(0, 243, 255, 0.15);
       border: 1px solid var(--cyan);
-      border-radius: 20px;
+      border-radius: 16px;
       color: var(--cyan);
       font-family: var(--font-mono);
       font-size: 10px;
@@ -359,10 +359,10 @@
     .hud-cmd-submit:hover {
       background: var(--cyan);
       color: var(--bg-deep);
-      box-shadow: 0 0 14px var(--cyan-glow);
+      box-shadow: 0 0 12px var(--cyan-glow);
     }
 
-    /* Barre Inférieure Actions & GPS */
+    /* Barre Inférieure Actions & VU-mètre */
     .bottom-bar-controls {
       display: flex;
       justify-content: space-between;
@@ -377,21 +377,39 @@
       letter-spacing: 0.08em;
       background: rgba(0, 255, 136, 0.08);
       border: 1px solid rgba(0, 255, 136, 0.25);
-      padding: 4px 12px;
-      border-radius: 12px;
+      padding: 3px 10px;
+      border-radius: 10px;
     }
 
     .action-pills {
       display: flex;
+      align-items: center;
       gap: 8px;
     }
 
+    /* VU-mètre Audio en Direct */
+    .hud-vumeter {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      height: 20px;
+      padding: 0 6px;
+    }
+
+    .vbar {
+      width: 3px;
+      height: 4px;
+      background: rgba(0, 243, 255, 0.35);
+      border-radius: 2px;
+      transition: height 0.08s ease, background 0.1s ease;
+    }
+
     .btn-action-small {
-      padding: 6px 16px;
+      padding: 5px 14px;
       background: var(--chip-bg);
       backdrop-filter: blur(12px);
       border: 1px solid var(--chip-border);
-      border-radius: 18px;
+      border-radius: 16px;
       font-family: var(--font-mono);
       font-size: 10px;
       font-weight: 700;
@@ -407,16 +425,16 @@
     .btn-action-small:hover {
       background: var(--cyan);
       color: var(--bg-deep);
-      box-shadow: 0 0 14px var(--cyan-glow);
+      box-shadow: 0 0 12px var(--cyan-glow);
     }
 
     /* État Enregistrement Actif Micro */
     .btn-action-small.active {
-      background: rgba(255, 183, 0, 0.25);
-      border-color: var(--gold);
-      color: var(--gold);
-      box-shadow: 0 0 16px rgba(255, 183, 0, 0.5);
-      animation: pulse-ring 1.5s infinite;
+      background: rgba(255, 59, 48, 0.25) !important;
+      border-color: var(--red) !important;
+      color: #fff !important;
+      box-shadow: 0 0 16px rgba(255, 59, 48, 0.6) !important;
+      animation: pulse-ring 1.4s infinite;
     }
 
     .btn-action-small.stop {
@@ -485,17 +503,17 @@
 
     <!-- Badge d'État Vocal Flottant -->
     <div class="voice-state-pill" id="voice-state-badge" data-state="idle">
-      ● VEILLE ACTIVE
+      ● MICRO COUPÉ
     </div>
 
     <!-- 3. Ruban Inférieur Flottant -->
     <div class="hud-bottom-ribbon">
       <div class="transcript-box" id="hud-dialogue-box">
-        <div class="transcript-user" id="hud-user-transcript">« Parlez librement (« Yo Moctar ») ou cliquez sur le micro... »</div>
-        <div class="transcript-assistant" id="hud-assistant-reply">M.O.C.T.A.R prêt et à l'écoute, Moctar.</div>
+        <div class="transcript-user" id="hud-user-transcript">« M.O.C.T.A.R en veille. Cliquez sur le micro pour parler... »</div>
+        <div class="transcript-assistant" id="hud-assistant-reply">Prêt et à votre disposition, Moctar.</div>
       </div>
 
-      <!-- Ligne de Commande Directe Hybride (Voix / Texte) -->
+      <!-- Ligne de Commande Hybride Compacte (Voix / Texte) -->
       <form id="hud-cmd-form" class="hud-cmd-form interactive">
         <input type="text" id="hud-cmd-input" class="hud-cmd-input" placeholder="Tapez un ordre (ex: Affiche la Terre, Météo, CPU, Pause)..." autocomplete="off">
         <button type="submit" id="hud-cmd-submit" class="hud-cmd-submit" title="Envoyer">⚡ ENVOYER</button>
@@ -507,10 +525,19 @@
         </div>
 
         <div class="action-pills">
+          <!-- VU-mètre Audio en Direct -->
+          <div id="hud-vumeter" class="hud-vumeter" title="Niveau audio du micro en direct">
+            <span class="vbar"></span>
+            <span class="vbar"></span>
+            <span class="vbar"></span>
+            <span class="vbar"></span>
+            <span class="vbar"></span>
+          </div>
+
           <button class="btn-action-small interactive" id="hud-mic-btn" title="Activer / Désactiver la capture micro">
-            🎙️ MICRO
+            🎙️ ACTIVER MICRO
           </button>
-          <button class="btn-action-small stop interactive" id="hud-stop-btn" title="Interrompre la synthèse vocale">
+          <button class="btn-action-small stop interactive" id="hud-stop-btn" title="Couper le micro et stopper la parole">
             ⏹️ STOP
           </button>
         </div>
@@ -523,6 +550,6 @@
   <!-- Moteur Vocal Audio Réel & Wake-Word -->
   <script src="/static/voice.js?v=4.0"></script>
   <!-- Moteur Graphique HUD 3D & Contrôles -->
-  <script src="/static/js/hud_3d.js?v=3.0"></script>
+  <script src="/static/js/hud_3d.js?v=4.0"></script>
 </body>
 </html>
