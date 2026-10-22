@@ -1,40 +1,44 @@
 /**
- * M.O.C.T.A.R — Moteur Graphique HUD 3D Cybernétique Ultra-Moderne (Three.js)
+ * M.O.C.T.A.R — Moteur Graphique HUD 3D Cybernétique & Assistant Vocal Intégré
  * 
- * Basé sur les modèles cinématiques TikTok (@techenclair) :
- * 1. Globe 3D NASA Réaliste (Texture satellite haute résolution, nuages dynamiques, anneau orbital incliné, radar vert).
- * 2. Réacteur à Arc Plasma Fluide (Torus de particules à dynamique turbulente, anneaux néon cyan, réactif à la voix).
- * 3. Cœur Neuronal Quantique (Noyau incandescent blanc-chaud, filaments énergétiques tourbillonnants, nébuleuse cosmique).
+ * 1. MOTEUR 3D THREE.JS (Référence Cinématique TikTok @techenclair) :
+ *    - Mode Arc Plasma (Image 5) : Tore circulaire frontal face caméra, fluide plasma électrique cyan/bleu, anneaux néon concentriques.
+ *    - Mode Quantum Core (Image 4) : Cœur solaire blanc-chaud, anneaux gyroscopiques imbriqués, nébuleuse quantique rayonnante.
+ *    - Mode Globe 3D (Image 3) : Terre satellite NASA réaliste, nuages dynamiques, anneau orbital incliné, radar vert pulsant.
  * 
- * Télémétrie système Dell Precision M4800 en direct (CPU, RAM, Host) & Contrôles tactiles / souris complets.
+ * 2. MOTEUR AUDIO VOCAL BIDIRECTIONNEL (MoctarVoice) :
+ *    - Capture micro réelle (MediaDevices + AudioContext + WAV 16k PCM).
+ *    - Détection d'activité vocale (VAD) et mot de réveil ("Yo Moctar", "Moctar").
+ *    - Dialogue direct avec /api/voice/interact (LLM + actions locales 0 ms).
+ *    - Synthèse vocale edge-TTS haute fidélité avec synchronisation visuelle.
  */
 
 'use strict';
 
 (function () {
-  // --- Paramètres & Constantes ---
-  const GLOBE_RADIUS = 95;
-  const CLOUD_RADIUS = 96.8;
-  const ATMOS_RADIUS = 104;
-  const TORUS_PARTICLE_COUNT = 3800;
-  const QUANTUM_PARTICLE_COUNT = 3200;
-  const STAR_COUNT = 1800;
+  // --- Paramètres & Constantes 3D ---
+  const GLOBE_RADIUS = 90;
+  const CLOUD_RADIUS = 91.6;
+  const ATMOS_RADIUS = 98;
+  const PLASMA_PARTICLE_COUNT = 3600;
+  const QUANTUM_PARTICLE_COUNT = 3000;
+  const STAR_COUNT = 1600;
 
-  const DEFAULT_COORDS = { lat: 34.020882, lon: -6.841650, label: "Rabat / Dell Precision M4800" };
+  // Coordonnées de référence Moctar (Dell Precision M4800 / Rabat)
+  const DEFAULT_COORDS = { lat: 34.020882, lon: -6.841650, label: "Rabat · Dell Precision M4800" };
 
-  // Palettes cybernétiques Three.js
+  // Couleurs Three.js
   const COLOR_CYAN = new THREE.Color(0x00f3ff);
-  const COLOR_DEEP_BLUE = new THREE.Color(0x0044ff);
-  const COLOR_ELECTRIC = new THREE.Color(0x00d4ff);
-  const COLOR_GOLD = new THREE.Color(0xffb700);
-  const COLOR_MAGENTA = new THREE.Color(0xd900ff);
-  const COLOR_GREEN = new THREE.Color(0x00ff88);
+  const COLOR_ELECTRIC = new THREE.Color(0x00aaff);
+  const COLOR_DEEP_BLUE = new THREE.Color(0x0033cc);
   const COLOR_WHITE = new THREE.Color(0xffffff);
+  const COLOR_MAGENTA = new THREE.Color(0xd900ff);
+  const COLOR_GOLD = new THREE.Color(0xffb700);
+  const COLOR_GREEN = new THREE.Color(0x00ff88);
 
-  // Éléments DOM
+  // Éléments du DOM
   const container = document.getElementById('hud-viewport');
   const canvas = document.getElementById('hud-canvas');
-  const btnOrbView = document.getElementById('btn-view-orb');
   const btnPlasmaView = document.getElementById('btn-view-plasma');
   const btnQuantumView = document.getElementById('btn-view-quantum');
   const btnGlobeView = document.getElementById('btn-view-globe');
@@ -50,34 +54,42 @@
   const hostValEl = document.getElementById('hud-host-val');
   const clockTimeEl = document.getElementById('hud-clock-time');
   const clockDateEl = document.getElementById('hud-clock-date');
+  const cmdForm = document.getElementById('hud-cmd-form');
+  const cmdInput = document.getElementById('hud-cmd-input');
 
   let renderer, scene, camera;
   let textureLoader;
   let starField;
 
-  // 1. Groupes 3D
+  // 1. Groupes de Scène 3D
   let globeGroup, earthMesh, cloudsMesh, atmosMesh, orbitalRingMesh, radarMarker, radarPulseRing;
-  let plasmaGroup, plasmaParticles, plasmaTorusInnerRing, plasmaTorusOuterRing;
-  let quantumGroup, quantumParticles, quantumCoreMesh, quantumFilamentRings = [];
+  let plasmaGroup, plasmaParticles, plasmaInnerRing, plasmaOuterRing;
+  let quantumGroup, quantumCoreMesh, quantumHaloMesh, quantumFilamentRings = [], quantumParticles;
 
   // Tableaux de particules
-  let plasmaPosArray, plasmaAngleArray, plasmaRadiusArray, plasmaSpeedArray, plasmaColors;
-  let quantumPosArray, quantumOrigArray, quantumVelArray, quantumColors;
+  let plasmaAngles, plasmaRadii, plasmaSpeeds, plasmaZOffsets;
+  let quantumPositions, quantumOriginals, quantumSpeeds;
 
-  // États
+  // Variables de contrôle 3D
   let currentView = 'plasma'; // 'plasma' | 'quantum' | 'globe'
-  let voiceState = 'idle';    // 'idle' | 'listening' | 'thinking' | 'speaking'
+  let voicePhase = 'idle';    // 'idle' | 'listening' | 'processing' | 'speaking'
   let clock = new THREE.Clock();
   let userCoords = { ...DEFAULT_COORDS };
   let isDragging = false;
   let previousMousePos = { x: 0, y: 0 };
-  let targetRotation = { x: 0.15, y: -0.4 };
-  let cameraTargetZ = 300;
-  let currentCameraZ = 300;
-  let sseSource = null;
-  let speechSynth = window.speechSynthesis || null;
+  let rotationTargets = {
+    plasma: { x: 0.12, y: 0 },
+    quantum: { x: 0.18, y: 0 },
+    globe: { x: 0.15, y: -0.6 },
+  };
+  let currentCameraZ = 290;
+  let targetCameraZ = 290;
 
-  // --- Initialisation Three.js ---
+  // Voice Engine Handle
+  let jarvisVoice = null;
+  let activeAudioElement = null;
+
+  // --- 1. INITIALISATION DU MOTEUR 3D ---
   function initThree() {
     if (!container || !canvas) return;
 
@@ -85,10 +97,10 @@
     const height = container.clientHeight || window.innerHeight;
 
     scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x02060e, 0.0009);
+    scene.fog = new THREE.FogExp2(0x02060e, 0.0008);
 
     camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 4000);
-    camera.position.set(0, 0, cameraTargetZ);
+    camera.position.set(0, 0, currentCameraZ);
 
     renderer = new THREE.WebGLRenderer({
       canvas: canvas,
@@ -101,42 +113,35 @@
 
     textureLoader = new THREE.TextureLoader();
 
-    // Éclairage spatial réaliste
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+    // Lumières
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
     scene.add(ambientLight);
 
-    const sunLight = new THREE.DirectionalLight(0xdff2ff, 1.6);
-    sunLight.position.set(350, 250, 400);
+    const sunLight = new THREE.DirectionalLight(0xe8f5ff, 1.8);
+    sunLight.position.set(400, 300, 500);
     scene.add(sunLight);
 
-    const blueBackLight = new THREE.DirectionalLight(0x0044bb, 0.9);
-    blueBackLight.position.set(-300, -100, -300);
-    scene.add(blueBackLight);
+    const rimLight = new THREE.DirectionalLight(0x0055ff, 1.2);
+    rimLight.position.set(-400, -200, -400);
+    scene.add(rimLight);
 
-    // 1. Champ d'étoiles cosmiques
+    // Création des 3 composants
     createStarfield();
-
-    // 2. Vue Réacteur Plasma Arc (Image 5)
-    createPlasmaReactor();
-
-    // 3. Vue Cœur Quantique Neuronal (Image 4)
-    createQuantumCore();
-
-    // 4. Vue Globe 3D Réaliste NASA (Image 3)
+    createCircularPlasmaReactor();
+    createRadiantQuantumCore();
     createRealisticEarthGlobe();
 
-    // Configuration des écouteurs
-    setupInteractions();
-    setupEventListeners();
+    // Interaction souris / touch
+    setup3DControls();
 
-    // Appliquer la vue initiale
-    applyViewVisibility(currentView);
+    // Synchronisation de la vue initiale
+    applyView(currentView);
 
-    // Démarrage de la boucle de rendu
+    // Lancement boucle de rendu
     animate();
   }
 
-  // --- 1. Champ d'étoiles spatiales ---
+  // --- CHAMP D'ÉTOILES ---
   function createStarfield() {
     const geo = new THREE.BufferGeometry();
     const positions = new Float32Array(STAR_COUNT * 3);
@@ -144,11 +149,11 @@
 
     for (let i = 0; i < STAR_COUNT; i++) {
       const idx = i * 3;
-      positions[idx] = (Math.random() - 0.5) * 2600;
-      positions[idx + 1] = (Math.random() - 0.5) * 2600;
-      positions[idx + 2] = (Math.random() - 0.5) * 2600;
+      positions[idx] = (Math.random() - 0.5) * 2800;
+      positions[idx + 1] = (Math.random() - 0.5) * 2800;
+      positions[idx + 2] = (Math.random() - 0.5) * 2800;
 
-      const c = Math.random() > 0.3 ? COLOR_CYAN : COLOR_WHITE;
+      const c = Math.random() > 0.4 ? COLOR_CYAN : COLOR_WHITE;
       colors[idx] = c.r;
       colors[idx + 1] = c.g;
       colors[idx + 2] = c.b;
@@ -158,80 +163,80 @@
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const mat = new THREE.PointsMaterial({
-      size: 1.6,
+      size: 1.8,
       vertexColors: true,
       transparent: true,
-      opacity: 0.75,
+      opacity: 0.8,
     });
 
     starField = new THREE.Points(geo, mat);
     scene.add(starField);
   }
 
-  // --- 2. Réacteur à Arc Plasma Fluide (Image 5) ---
-  function createPlasmaReactor() {
+  // --- MODE 1 : RÉACTEUR À ARC PLASMA CIRCULAIRE (Image 5 TikTok) ---
+  function createCircularPlasmaReactor() {
     plasmaGroup = new THREE.Group();
 
-    // Anneaux néon intérieurs et extérieurs
-    const innerRingGeo = new THREE.TorusGeometry(72, 1.2, 16, 100);
-    const ringMat = new THREE.MeshBasicMaterial({
+    // 1. Anneau néon intérieur (face à la caméra dans le plan XY)
+    const innerGeo = new THREE.TorusGeometry(74, 1.6, 16, 120);
+    const innerMat = new THREE.MeshBasicMaterial({
       color: COLOR_CYAN,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.85,
       blending: THREE.AdditiveBlending,
     });
-    plasmaTorusInnerRing = new THREE.Mesh(innerRingGeo, ringMat);
-    plasmaGroup.add(plasmaTorusInnerRing);
+    plasmaInnerRing = new THREE.Mesh(innerGeo, innerMat);
+    plasmaGroup.add(plasmaInnerRing);
 
-    const outerRingGeo = new THREE.TorusGeometry(105, 0.8, 16, 120);
-    const outerRingMat = new THREE.MeshBasicMaterial({
+    // 2. Anneau néon extérieur
+    const outerGeo = new THREE.TorusGeometry(94, 1.2, 16, 140);
+    const outerMat = new THREE.MeshBasicMaterial({
       color: COLOR_DEEP_BLUE,
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.55,
       blending: THREE.AdditiveBlending,
     });
-    plasmaTorusOuterRing = new THREE.Mesh(outerRingGeo, outerRingMat);
-    plasmaGroup.add(plasmaTorusOuterRing);
+    plasmaOuterRing = new THREE.Mesh(outerGeo, outerMat);
+    plasmaGroup.add(plasmaOuterRing);
 
-    // Nuage toroidal de particules de plasma tourbillonnantes
+    // 3. Particules de plasma en flux circulaire
     const geo = new THREE.BufferGeometry();
-    plasmaPosArray = new Float32Array(TORUS_PARTICLE_COUNT * 3);
-    plasmaAngleArray = new Float32Array(TORUS_PARTICLE_COUNT);
-    plasmaRadiusArray = new Float32Array(TORUS_PARTICLE_COUNT);
-    plasmaSpeedArray = new Float32Array(TORUS_PARTICLE_COUNT);
-    plasmaColors = new Float32Array(TORUS_PARTICLE_COUNT * 3);
+    const positions = new Float32Array(PLASMA_PARTICLE_COUNT * 3);
+    const colors = new Float32Array(PLASMA_PARTICLE_COUNT * 3);
 
-    const majorR = 86; // Rayon majeur du tore
-    const minorR = 19; // Rayon du tube
+    plasmaAngles = new Float32Array(PLASMA_PARTICLE_COUNT);
+    plasmaRadii = new Float32Array(PLASMA_PARTICLE_COUNT);
+    plasmaSpeeds = new Float32Array(PLASMA_PARTICLE_COUNT);
+    plasmaZOffsets = new Float32Array(PLASMA_PARTICLE_COUNT);
 
-    for (let i = 0; i < TORUS_PARTICLE_COUNT; i++) {
-      const u = Math.random() * Math.PI * 2;
-      const v = Math.random() * Math.PI * 2;
-      const r = minorR * (0.3 + Math.random() * 0.7);
+    const baseRadius = 84;
 
-      const x = (majorR + r * Math.cos(v)) * Math.cos(u);
-      const y = (majorR + r * Math.cos(v)) * Math.sin(u);
-      const z = r * Math.sin(v) + (Math.random() - 0.5) * 8;
+    for (let i = 0; i < PLASMA_PARTICLE_COUNT; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const rOffset = (Math.random() - 0.5) * 18;
+      const r = baseRadius + rOffset;
+      const z = (Math.random() - 0.5) * 16;
 
       const idx = i * 3;
-      plasmaPosArray[idx] = x;
-      plasmaPosArray[idx + 1] = y;
-      plasmaPosArray[idx + 2] = z;
+      positions[idx] = r * Math.cos(theta);
+      positions[idx + 1] = r * Math.sin(theta);
+      positions[idx + 2] = z;
 
-      plasmaAngleArray[i] = u;
-      plasmaRadiusArray[i] = r;
-      plasmaSpeedArray[i] = 0.8 + Math.random() * 1.5;
+      plasmaAngles[i] = theta;
+      plasmaRadii[i] = r;
+      plasmaSpeeds[i] = 1.0 + Math.random() * 2.2;
+      plasmaZOffsets[i] = z;
 
-      // Dégradé électrique cyan <-> bleu profond avec pointes de blanc
-      const mix = Math.random();
-      const col = mix > 0.85 ? COLOR_WHITE : mix > 0.4 ? COLOR_CYAN : COLOR_ELECTRIC;
-      plasmaColors[idx] = col.r;
-      plasmaColors[idx + 1] = col.g;
-      plasmaColors[idx + 2] = col.b;
+      // Dégradé cyan éclatant, bleu électrique et blanc étincelant
+      const rand = Math.random();
+      const c = rand > 0.8 ? COLOR_WHITE : rand > 0.35 ? COLOR_CYAN : COLOR_ELECTRIC;
+      colors[idx] = c.r;
+      colors[idx + 1] = c.g;
+      colors[idx + 2] = c.b;
     }
 
-    geo.setAttribute('position', new THREE.BufferAttribute(plasmaPosArray, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(plasmaColors, 3));
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const pMat = new THREE.PointsMaterial({
       size: 2.8,
@@ -244,15 +249,19 @@
     plasmaParticles = new THREE.Points(geo, pMat);
     plasmaGroup.add(plasmaParticles);
 
+    // Orientation initiale douce face à l'utilisateur
+    plasmaGroup.rotation.x = rotationTargets.plasma.x;
+    plasmaGroup.rotation.y = rotationTargets.plasma.y;
+
     scene.add(plasmaGroup);
   }
 
-  // --- 3. Cœur Neuronal Quantique (Image 4) ---
-  function createQuantumCore() {
+  // --- MODE 2 : CŒUR QUANTIQUE NEURONAL RAYONNANT (Image 4 TikTok) ---
+  function createRadiantQuantumCore() {
     quantumGroup = new THREE.Group();
 
-    // Sphère centrale blanche ultra-luminescente
-    const coreGeo = new THREE.SphereGeometry(18, 32, 32);
+    // 1. Cœur sphérique incandescent blanc-chaud
+    const coreGeo = new THREE.SphereGeometry(22, 32, 32);
     const coreMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
@@ -262,73 +271,80 @@
     quantumCoreMesh = new THREE.Mesh(coreGeo, coreMat);
     quantumGroup.add(quantumCoreMesh);
 
-    // Halo d'énergie coronale
-    const haloGeo = new THREE.SphereGeometry(30, 32, 32);
+    // 2. Halo coronale cyan
+    const haloGeo = new THREE.SphereGeometry(36, 32, 32);
     const haloMat = new THREE.MeshBasicMaterial({
       color: COLOR_CYAN,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.32,
       blending: THREE.AdditiveBlending,
     });
-    const haloMesh = new THREE.Mesh(haloGeo, haloMat);
-    quantumGroup.add(haloMesh);
+    quantumHaloMesh = new THREE.Mesh(haloGeo, haloMat);
+    quantumGroup.add(quantumHaloMesh);
 
-    // Filaments et orbites d'énergie elliptiques inclinées
-    for (let r = 0; r < 4; r++) {
-      const curveGeo = new THREE.TorusGeometry(60 + r * 22, 0.9, 12, 100);
-      const curveMat = new THREE.MeshBasicMaterial({
-        color: r % 2 === 0 ? COLOR_CYAN : COLOR_MAGENTA,
+    // 3. Filaments gyroscopiques imbriqués à 0°, 45°, 90°, 135°
+    const angles = [
+      { x: 0, y: 0, z: 0, r: 70, c: COLOR_CYAN },
+      { x: Math.PI * 0.25, y: Math.PI * 0.15, z: 0, r: 80, c: COLOR_MAGENTA },
+      { x: Math.PI * 0.5, y: 0, z: Math.PI * 0.25, r: 90, c: COLOR_CYAN },
+      { x: -Math.PI * 0.25, y: Math.PI * 0.3, z: 0, r: 100, c: COLOR_ELECTRIC },
+    ];
+
+    quantumFilamentRings = [];
+    angles.forEach((cfg) => {
+      const rGeo = new THREE.TorusGeometry(cfg.r, 1.1, 16, 120);
+      const rMat = new THREE.MeshBasicMaterial({
+        color: cfg.c,
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.5,
         blending: THREE.AdditiveBlending,
       });
-      const ring = new THREE.Mesh(curveGeo, curveMat);
-      ring.rotation.x = Math.PI * (0.2 + r * 0.18);
-      ring.rotation.y = Math.PI * (0.15 * r);
+      const ring = new THREE.Mesh(rGeo, rMat);
+      ring.rotation.set(cfg.x, cfg.y, cfg.z);
       quantumFilamentRings.push(ring);
       quantumGroup.add(ring);
-    }
+    });
 
-    // Nébuleuse de particules quantiques rayonnantes
+    // 4. Nébuleuse de particules quantiques sphériques
     const geo = new THREE.BufferGeometry();
-    quantumPosArray = new Float32Array(QUANTUM_PARTICLE_COUNT * 3);
-    quantumOrigArray = new Float32Array(QUANTUM_PARTICLE_COUNT * 3);
-    quantumVelArray = new Float32Array(QUANTUM_PARTICLE_COUNT * 3);
-    quantumColors = new Float32Array(QUANTUM_PARTICLE_COUNT * 3);
+    quantumPositions = new Float32Array(QUANTUM_PARTICLE_COUNT * 3);
+    quantumOriginals = new Float32Array(QUANTUM_PARTICLE_COUNT * 3);
+    quantumSpeeds = new Float32Array(QUANTUM_PARTICLE_COUNT);
+    const colors = new Float32Array(QUANTUM_PARTICLE_COUNT * 3);
 
     for (let i = 0; i < QUANTUM_PARTICLE_COUNT; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      const rad = 25 + Math.random() * 95;
+      const u = Math.random();
+      const v = Math.random();
+      const theta = u * 2.0 * Math.PI;
+      const phi = Math.acos(2.0 * v - 1.0);
+      const r = 35 + Math.random() * 85;
 
-      const x = rad * Math.sin(phi) * Math.cos(theta);
-      const y = rad * Math.sin(phi) * Math.sin(theta);
-      const z = rad * Math.cos(phi);
+      const x = r * Math.sin(phi) * Math.cos(theta);
+      const y = r * Math.sin(phi) * Math.sin(theta);
+      const z = r * Math.cos(phi);
 
       const idx = i * 3;
-      quantumPosArray[idx] = x;
-      quantumPosArray[idx + 1] = y;
-      quantumPosArray[idx + 2] = z;
+      quantumPositions[idx] = x;
+      quantumPositions[idx + 1] = y;
+      quantumPositions[idx + 2] = z;
 
-      quantumOrigArray[idx] = x;
-      quantumOrigArray[idx + 1] = y;
-      quantumOrigArray[idx + 2] = z;
+      quantumOriginals[idx] = x;
+      quantumOriginals[idx + 1] = y;
+      quantumOriginals[idx + 2] = z;
 
-      quantumVelArray[idx] = (Math.random() - 0.5) * 0.4;
-      quantumVelArray[idx + 1] = (Math.random() - 0.5) * 0.4;
-      quantumVelArray[idx + 2] = (Math.random() - 0.5) * 0.4;
+      quantumSpeeds[i] = 0.5 + Math.random() * 1.5;
 
-      const c = Math.random() > 0.4 ? COLOR_CYAN : COLOR_MAGENTA;
-      quantumColors[idx] = c.r;
-      quantumColors[idx + 1] = c.g;
-      quantumColors[idx + 2] = c.b;
+      const c = Math.random() > 0.45 ? COLOR_CYAN : COLOR_MAGENTA;
+      colors[idx] = c.r;
+      colors[idx + 1] = c.g;
+      colors[idx + 2] = c.b;
     }
 
-    geo.setAttribute('position', new THREE.BufferAttribute(quantumPosArray, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(quantumColors, 3));
+    geo.setAttribute('position', new THREE.BufferAttribute(quantumPositions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const pMat = new THREE.PointsMaterial({
-      size: 2.4,
+      size: 2.5,
       vertexColors: true,
       transparent: true,
       opacity: 0.85,
@@ -338,66 +354,46 @@
     quantumParticles = new THREE.Points(geo, pMat);
     quantumGroup.add(quantumParticles);
 
+    quantumGroup.rotation.x = rotationTargets.quantum.x;
+    quantumGroup.rotation.y = rotationTargets.quantum.y;
+
     scene.add(quantumGroup);
   }
 
-  // --- 4. Globe Terrestre Réaliste NASA (Image 3) ---
+  // --- MODE 3 : GLOBE 3D RÉALISTE NASA (Image 3 TikTok) ---
   function createRealisticEarthGlobe() {
     globeGroup = new THREE.Group();
 
-    // 1. Texture Satellite NASA Terre
+    // 1. Sphère terrestre avec texture satellite haute résolution
     const earthGeo = new THREE.SphereGeometry(GLOBE_RADIUS, 64, 64);
-    
-    // Chargement de la texture réelle avec repli procédural élégant
-    const earthTex = textureLoader.load(
-      '/static/textures/earth_atmos_2048.jpg',
-      function (tex) {
-        tex.anisotropy = 4;
-        earthMesh.material.map = tex;
-        earthMesh.material.needsUpdate = true;
-      },
-      undefined,
-      function () {
-        // Repli élégant en cas de non disponibilité réseau
-        const fallbackCanvas = createCyberEarthTexture();
-        earthMesh.material.map = new THREE.CanvasTexture(fallbackCanvas);
-        earthMesh.material.needsUpdate = true;
-      }
-    );
+    const earthTex = textureLoader.load('/static/textures/earth_atmos_2048.jpg');
+    earthTex.anisotropy = 4;
 
     const earthMat = new THREE.MeshPhongMaterial({
       map: earthTex,
-      bumpScale: 0.08,
-      specular: new THREE.Color(0x192b45),
-      shininess: 18,
+      bumpScale: 0.06,
+      specular: new THREE.Color(0x1a3355),
+      shininess: 22,
     });
 
     earthMesh = new THREE.Mesh(earthGeo, earthMat);
     globeGroup.add(earthMesh);
 
-    // 2. Couche de Nuages Dynamiques Indépendante
+    // 2. Couche de nuages dynamiques semi-transparente
     const cloudsGeo = new THREE.SphereGeometry(CLOUD_RADIUS, 64, 64);
-    const cloudsTex = textureLoader.load(
-      '/static/textures/earth_clouds_1024.png',
-      function (tex) {
-        cloudsMesh.material.map = tex;
-        cloudsMesh.material.needsUpdate = true;
-      },
-      undefined,
-      function () {}
-    );
+    const cloudsTex = textureLoader.load('/static/textures/earth_clouds_1024.png');
 
     const cloudsMat = new THREE.MeshLambertMaterial({
       map: cloudsTex,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.78,
       blending: THREE.AdditiveBlending,
     });
 
     cloudsMesh = new THREE.Mesh(cloudsGeo, cloudsMat);
     globeGroup.add(cloudsMesh);
 
-    // 3. Halo Atmosphérique Lumineux Cyan
+    // 3. Halo atmosphérique cyan
     const atmosGeo = new THREE.SphereGeometry(ATMOS_RADIUS, 64, 64);
     const atmosMat = new THREE.MeshBasicMaterial({
       color: COLOR_CYAN,
@@ -409,25 +405,25 @@
     atmosMesh = new THREE.Mesh(atmosGeo, atmosMat);
     globeGroup.add(atmosMesh);
 
-    // 4. Anneau Trajectoire Orbitale Incliné Luminescent (Exactement comme Image 3)
-    const ringGeo = new THREE.TorusGeometry(GLOBE_RADIUS * 1.55, 0.8, 16, 140);
+    // 4. Anneau orbital incliné en harmonie avec le globe
+    const ringGeo = new THREE.TorusGeometry(GLOBE_RADIUS * 1.42, 0.75, 16, 140);
     const ringMat = new THREE.MeshBasicMaterial({
       color: COLOR_CYAN,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.65,
       blending: THREE.AdditiveBlending,
     });
     orbitalRingMesh = new THREE.Mesh(ringGeo, ringMat);
-    orbitalRingMesh.rotation.x = Math.PI * 0.38;
+    orbitalRingMesh.rotation.x = Math.PI * 0.32;
     orbitalRingMesh.rotation.y = Math.PI * 0.12;
     globeGroup.add(orbitalRingMesh);
 
-    // 5. Marqueur Radar Vert Géolocalisé (Pointe sur Moctar / Dell Precision M4800)
-    const markerGeo = new THREE.SphereGeometry(2.6, 16, 16);
+    // 5. Radar vert pulsant sur Moctar
+    const markerGeo = new THREE.SphereGeometry(2.4, 16, 16);
     const markerMat = new THREE.MeshBasicMaterial({ color: COLOR_GREEN });
     radarMarker = new THREE.Mesh(markerGeo, markerMat);
 
-    const pulseGeo = new THREE.RingGeometry(3.6, 5.8, 32);
+    const pulseGeo = new THREE.RingGeometry(3.2, 5.0, 32);
     const pulseMat = new THREE.MeshBasicMaterial({
       color: COLOR_GREEN,
       side: THREE.DoubleSide,
@@ -439,240 +435,333 @@
     radarMarker.add(radarPulseRing);
 
     globeGroup.add(radarMarker);
-    updateRadarCoordinates(userCoords.lat, userCoords.lon);
+    setRadarGpsCoordinates(userCoords.lat, userCoords.lon);
+
+    globeGroup.rotation.x = rotationTargets.globe.x;
+    globeGroup.rotation.y = rotationTargets.globe.y;
 
     scene.add(globeGroup);
   }
 
-  // Texture de repli procédurale au cas où le fichier JPEG est en cours de téléchargement
-  function createCyberEarthTexture() {
-    const c = document.createElement('canvas');
-    c.width = 1024;
-    c.height = 512;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#020b18';
-    ctx.fillRect(0, 0, c.width, c.height);
-
-    ctx.fillStyle = '#082846';
-    ctx.beginPath();
-    ctx.ellipse(c.width * 0.52, c.height * 0.55, 80, 120, 0, 0, Math.PI * 2);
-    ctx.ellipse(c.width * 0.28, c.height * 0.45, 90, 110, 0, 0, Math.PI * 2);
-    ctx.ellipse(c.width * 0.75, c.height * 0.40, 120, 90, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = '#00f3ff22';
-    for (let x = 0; x <= c.width; x += 64) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, c.height);
-      ctx.stroke();
-    }
-    return c;
-  }
-
-  // Conversion GPS (Lat, Lon) -> Coordonnées 3D sur la sphère
-  function latLonToVector3(lat, lon, radius) {
+  function setRadarGpsCoordinates(lat, lon) {
+    if (!radarMarker) return;
     const phi = (90 - lat) * (Math.PI / 180);
     const theta = (lon + 180) * (Math.PI / 180);
 
-    const x = -(radius * Math.sin(phi) * Math.cos(theta));
-    const z = radius * Math.sin(phi) * Math.sin(theta);
-    const y = radius * Math.cos(phi);
+    const r = GLOBE_RADIUS + 1.2;
+    const x = -(r * Math.sin(phi) * Math.cos(theta));
+    const z = r * Math.sin(phi) * Math.sin(theta);
+    const y = r * Math.cos(phi);
 
-    return new THREE.Vector3(x, y, z);
-  }
-
-  function updateRadarCoordinates(lat, lon) {
-    if (!radarMarker) return;
-    const pos = latLonToVector3(lat, lon, GLOBE_RADIUS + 1.2);
+    const pos = new THREE.Vector3(x, y, z);
     radarMarker.position.copy(pos);
     radarMarker.lookAt(pos.clone().multiplyScalar(2));
   }
 
-  // --- Gestion du Changement de Vue 3D ---
-  function setView(viewName, locate = false) {
-    const cleanView = (viewName || '').toLowerCase().trim();
-    if (['globe', 'earth', 'terre'].includes(cleanView)) {
+  // --- BASCULEMENT DE VUE & AFFICHAGE ---
+  function applyView(viewName) {
+    const v = (viewName || '').toLowerCase().trim();
+    if (['globe', 'earth', 'terre'].includes(v)) {
       currentView = 'globe';
-    } else if (['quantum', 'core', 'neural'].includes(cleanView)) {
+    } else if (['quantum', 'core', 'neural'].includes(v)) {
       currentView = 'quantum';
     } else {
       currentView = 'plasma';
     }
 
-    applyViewVisibility(currentView);
+    if (globeGroup) globeGroup.visible = currentView === 'globe';
+    if (quantumGroup) quantumGroup.visible = currentView === 'quantum';
+    if (plasmaGroup) plasmaGroup.visible = currentView === 'plasma';
 
-    // Mettre à jour les boutons de vue
-    [btnOrbView, btnPlasmaView, btnQuantumView, btnGlobeView].forEach((btn) => {
-      if (btn) btn.classList.remove('active');
+    // Boutons actifs
+    [btnPlasmaView, btnQuantumView, btnGlobeView].forEach((b) => b && b.classList.remove('active'));
+    if (currentView === 'plasma' && btnPlasmaView) btnPlasmaView.classList.add('active');
+    if (currentView === 'quantum' && btnQuantumView) btnQuantumView.classList.add('active');
+    if (currentView === 'globe' && btnGlobeView) btnGlobeView.classList.add('active');
+
+    targetCameraZ = currentView === 'globe' ? 280 : 290;
+  }
+
+  // --- CONTRÔLES SOURIS, TOUCH & ZOOM ---
+  function setup3DControls() {
+    function onDown(e) {
+      isDragging = true;
+      const x = e.touches ? e.touches[0].clientX : e.clientX;
+      const y = e.touches ? e.touches[0].clientY : e.clientY;
+      previousMousePos = { x, y };
+    }
+
+    function onMove(e) {
+      if (!isDragging) return;
+      const x = e.touches ? e.touches[0].clientX : e.clientX;
+      const y = e.touches ? e.touches[0].clientY : e.clientY;
+
+      const dx = x - previousMousePos.x;
+      const dy = y - previousMousePos.y;
+
+      const target = rotationTargets[currentView];
+      if (target) {
+        target.y += dx * 0.007;
+        target.x += dy * 0.007;
+        target.x = Math.max(-Math.PI * 0.45, Math.min(Math.PI * 0.45, target.x));
+      }
+
+      previousMousePos = { x, y };
+    }
+
+    function onUp() {
+      isDragging = false;
+    }
+
+    canvas.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+
+    canvas.addEventListener('touchstart', onDown, { passive: true });
+    window.addEventListener('touchmove', onMove, { passive: true });
+    window.addEventListener('touchend', onUp);
+
+    // Zoom molette
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      targetCameraZ += e.deltaY * 0.25;
+      targetCameraZ = Math.max(160, Math.min(650, targetCameraZ));
+    }, { passive: false });
+  }
+
+  // --- 2. INTÉGRATION COMPLÈTE DU MOTEUR VOCAL (MoctarVoice) ---
+  function initVoiceEngine() {
+    if (!window.MoctarVoice) {
+      console.warn("MoctarVoice non disponible dans la fenêtre.");
+      return;
+    }
+
+    jarvisVoice = window.MoctarVoice.create({
+      followupMs: 30000,
+      mediaDevices: window.navigator ? window.navigator.mediaDevices : null,
+      MediaRecorder: window.MediaRecorder,
+      AudioContext: window.AudioContext || window.webkitAudioContext,
+      Audio: window.Audio,
+      interactUrl: '/api/voice/interact',
+      onState: handleVoiceStateChange,
+      onInteractResult: handleVoiceInteractResult,
+      language: 'fr-FR',
     });
 
-    if (currentView === 'globe' && btnGlobeView) btnGlobeView.classList.add('active');
-    if (currentView === 'plasma' && (btnPlasmaView || btnOrbView)) {
-      if (btnPlasmaView) btnPlasmaView.classList.add('active');
-      if (btnOrbView) btnOrbView.classList.add('active');
-    }
-    if (currentView === 'quantum' && btnQuantumView) btnQuantumView.classList.add('active');
+    // Mettre à jour l'interface
+    handleVoiceStateChange(jarvisVoice.state);
 
-    // Géolocalisation ciblée
-    if (locate && currentView === 'globe') {
-      triggerGeolocation();
+    // Activer l'écoute automatique au premier clic utilisateur (déverrouillage navigateur)
+    function unlockVoice() {
+      if (jarvisVoice && !jarvisVoice.enabled) {
+        jarvisVoice.enable().catch(() => {});
+      }
+      window.removeEventListener('click', unlockVoice);
+      window.removeEventListener('touchstart', unlockVoice);
     }
+    window.addEventListener('click', unlockVoice);
+    window.addEventListener('touchstart', unlockVoice);
   }
 
-  function applyViewVisibility(view) {
-    if (globeGroup) globeGroup.visible = view === 'globe';
-    if (plasmaGroup) plasmaGroup.visible = view === 'plasma';
-    if (quantumGroup) quantumGroup.visible = view === 'quantum';
+  function handleVoiceStateChange(phase, detail = {}) {
+    voicePhase = phase;
 
-    if (view === 'globe') {
-      cameraTargetZ = 280;
-    } else if (view === 'quantum') {
-      cameraTargetZ = 290;
-    } else {
-      cameraTargetZ = 300;
-    }
-  }
+    const messages = {
+      off: '● VEILLE ACTIVE',
+      starting: '🟢 INITIALISATION...',
+      wake: '🟢 À L\'ÉCOUTE (Dites « Yo Moctar »)',
+      listening: '🎙️ ÉCOUTE EN COURS...',
+      processing: '⚡ ANALYSE...',
+      speaking: '🔊 SYNTHÈSE...',
+      paused: '⏸️ VEILLE',
+      error: '⚠️ ERREUR MICRO',
+      unsupported: '❌ NON SUPPORTÉ',
+    };
 
-  // --- Gestion des États Vocaux ---
-  function setVoiceState(state, userText = null, assistantText = null) {
-    voiceState = state;
     if (voiceStateBadge) {
-      voiceStateBadge.setAttribute('data-state', state);
-      const labels = {
-        idle: '● VEILLE ACTIVE',
-        listening: '🎙️ ÉCOUTE...',
-        thinking: '⚡ ANALYSE...',
-        speaking: '🔊 SYNTHÈSE...',
-      };
-      voiceStateBadge.textContent = labels[state] || '● EN LIGNE';
+      voiceStateBadge.setAttribute('data-state', phase);
+      voiceStateBadge.textContent = messages[phase] || '● EN LIGNE';
     }
 
-    if (userText !== null && userTextEl) {
-      userTextEl.textContent = userText ? `« ${userText} »` : '';
-    }
-    if (assistantText !== null && assistantTextEl) {
-      assistantTextEl.textContent = assistantText || '';
-    }
-
-    // Réactivité visuelle : si réflexion lourde, basculer temporairement sur le cœur quantique
-    if (state === 'thinking' && currentView === 'plasma') {
-      // Énergie accrue
+    if (btnMic) {
+      const isListening = ['starting', 'wake', 'listening'].includes(phase);
+      btnMic.classList.toggle('active', isListening);
+      btnMic.textContent = phase === 'listening' ? '🎙️ ENREGISTREMENT...' : '🎙️ MICRO';
     }
   }
 
-  // --- Géolocalisation GPS ---
-  function triggerGeolocation() {
-    if (gpsCoordsEl) gpsCoordsEl.textContent = 'Acquisition GPS en cours...';
+  function handleVoiceInteractResult(data) {
+    if (!data || data.ignored) return;
 
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          userCoords.lat = pos.coords.latitude;
-          userCoords.lon = pos.coords.longitude;
-          userCoords.label = 'Position Fixée (Navigateur)';
-          updateRadarCoordinates(userCoords.lat, userCoords.lon);
-          if (gpsCoordsEl) {
-            gpsCoordsEl.textContent = `GPS : ${userCoords.lat.toFixed(4)}°N, ${userCoords.lon.toFixed(4)}°E (Précision ±${Math.round(pos.coords.accuracy)}m)`;
-          }
-        },
-        () => {
-          // Repli sur coordonnées configurées
-          updateRadarCoordinates(DEFAULT_COORDS.lat, DEFAULT_COORDS.lon);
-          if (gpsCoordsEl) {
-            gpsCoordsEl.textContent = `GPS : ${DEFAULT_COORDS.lat.toFixed(4)}°N, ${DEFAULT_COORDS.lon.toFixed(4)}°E (${DEFAULT_COORDS.label})`;
-          }
-        },
-        { timeout: 7000 }
-      );
-    } else {
-      updateRadarCoordinates(DEFAULT_COORDS.lat, DEFAULT_COORDS.lon);
-      if (gpsCoordsEl) {
-        gpsCoordsEl.textContent = `GPS : ${DEFAULT_COORDS.lat.toFixed(4)}°N, ${DEFAULT_COORDS.lon.toFixed(4)}°E (${DEFAULT_COORDS.label})`;
+    if (data.user_text && userTextEl) {
+      userTextEl.textContent = `« ${data.user_text} »`;
+    }
+
+    if (data.reply_text && assistantTextEl) {
+      assistantTextEl.textContent = data.reply_text;
+    }
+
+    // Basculement automatique de vue 3D si la commande le demande
+    if (data.action === 'open_app' && data.url === '/hud') {
+      if (data.title && data.title.includes('Globe')) {
+        applyView('globe');
+      } else if (data.title && data.title.includes('Plasma')) {
+        applyView('plasma');
+      } else if (data.title && data.title.includes('Quantique')) {
+        applyView('quantum');
       }
     }
   }
 
-  // --- Interactions Souris, Touch & Zoom ---
-  function setupInteractions() {
-    // Rotation par glissement (Souris & Doigt)
-    function onPointerDown(e) {
-      isDragging = true;
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-      previousMousePos = { x: clientX, y: clientY };
+  // Action Manuelle Micro
+  function toggleMicrophone() {
+    if (!jarvisVoice) {
+      initVoiceEngine();
+    }
+    if (!jarvisVoice) return;
+
+    if (window.isSecureContext === false) {
+      alert("L'accès micro nécessite une connexion HTTPS.");
+      return;
     }
 
-    function onPointerMove(e) {
-      if (!isDragging) return;
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
-      const deltaX = clientX - previousMousePos.x;
-      const deltaY = clientY - previousMousePos.y;
-
-      targetRotation.y += deltaX * 0.007;
-      targetRotation.x += deltaY * 0.007;
-
-      // Limiter le pitch vertical
-      targetRotation.x = Math.max(-Math.PI * 0.45, Math.min(Math.PI * 0.45, targetRotation.x));
-
-      previousMousePos = { x: clientX, y: clientY };
+    if (jarvisVoice.state === 'listening') {
+      jarvisVoice.stopManual();
+    } else {
+      if (!jarvisVoice.enabled) {
+        jarvisVoice.enable().then(() => jarvisVoice.startManual());
+      } else {
+        jarvisVoice.startManual();
+      }
     }
-
-    function onPointerUp() {
-      isDragging = false;
-    }
-
-    canvas.addEventListener('mousedown', onPointerDown);
-    window.addEventListener('mousemove', onPointerMove);
-    window.addEventListener('mouseup', onPointerUp);
-
-    canvas.addEventListener('touchstart', onPointerDown, { passive: true });
-    window.addEventListener('touchmove', onPointerMove, { passive: true });
-    window.addEventListener('touchend', onPointerUp);
-
-    // Zoom à la molette (Wheel Zoom)
-    canvas.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      cameraTargetZ += e.deltaY * 0.25;
-      cameraTargetZ = Math.max(160, Math.min(750, cameraTargetZ));
-    }, { passive: false });
   }
 
-  // --- Écouteurs d'Événements UI ---
-  function setupEventListeners() {
-    if (btnOrbView) btnOrbView.addEventListener('click', () => setView('plasma'));
-    if (btnPlasmaView) btnPlasmaView.addEventListener('click', () => setView('plasma'));
-    if (btnQuantumView) btnQuantumView.addEventListener('click', () => setView('quantum'));
-    if (btnGlobeView) btnGlobeView.addEventListener('click', () => setView('globe'));
-    if (btnLocate) btnLocate.addEventListener('click', () => {
-      setView('globe', true);
+  // Interruption audio immédiate
+  function stopAllSpeech() {
+    if (jarvisVoice) {
+      jarvisVoice.stopManual();
+    }
+    if (window.speechSynthesis && window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+    }
+    const audios = document.querySelectorAll('audio');
+    audios.forEach((a) => {
+      try { a.pause(); a.currentTime = 0; } catch (e) {}
     });
+    handleVoiceStateChange('wake');
+    if (assistantTextEl) {
+      assistantTextEl.textContent = "Interrompu, Moctar.";
+    }
+  }
 
-    if (btnStop) {
-      btnStop.addEventListener('click', () => {
-        if (speechSynth && speechSynth.speaking) {
-          speechSynth.cancel();
+  // Envoi de commande textuelle (Alternative sans micro)
+  async function submitTextCommand(text) {
+    const query = (text || '').trim();
+    if (!query) return;
+
+    if (userTextEl) userTextEl.textContent = `« ${query} »`;
+    if (assistantTextEl) assistantTextEl.textContent = "Traitement en cours...";
+    handleVoiceStateChange('processing');
+
+    try {
+      const res = await fetch('/api/voice/interact', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Voice-Session-Active': 'true',
+        },
+        body: JSON.stringify({ text: query }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        handleVoiceInteractResult(data);
+        handleVoiceStateChange('speaking');
+
+        // Jouer la synthèse audio si reçue
+        if (data.audio_url) {
+          playAudioUrl(data.audio_url);
+        } else if (data.reply_text && window.speechSynthesis) {
+          const utter = new SpeechSynthesisUtterance(data.reply_text);
+          utter.lang = 'fr-FR';
+          utter.onend = () => handleVoiceStateChange('wake');
+          window.speechSynthesis.speak(utter);
         }
-        setVoiceState('idle', null, 'Lecture audio interrompue, Moctar.');
+      } else {
+        handleVoiceStateChange('wake');
+      }
+    } catch (e) {
+      handleVoiceStateChange('wake');
+    }
+  }
+
+  function playAudioUrl(url) {
+    try {
+      const audio = new Audio(url);
+      activeAudioElement = audio;
+      audio.onended = () => {
+        handleVoiceStateChange('wake');
+        activeAudioElement = null;
+      };
+      audio.play().catch(() => {
+        handleVoiceStateChange('wake');
+      });
+    } catch (e) {
+      handleVoiceStateChange('wake');
+    }
+  }
+
+  // --- ACTIONS DES BOUTONS ---
+  function setupUIEventListeners() {
+    if (btnPlasmaView) btnPlasmaView.addEventListener('click', () => applyView('plasma'));
+    if (btnQuantumView) btnQuantumView.addEventListener('click', () => applyView('quantum'));
+    if (btnGlobeView) btnGlobeView.addEventListener('click', () => applyView('globe'));
+
+    if (btnLocate) {
+      btnLocate.addEventListener('click', () => {
+        applyView('globe');
+        // Animation fluide de rotation vers la position de Rabat
+        const phi = (90 - userCoords.lat) * (Math.PI / 180);
+        const theta = (userCoords.lon + 180) * (Math.PI / 180);
+        rotationTargets.globe.x = 0.25;
+        rotationTargets.globe.y = -(theta - Math.PI / 2);
+
+        if (gpsCoordsEl) {
+          gpsCoordsEl.textContent = `GPS : ${userCoords.lat.toFixed(4)}°N, ${userCoords.lon.toFixed(4)}°E (Position Moctar Fixée)`;
+        }
+        if (assistantTextEl) {
+          assistantTextEl.textContent = "Position géographique verrouillée sur le Dell Precision M4800, Moctar.";
+        }
       });
     }
 
     if (btnMic) {
-      btnMic.addEventListener('click', () => {
-        if (voiceState === 'listening') {
-          setVoiceState('idle');
-        } else {
-          setVoiceState('listening', 'Écoute active en cours...', 'Parlez, Moctar...');
-        }
+      btnMic.addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleMicrophone();
       });
     }
 
-    window.addEventListener('resize', onWindowResize);
+    if (btnStop) {
+      btnStop.addEventListener('click', (e) => {
+        e.preventDefault();
+        stopAllSpeech();
+      });
+    }
+
+    if (cmdForm && cmdInput) {
+      cmdForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const val = cmdInput.value;
+        cmdInput.value = '';
+        submitTextCommand(val);
+      });
+    }
+
+    window.addEventListener('resize', onResize);
   }
 
-  function onWindowResize() {
+  function onResize() {
     if (!container || !renderer || !camera) return;
     const w = container.clientWidth || window.innerWidth;
     const h = container.clientHeight || window.innerHeight;
@@ -682,30 +771,31 @@
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   }
 
-  // --- Horloge Numérique en Direct ---
-  function updateClock() {
-    const now = new Date();
-    const hh = String(now.getHours()).padStart(2, '0');
-    const mm = String(now.getMinutes()).padStart(2, '0');
-    const ss = String(now.getSeconds()).padStart(2, '0');
-    if (clockTimeEl) clockTimeEl.textContent = `${hh}:${mm}:${ss}`;
+  // --- HORLOGE NUMÉRIQUE CYBERNÉTIQUE ---
+  function startClock() {
+    function tick() {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const ss = String(now.getSeconds()).padStart(2, '0');
+      if (clockTimeEl) clockTimeEl.textContent = `${hh}:${mm}:${ss}`;
 
-    if (clockDateEl) {
-      const options = { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' };
-      clockDateEl.textContent = now.toLocaleDateString('fr-FR', options).toUpperCase();
+      if (clockDateEl) {
+        const opts = { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' };
+        clockDateEl.textContent = now.toLocaleDateString('fr-FR', opts).toUpperCase();
+      }
     }
+    setInterval(tick, 1000);
+    tick();
   }
-  setInterval(updateClock, 1000);
-  updateClock();
 
-  // --- Synchronisation de l'État & Télémétrie Matérielle ---
-  function setupStateSync() {
-    async function fetchHudMetrics() {
+  // --- SYNCHRONISATION TÉLÉMÉTRIE MATÉRIELLE EN DIRECT ---
+  function startTelemetrySync() {
+    async function sync() {
       try {
         const res = await fetch('/api/hud/state');
         if (res.ok) {
           const data = await res.json();
-          // 1. Télémétrie CPU & RAM réelles
           if (cpuValEl && data.cpu_percent !== undefined) {
             cpuValEl.textContent = `${data.cpu_percent}%`;
           }
@@ -716,166 +806,132 @@
             hostValEl.textContent = data.hostname;
           }
 
-          // 2. Vue demandée
+          // Bascule de vue à distance
           if (data.view && data.view !== currentView) {
-            setView(data.view, Boolean(data.locate));
-          } else if (data.locate && currentView === 'globe') {
-            triggerGeolocation();
-          }
-
-          // 3. Statut vocal
-          if (data.status && data.status !== voiceState) {
-            setVoiceState(data.status, data.user_transcript, data.assistant_reply);
+            applyView(data.view);
           }
         }
-      } catch (err) {}
+      } catch (e) {}
     }
-
-    // Polling toutes les 1 200 ms pour assurer des métriques toujours fraîches
-    setInterval(fetchHudMetrics, 1200);
-    fetchHudMetrics();
-
-    // Connexion SSE en continu pour les réactions à 0 ms
-    try {
-      if (window.EventSource) {
-        sseSource = new EventSource('/stream');
-        sseSource.onmessage = function (event) {
-          try {
-            const msg = JSON.parse(event.data);
-            if (msg.hud_view && msg.hud_view !== currentView) {
-              setView(msg.hud_view, Boolean(msg.hud_locate));
-            }
-            if (msg.voice_state) {
-              setVoiceState(msg.voice_state, msg.user_text, msg.reply_text);
-            }
-          } catch (e) {}
-        };
-      }
-    } catch (e) {}
+    setInterval(sync, 1400);
+    sync();
   }
 
-  // --- Boucle d'Animation & Moteur Cinématique ---
+  // --- BOUCLE DE RENDU CINÉMATIQUE 60 FPS ---
   function animate() {
     requestAnimationFrame(animate);
 
     const delta = clock.getDelta();
-    const elapsedTime = clock.getElapsedTime();
+    const elapsed = clock.getElapsedTime();
 
     // 1. Zoom caméra doux (Lerp)
-    currentCameraZ += (cameraTargetZ - currentCameraZ) * 0.08;
+    currentCameraZ += (targetCameraZ - currentCameraZ) * 0.08;
     camera.position.z = currentCameraZ;
 
-    // 2. Rotation douce des groupes (Lerp)
-    const currentGroup = currentView === 'globe' ? globeGroup : currentView === 'quantum' ? quantumGroup : plasmaGroup;
-    if (currentGroup) {
-      currentGroup.rotation.y += (targetRotation.y - currentGroup.rotation.y) * 0.08;
-      currentGroup.rotation.x += (targetRotation.x - currentGroup.rotation.x) * 0.08;
+    // 2. Rotation douce des groupes
+    const activeGrp = currentView === 'globe' ? globeGroup : currentView === 'quantum' ? quantumGroup : plasmaGroup;
+    const tgt = rotationTargets[currentView];
 
-      // Dérive continue naturelle si l'utilisateur ne manipule pas
+    if (activeGrp && tgt) {
+      activeGrp.rotation.y += (tgt.y - activeGrp.rotation.y) * 0.08;
+      activeGrp.rotation.x += (tgt.x - activeGrp.rotation.x) * 0.08;
+
+      // Dérive naturelle si non manipulé
       if (!isDragging) {
-        targetRotation.y += delta * 0.12;
+        if (currentView === 'globe') {
+          tgt.y += delta * 0.1; // Terre tourne
+        } else {
+          // Balancement subtil et stable pour Plasma et Quantum (reste centré !)
+          tgt.y = Math.sin(elapsed * 0.4) * 0.08;
+        }
       }
     }
 
-    // Rotation du champ d'étoiles
     if (starField) {
-      starField.rotation.y += delta * 0.015;
+      starField.rotation.y += delta * 0.012;
     }
 
-    // --- ANIMATION MODE 1 : GLOBE 3D ---
-    if (currentView === 'globe') {
-      if (cloudsMesh) {
-        // Défilement atmosphérique indépendant des nuages
-        cloudsMesh.rotation.y += delta * 0.04;
-      }
-      if (orbitalRingMesh) {
-        orbitalRingMesh.rotation.z += delta * 0.2;
-      }
-      if (radarPulseRing) {
-        // Onde pulsante du radar
-        const pulseScale = 1.0 + ((elapsedTime * 2.5) % 2.5);
-        radarPulseRing.scale.set(pulseScale, pulseScale, pulseScale);
-        radarPulseRing.material.opacity = Math.max(0, 1.0 - (pulseScale - 1.0) / 2.5);
-      }
-    }
-
-    // --- ANIMATION MODE 2 : RÉACTEUR PLASMA ARC ---
+    // --- ANIMATION MODE 1 : PLASMA ARC REACTOR (Image 5) ---
     if (currentView === 'plasma' && plasmaParticles) {
       const positions = plasmaParticles.geometry.attributes.position.array;
-      const speedMult = voiceState === 'speaking' ? 2.8 : voiceState === 'thinking' ? 2.0 : 1.0;
+      const speedMult = voicePhase === 'speaking' ? 2.6 : voicePhase === 'listening' ? 1.8 : 1.0;
 
-      for (let i = 0; i < TORUS_PARTICLE_COUNT; i++) {
-        plasmaAngleArray[i] += delta * plasmaSpeedArray[i] * speedMult;
-        const u = plasmaAngleArray[i];
-        const r = plasmaRadiusArray[i] + Math.sin(elapsedTime * 4 + i) * 1.5;
-        const v = u * 4.0; // Spirale le long du tore
-
-        const majorR = 86;
-        const x = (majorR + r * Math.cos(v)) * Math.cos(u);
-        const y = (majorR + r * Math.cos(v)) * Math.sin(u);
-        const z = r * Math.sin(v);
+      for (let i = 0; i < PLASMA_PARTICLE_COUNT; i++) {
+        plasmaAngles[i] += delta * plasmaSpeeds[i] * speedMult;
+        const u = plasmaAngles[i];
+        const r = plasmaRadii[i] + Math.sin(elapsed * 5 + i) * 1.8;
 
         const idx = i * 3;
-        positions[idx] = x;
-        positions[idx + 1] = y;
-        positions[idx + 2] = z;
+        positions[idx] = r * Math.cos(u);
+        positions[idx + 1] = r * Math.sin(u);
+        positions[idx + 2] = plasmaZOffsets[i] + Math.sin(u * 3 + elapsed) * 3;
       }
       plasmaParticles.geometry.attributes.position.needsUpdate = true;
 
-      if (plasmaTorusInnerRing) {
-        const pScale = 1.0 + Math.sin(elapsedTime * 3) * 0.02;
-        plasmaTorusInnerRing.scale.set(pScale, pScale, pScale);
+      if (plasmaInnerRing) {
+        const pulse = 1.0 + Math.sin(elapsed * 4) * 0.025;
+        plasmaInnerRing.scale.set(pulse, pulse, pulse);
       }
-      if (plasmaTorusOuterRing) {
-        plasmaTorusOuterRing.rotation.z -= delta * 0.4;
+      if (plasmaOuterRing) {
+        plasmaOuterRing.rotation.z -= delta * 0.5;
       }
     }
 
-    // --- ANIMATION MODE 3 : CŒUR QUANTIQUE NEURONAL ---
+    // --- ANIMATION MODE 2 : QUANTUM CORE (Image 4) ---
     if (currentView === 'quantum' && quantumParticles) {
       const positions = quantumParticles.geometry.attributes.position.array;
-      const pulse = 1.0 + Math.sin(elapsedTime * 5) * 0.08;
+      const corePulse = 1.0 + Math.sin(elapsed * 6) * 0.08;
 
-      if (quantumCoreMesh) {
-        quantumCoreMesh.scale.set(pulse, pulse, pulse);
-      }
+      if (quantumCoreMesh) quantumCoreMesh.scale.set(corePulse, corePulse, corePulse);
+      if (quantumHaloMesh) quantumHaloMesh.scale.set(corePulse * 1.05, corePulse * 1.05, corePulse * 1.05);
 
       quantumFilamentRings.forEach((ring, idx) => {
-        ring.rotation.z += delta * (0.3 + idx * 0.15);
+        ring.rotation.z += delta * (0.35 + idx * 0.2);
       });
 
       for (let i = 0; i < QUANTUM_PARTICLE_COUNT; i++) {
         const idx = i * 3;
-        positions[idx] += quantumVelArray[idx];
-        positions[idx + 1] += quantumVelArray[idx + 1];
-        positions[idx + 2] += quantumVelArray[idx + 2];
+        const ox = quantumOriginals[idx];
+        const oy = quantumOriginals[idx + 1];
+        const oz = quantumOriginals[idx + 2];
 
-        // Rétablir vers l'orbite d'origine
-        const dist = Math.sqrt(
-          positions[idx] ** 2 + positions[idx + 1] ** 2 + positions[idx + 2] ** 2
-        );
-        if (dist > 130 || dist < 20) {
-          positions[idx] = quantumOrigArray[idx];
-          positions[idx + 1] = quantumOrigArray[idx + 1];
-          positions[idx + 2] = quantumOrigArray[idx + 2];
-        }
+        // Respiration ondulatoire vers l'extérieur
+        const breath = 1.0 + Math.sin(elapsed * 3 + i) * 0.12;
+        positions[idx] = ox * breath;
+        positions[idx + 1] = oy * breath;
+        positions[idx + 2] = oz * breath;
       }
       quantumParticles.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // --- ANIMATION MODE 3 : GLOBE 3D (Image 3) ---
+    if (currentView === 'globe') {
+      if (cloudsMesh) cloudsMesh.rotation.y += delta * 0.035;
+      if (orbitalRingMesh) orbitalRingMesh.rotation.z += delta * 0.18;
+      if (radarPulseRing) {
+        const pScale = 1.0 + ((elapsed * 2.8) % 2.5);
+        radarPulseRing.scale.set(pScale, pScale, pScale);
+        radarPulseRing.material.opacity = Math.max(0, 1.0 - (pScale - 1.0) / 2.5);
+      }
     }
 
     renderer.render(scene, camera);
   }
 
-  // Lancement dès que le DOM est disponible
+  // --- INITIALISATION GLOBALE AU CHARGEMENT ---
   window.addEventListener('DOMContentLoaded', () => {
     initThree();
-    setupStateSync();
+    initVoiceEngine();
+    setupUIEventListeners();
+    startClock();
+    startTelemetrySync();
   });
 
-  // Interface globale exposée
+  // Interface externe globale
   window.MocHUD = {
-    setView,
-    setVoiceState,
-    triggerGeolocation,
+    applyView,
+    toggleMicrophone,
+    stopAllSpeech,
+    submitTextCommand,
   };
 })();
