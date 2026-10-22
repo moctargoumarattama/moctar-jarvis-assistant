@@ -104,6 +104,33 @@ class AssistantMemoryTests(unittest.TestCase):
         if window:
             self.assertNotEqual("tool", window[0]["role"])
 
+    def test_anti_doublon_add_message(self):
+        """Vérifie que l'enregistrement consécutif identique (double mémoire) est neutralisé."""
+        session_id = "test_dedup_session"
+        # Ajout du même message utilisateur 2 fois de suite
+        self.memory.add_message(session_id, "user", "Mets la musique.")
+        self.memory.add_message(session_id, "user", "Mets la musique.")
+
+        # Ajout de la réponse assistant 2 fois de suite
+        self.memory.add_message(session_id, "assistant", "Musique lancée, Moctar.")
+        self.memory.add_message(session_id, "assistant", "Musique lancée, Moctar.")
+
+        window = self.memory.get_context_window(session_id, max_turns=10)
+        self.assertEqual(2, len(window))
+        self.assertEqual("user", window[0]["role"])
+        self.assertEqual("Mets la musique.", window[0]["content"])
+        self.assertEqual("assistant", window[1]["role"])
+        self.assertEqual("Musique lancée, Moctar.", window[1]["content"])
+
+    def test_get_last_assistant_message(self):
+        """Vérifie la récupération précise du dernier propos de l'assistant pour la répétition."""
+        session_id = "test_repeat_session"
+        self.assertIsNone(self.memory.get_last_assistant_message(session_id))
+        self.memory.add_message(session_id, "user", "Quelle heure est-il ?")
+        self.memory.add_message(session_id, "assistant", "Il est 14 heures 20, Moctar.")
+        last_msg = self.memory.get_last_assistant_message(session_id)
+        self.assertEqual("Il est 14 heures 20, Moctar.", last_msg)
+
     def test_backward_compatibility_classes(self):
         session_mem = SessionMemory()
         session_mem.add("user", "Bonjour")

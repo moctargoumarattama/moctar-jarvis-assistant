@@ -553,6 +553,20 @@ def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
         except Exception:
             return "Nous sommes en veille opérationnelle sur l'infrastructure Dell Precision M4800, Moctar."
 
+    # 7. Demande de répétition ("répète", "tu as dit quoi", "qu'est-ce que tu as dit", "j'ai pas entendu")
+    if re.search(r"\b(?:r[ée]p[èe]te(?:\s+(?:ce\s+que\s+tu\s+viens\s+de\s+dire|ce\s+que\s+tu\s+as\s+dit|s['’]il\s+te\s+pla[îi]t|un\s+peu))?|qu['’]est[- ]ce\s+que\s+tu\s+as\s+dit|tu\s+as\s+dit\s+quoi|qu['’]as[- ]tu\s+dit|peux[- ]tu\s+r[ée]p[ée]ter|tu\s+disais|j['’]?ai\s+pas\s+(?:bien\s+)?entendu)\b", normalized):
+        last_phrase = None
+        if memory and hasattr(memory, "get_last_assistant_message"):
+            try:
+                last_phrase = memory.get_last_assistant_message()
+            except Exception:
+                pass
+        if last_phrase:
+            if not re.search(r"\bmoctar\b", last_phrase, re.IGNORECASE):
+                last_phrase = f"{last_phrase.rstrip('.')} Moctar."
+            return f"Je disais : {last_phrase}"
+        return "Je n'avais encore rien dit de particulier, Moctar."
+
     return None
 
 
@@ -1574,6 +1588,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             )
 
+        # C) Phrase inintelligible ou non-sens (bruit de fond, hallucination Whisper, fragment déformé)
+        # Demander poliment de répéter tout en maintenant la session collaborative active.
+        if (session_active or header_session or header_barge_in) and attention.get("is_incomprehensible"):
+            if VOICE_SESSION_DURATION_SECONDS > 0:
+                runtime.voice_session_until = time.monotonic() + max(VOICE_SESSION_DURATION_SECONDS, 30.0)
+            reply_text = "Pardon Moctar, je n'ai pas bien compris votre phrase. Pouvez-vous répéter ?"
+            LOGGER.info("⚡ [VOICE INCOMPREHENSIBLE]: Moctar a prononcé une phrase inintelligible ('%s'). Demande de répétition.", repaired_transcript)
+            audio_url: str | None = None
+            audio_chunks: list[str] = []
+            try:
+                audio_url, audio_chunks = await generate_cached_tts_chunks(reply_text, DEFAULT_TTS_VOICE)
+            except Exception:
+                pass
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "ignored": False,
+                    "user_text": repaired_transcript,
+                    "raw_transcript": transcript,
+                    "reply_text": reply_text,
+                    "audio_url": audio_url,
+                    "audio_chunks": audio_chunks,
+                    "first_chunk_audio_url": audio_chunks[0] if audio_chunks else audio_url,
+                    "session_active": True,
+                    "wake_word_detected": False,
+                    "action": None,
+                    "url": None,
+                    "title": None,
+                    "tools_used": [],
+                    "thought_chain": ["Phrase inintelligible ou non-sens : demande polie de répétition (0ms)"],
+                    "fast_path": True,
+                }
+            )
+
         accepted, command_text, wake_detected = extract_voice_interact_command(
             repaired_transcript,
             session_active=session_active,
@@ -1661,7 +1709,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "thought_chain": [f"Action locale autonome exécutée ({cat}) (0ms)"],
                     "fast_path": True,
                 }
-                if runtime.jarvis and getattr(runtime.jarvis, "memory", None):
+                if runtime.jarvis and getattr(runtime.jarvis, "memory", None) and not agent_result.get("memory_persisted"):
                     try:
                         runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
                         runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
@@ -1706,7 +1754,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     reply_text = f"{reply_text.rstrip('.')} Moctar."
                 agent_result["reply"] = reply_text
 
-                if runtime.jarvis and getattr(runtime.jarvis, "memory", None):
+                if runtime.jarvis and getattr(runtime.jarvis, "memory", None) and not agent_result.get("memory_persisted"):
                     try:
                         runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
                         runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)

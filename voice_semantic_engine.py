@@ -333,6 +333,8 @@ VOICE_FAST_SYSTEM_PROMPT = (
     "Ton style allie la précision d'un centre de commandement futuriste (NOC) à la fluidité d'un associé technique d'élite. "
     "Tes réponses orales sont ultra-réactives, posées, analytiques et concises (1 à 3 phrases maximum). "
     "Pas de jargon théâtral de bande dessinée, mais une prestance technologique moderne, directe et chirurgicale. "
+    "RÈGLE D'INTELLIGIBILITÉ : Si l'énoncé de Moctar est incompréhensible, inintelligible, déformé par le bruit ou n'a aucun sens, "
+    "ne devine pas et n'appelle aucun outil ; demande poliment de répéter : 'Pardon Moctar, je n'ai pas bien compris votre phrase. Pouvez-vous répéter ?'. "
     "Termine toujours tes interventions vocales en t'adressant à lui par 'Moctar.'"
 )
 
@@ -346,6 +348,11 @@ VOICE_SEMANTIC_SYSTEM_PROMPT = (
     "- Quand une action technique ou système est accomplie, valide son exécution et propose immédiatement l'étape logique suivante.\n"
     "- Quand une information (météo, git, métriques système) est demandée, donne l'état net puis une remarque opérationnelle contextuelle.\n"
     "- Fais preuve de bon sens d'ingénieur : privilégie l'action concrète et le pragmatisme.\n\n"
+    "Directives d'intelligibilité et de clarification (Non-sens & Bruit ambiant) :\n"
+    "- Si la phrase de Moctar est inintelligible, incomplète, incohérente, déformée par le bruit ambiant ou n'a aucun sens logique (ex: 'Sur l'autre toi j'ai chiqué pour toi', 'je sais qui pour toi', bruits de fond transcrits par erreur) :\n"
+    "  1. NE DEVINE PAS et n'invente rien au hasard.\n"
+    "  2. N'APPELLE AUCUN OUTIL (ne touche ni à open_app, ni à control_music, ni à get_active_task, ni à optimize_system).\n"
+    "  3. Demande poliment et brièvement de répéter ou de clarifier : 'Pardon Moctar, je n'ai pas bien compris votre phrase. Pouvez-vous répéter ?' en terminant par 'Moctar.'.\n\n"
     "Directives de sélection des outils natifs (Function Calling) :\n"
     "- Si Moctar demande d'ouvrir une application, de travailler, de coder, de préparer son bureau ou son espace de travail "
     "(ex: 'prépare-moi de quoi bosser', 'ouvre le truc pour coder', 'mets-toi au mode bureau', 'ouvre vs code') -> appelle 'open_app' avec target='vscode'.\n"
@@ -408,6 +415,24 @@ def execute_voice_semantic_turn(
     if repairs:
         LOGGER.info("⚡ [VOICE PHONETIC REPAIR] (%dms): '%s' -> '%s' (regles: %s)",
                     0, command_text, clean_text, [r["rule"] for r in repairs])
+
+    import dynamic_attention_engine
+    if dynamic_attention_engine.is_incomprehensible_or_nonsensical(clean_text):
+        ask_repeat_msg = "Pardon Moctar, je n'ai pas bien compris votre phrase. Pouvez-vous répéter ?"
+        LOGGER.info("⚡ [VOICE GIBBERISH DETECTED (0ms)]: '%s' -> demande de répétition", clean_text)
+        return {
+            "status": "success",
+            "reply": ask_repeat_msg,
+            "action": None,
+            "url": None,
+            "title": None,
+            "tools_used": [],
+            "thought_chain": ["Phrase inintelligible ou non-sens : demande polie de répétition (0ms)"],
+            "fast_path": True,
+            "semantic_tool_calling": False,
+            "ask_repeat": True,
+            "memory_persisted": False,
+        }
 
     sess_key = session_id or getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
 
@@ -487,7 +512,7 @@ def execute_voice_semantic_turn(
     chat_messages: list[dict[str, Any]] = []
     if runtime and getattr(runtime, "jarvis", None) and getattr(runtime.jarvis, "memory", None):
         try:
-            raw_history = runtime.jarvis.memory.get_context_window(sess_key, max_turns=6)
+            raw_history = runtime.jarvis.memory.get_context_window(sess_key, max_turns=12)
             if raw_history and isinstance(raw_history, list):
                 for m in raw_history:
                     role = m.get("role")
@@ -732,6 +757,7 @@ def execute_voice_semantic_turn(
             "thought_chain": [f"Action sémantique résolue par LLM Tool Calling ({tools_used[0]['tool'] if tools_used else 'action'})"],
             "fast_path": True,
             "semantic_tool_calling": True,
+            "memory_persisted": True,
         }
 
     # 4. Traitement conversationnel si le LLM a répondu directement sans outil avec succès
@@ -759,6 +785,7 @@ def execute_voice_semantic_turn(
             "thought_chain": ["Réponse conversationnelle sémantique Gemini (< 400ms)"],
             "fast_path": True,
             "semantic_tool_calling": False,
+            "memory_persisted": True,
         }
 
     # 5. Repli déterministe sur autonomous_library si le LLM n'est pas disponible (offline / tests)

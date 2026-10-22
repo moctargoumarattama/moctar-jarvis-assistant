@@ -36,6 +36,41 @@ _THINKING_SOLILOQUY_PATTERNS = [
     re.compile(r"\b(?:non\s+c['’]est\s+pas\s+[cç]a|pas\s+[cç]a)\b", re.I),
 ]
 
+# 1b. Motifs de phrases inintelligibles, déformées par le bruit ou non-sens (Nonsensical / Garbled Speech)
+_NONSENSICAL_PATTERNS = [
+    # Hallucinations YouTube / Whisper connues
+    re.compile(r"\b(?:merci\s+d['’]avoir\s+regard[ée]\s+(?:cette\s+)?vid[ée]o|sous[- ]titres?\s+(?:par|r[ée]alis[ée]s?|faits?)|abonnez[- ]vous|fin\s+de\s+la\s+vid[ée]o)\b", re.I),
+    # Déformations phonétiques et non-sens observés en conditions réelles
+    re.compile(r"\b(?:chiqu[ée]|chik[ée]|j['’]?ai\s+chiqu[ée])\b", re.I),
+    re.compile(r"\b(?:sur\s+l['’]autre\s+toi|je\s+sais\s+qui\s+pour\s+toi|qui\s+pour\s+toi)\b", re.I),
+    re.compile(r"^(?:du\s+mois|du\s+coup\s+que|et\s+que\s+de|sur\s+l['’]autre),?$", re.I),
+]
+
+_ISOLATED_PREPOSITION_TOKENS = {
+    "du", "de", "des", "d", "le", "la", "les", "l", "un", "une",
+    "et", "ou", "ni", "car", "sur", "sous", "par", "pour", "vers",
+    "avec", "sans", "dans", "en", "mois",
+}
+
+
+def is_incomprehensible_or_nonsensical(text: str) -> bool:
+    """Détecte si un énoncé est inintelligible, incohérent, déformé par l'acoustique ou une hallucination Whisper."""
+    clean = (text or "").strip()
+    if not clean:
+        return False
+    # Ponctuation pure ou points de suspension isolés (hallucination de silence Whisper)
+    stripped = clean.strip(" ,.:;!?-'\u2019…")
+    if not stripped:
+        return True
+    norm = clean.lower().strip(" ,.:;!?-'\u2019")
+    for p in _NONSENSICAL_PATTERNS:
+        if p.search(norm):
+            return True
+    tokens = [t.strip(" ,.:;!?-'\u2019") for t in norm.split() if t.strip(" ,.:;!?-'\u2019")]
+    if 1 <= len(tokens) <= 2 and all(t in _ISOLATED_PREPOSITION_TOKENS for t in tokens):
+        return True
+    return False
+
 # 2. Marqueurs d'interpellation explicite ou verbes opérationnels à l'impératif (Directed Speech)
 _DIRECTED_IMPERATIVES = (
     "ouvre", "ouvrir", "ferme", "fermer", "quitte", "quitter", "lance", "lancer",
@@ -171,6 +206,18 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
         r"\b(?:tu\s+es\s+l[aà]|t['’]es\s+l[aà]|es[- ]tu\s+l[aà]|dis[- ]moi|eh\s+viens\s+voir|mon\s+pote)\b",
         norm,
     ))
+
+    # 3b. Détection de phrases inintelligibles, non-sens acoustique ou hallucinations Whisper
+    if (is_session_active or has_explicit_wake) and is_incomprehensible_or_nonsensical(clean):
+        return {
+            "intent": "incomprehensible",
+            "is_directed": True,
+            "is_thinking_out_loud": False,
+            "is_incomplete": False,
+            "is_incomprehensible": True,
+            "should_disengage": False,
+            "reason": "incomprehensible_or_nonsensical",
+        }
 
     # 3. VAD Sémantique : Détection des phrases inachevées (Turn-Taking Prédictif)
     # Ne JAMAIS couper Moctar s'il est en train de formuler sa pensée ou sa commande.

@@ -461,6 +461,65 @@ class DynamicVoiceExperienceTests(unittest.TestCase):
             self.assertTrue(att["is_directed"], f"Échec directed pour '{q}'")
             self.assertEqual(att["intent"], "directed_speech")
 
+    def test_incomprehensible_and_nonsensical_speech_detection(self) -> None:
+        """Vérifie la détection chirurgicale des phrases inintelligibles ou déformées par le bruit."""
+        for garbled in (
+            "Sur l'autre toi, j'ai chiqué pour toi.",
+            "Je sais qui pour toi.",
+            "Du mois,",
+            "Merci d'avoir regardé cette vidéo !",
+            "...",
+            "du mois",
+        ):
+            self.assertTrue(
+                dynamic_attention_engine.is_incomprehensible_or_nonsensical(garbled),
+                f"Échec de détection non-sens pour : '{garbled}'",
+            )
+
+        # Les vraies commandes ne doivent JAMAIS être considérées comme du non-sens
+        for valid in ("Mets la musique", "Ouvre VS Code", "Quelle heure est-il ?", "Quel temps fait-il à Niamey ?"):
+            self.assertFalse(
+                dynamic_attention_engine.is_incomprehensible_or_nonsensical(valid),
+                f"Faux positif non-sens pour : '{valid}'",
+            )
+
+        # En session active, la phrase inintelligible renvoie l'intention 'incomprehensible'
+        att = dynamic_attention_engine.classify_utterance_attention("Sur l'autre toi, j'ai chiqué pour toi.", is_session_active=True)
+        self.assertEqual(att["intent"], "incomprehensible")
+        self.assertTrue(att.get("is_incomprehensible"))
+
+    def test_handle_instant_local_command_repeat(self) -> None:
+        """Vérifie que la demande de répétition restitue fidèlement le dernier propos de l'assistant."""
+        class MockMemory:
+            def get_last_assistant_message(self, session_id=None):
+                return "Le système est à 45 degrés Celsius, Moctar."
+
+        mock_mem = MockMemory()
+        for phrase in ("répète", "repete ce que tu viens de dire", "tu as dit quoi ?", "qu'est-ce que tu as dit ?", "peux-tu répéter ?", "j'ai pas entendu"):
+            res = main.handle_instant_local_command(phrase, memory=mock_mem)
+            self.assertIsNotNone(res, f"Échec répétition pour '{phrase}'")
+            self.assertIn("Le système est à 45 degrés Celsius, Moctar.", res)
+            self.assertTrue(res.startswith("Je disais :"))
+
+    def test_api_voice_interact_incomprehensible_asks_repeat(self) -> None:
+        """Vérifie que /api/voice/interact demande de répéter et maintient la session active sur phrase inintelligible."""
+        wav_bytes = encode_pcm16_wav(struct.pack("<hhhh", 1000, -1000, 1000, -1000))
+        fake_mp3 = b"ID3-AUDIO-MP3"
+        with patch("main.voice_transcribe.transcribe_audio", return_value="Sur l'autre toi, j'ai chiqué pour toi."), patch(
+            "main.synthesize_edge_tts", new=AsyncMock(return_value=fake_mp3)
+        ):
+            resp = self.client.post(
+                "/api/voice/interact",
+                content=wav_bytes,
+                headers={"Content-Type": "audio/wav", "X-Voice-Session-Active": "true"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertTrue(data["ok"])
+            self.assertFalse(data["ignored"])
+            self.assertEqual("Pardon Moctar, je n'ai pas bien compris votre phrase. Pouvez-vous répéter ?", data["reply_text"])
+            self.assertTrue(data["session_active"])
+
     def test_continuous_session_active_default_45_seconds(self) -> None:
         """Vérifie que la session d'écoute reste active 45s via followupMs et enchaîne les répliques sans wake-word."""
         index_html = Path("static/index.html").read_text(encoding="utf-8")

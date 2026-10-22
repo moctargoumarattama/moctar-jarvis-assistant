@@ -489,7 +489,7 @@ class AssistantMemory:
         tool_calls: Optional[List[Dict[str, Any]]] = None,
         tool_call_id: Optional[str] = None,
     ) -> None:
-        """Enregistre un message dans l'historique de la session.
+        """Enregistre un message dans l'historique de la session avec protection anti-doublon.
 
         Args:
             session_id: Identifiant de la session de conversation.
@@ -500,10 +500,47 @@ class AssistantMemory:
         """
         now_iso = datetime.now().isoformat(timespec="seconds")
         tool_calls_str = json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None
+        clean_content = (content or "").strip()
 
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+
+                # Anti-doublon (Idempotence) : Évite d'enregistrer deux fois le même tour dans la session
+                cursor.execute(
+                    """
+                    SELECT role, content, tool_calls, timestamp 
+                    FROM conversation_history 
+                    WHERE session_id = ? 
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (session_id,)
+                )
+                last_row = cursor.fetchone()
+                if last_row:
+                    last_role, last_content, last_tc, last_ts = last_row
+                    if (
+                        last_role == role
+                        and (last_content or "").strip() == clean_content
+                        and (last_tc or None) == tool_calls_str
+                    ):
+                        try:
+                            t_now = datetime.fromisoformat(now_iso)
+                            t_last = datetime.fromisoformat(last_ts)
+                            diff_sec = abs((t_now - t_last).total_seconds())
+                        except Exception:
+                            diff_sec = 0.0
+
+                        if diff_sec <= 15.0:
+                            logger.debug(
+                                "Anti-doublon mémoire actif : message '%s' [%s] déjà mémorisé il y a %.1fs (session=%s). Doublon ignoré.",
+                                clean_content[:40],
+                                role,
+                                diff_sec,
+                                session_id,
+                            )
+                            return
+
                 cursor.execute(
                     """
                     INSERT INTO conversation_history (session_id, timestamp, role, content, tool_calls, tool_call_id)
@@ -605,6 +642,18 @@ class AssistantMemory:
         while messages and messages[0].get("role") == "tool":
             messages.pop(0)
 
+        # Déduplication de sécurité : élimine les doublons consécutifs résiduels (même rôle et même contenu)
+        deduped: List[Dict[str, Any]] = []
+        for m in messages:
+            if (
+                deduped
+                and deduped[-1].get("role") == m.get("role")
+                and (deduped[-1].get("content") or "").strip() == (m.get("content") or "").strip()
+            ):
+                continue
+            deduped.append(m)
+        messages = deduped
+
         # Tronquer aux max_turns derniers messages si nécessaire
         if len(messages) > max_turns * 2:
             messages = messages[-(max_turns * 2):]
@@ -612,6 +661,35 @@ class AssistantMemory:
                 messages.pop(0)
 
         return messages
+
+    def get_last_assistant_message(self, session_id: Optional[str] = None) -> Optional[str]:
+        """Récupère le dernier message prononcé par l'assistant pour pouvoir le répéter à la demande."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if session_id:
+                    cursor.execute(
+                        """
+                        SELECT content FROM conversation_history 
+                        WHERE session_id = ? AND role = 'assistant' AND content IS NOT NULL AND content != '' 
+                        ORDER BY id DESC LIMIT 1
+                        """,
+                        (session_id,)
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT content FROM conversation_history 
+                        WHERE role = 'assistant' AND content IS NOT NULL AND content != '' 
+                        ORDER BY id DESC LIMIT 1
+                        """
+                    )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    return str(row[0]).strip()
+        except Exception as exc:
+            logger.error("Erreur lors de la récupération du dernier message assistant : %s", exc)
+        return None
 
     def clear_session(self, session_id: str) -> None:
         """Efface l'historique court terme d'une session."""
