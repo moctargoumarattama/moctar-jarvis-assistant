@@ -261,8 +261,9 @@
       margin:0 auto !important;
       width:min(1380px,calc(100% - 24px)) !important;
       max-width:calc(100% - 24px) !important;
-      height:48dvh !important;
-      max-height:50dvh !important;
+      height:48dvh;
+      max-height:92dvh;
+      min-height:220px;
       padding:0 !important;
       overflow:hidden !important;
       border:1px solid rgba(56,189,248,0.45) !important;
@@ -310,24 +311,36 @@
       overflow:hidden;
     }
 
-    /* Poignée tactile de fermeture / minimisation */
+    /* Poignée tactile de redimensionnement et étirement */
     .jarvis-drawer-handle{
       display:flex;
       align-items:center;
       justify-content:center;
       width:100%;
-      padding:7px 0 3px 0;
+      padding:8px 0 4px 0;
       background:transparent;
-      cursor:pointer;
+      cursor:ns-resize;
+      touch-action:none;
+      -webkit-user-select:none;
       user-select:none;
       flex-shrink:0;
       transition:opacity .2s ease;
     }
     .jarvis-handle-grip{
-      width:48px;
-      height:4px;
+      width:54px;
+      height:5px;
       border-radius:4px;
-      background:rgba(56,189,248,0.5);
+      background:rgba(56,189,248,0.55);
+      box-shadow:0 0 10px rgba(56,189,248,0.4);
+      transition:width .2s ease, background .2s ease, box-shadow .2s ease;
+      pointer-events:none;
+    }
+    .jarvis-drawer-handle:hover .jarvis-handle-grip,
+    .jarvis-drawer-handle.dragging .jarvis-handle-grip{
+      width:78px;
+      background:var(--cyan);
+      box-shadow:0 0 16px var(--cyan);
+    }
       box-shadow:0 0 10px rgba(56,189,248,0.35);
       transition:all .2s ease;
     }
@@ -744,7 +757,7 @@
   </dialog>
   <template id="service-template"><article class="card service-card"><div class="service-header"><div class="service-logo"></div><div class="service-identity"><h3 class="service-name"></h3><p class="service-port"></p></div><span class="badge service-badge"><span class="led"></span><span class="service-badge-text">EN ATTENTE</span></span></div><div class="service-measure"><div><div class="service-measure-label">Réponse HTTP</div><div class="latency"><span class="service-latency">—</span><small>ms</small></div></div><span class="http-status">HTTP —</span></div><div class="service-footer"><span class="service-systemd">systemd : —</span><button class="restart-button" type="button" disabled><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg>Restart</button></div><p class="service-error" hidden></p></article></template>
   <dialog id="jarvis-modal" closedby="any" aria-labelledby="jarvis-modal-title" aria-describedby="jarvis-modal-title">
-    <div class="jarvis-drawer-handle" id="jarvis-drawer-handle" title="Fermer la console (Échap)">
+    <div class="jarvis-drawer-handle" id="jarvis-drawer-handle" title="Glisser pour étirer · Double-cliquer pour agrandir" aria-label="Poignée pour étirer ou agrandir la console">
       <span class="jarvis-handle-grip"></span>
     </div>
     <canvas id="jarvis-bg-canvas" class="jarvis-bg-canvas" aria-hidden="true"></canvas>
@@ -761,6 +774,9 @@
         <span class="jarvis-tools-badge" id="jarvis-tools-badge">54 outils ReAct</span>
         <button type="button" class="jarvis-btn-icon" id="jarvis-clear-btn" title="Vider l'historique">
           <svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
+        </button>
+        <button type="button" class="jarvis-btn-icon" id="jarvis-expand-btn" aria-label="Agrandir / Réduire la console" title="Agrandir la console (ou double-clic sur la poignée)">
+          <svg class="icon" id="jarvis-expand-icon" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
         </button>
         <button type="button" class="jarvis-btn-icon jarvis-close-btn" id="jarvis-close-btn" aria-label="Fermer la console (Échap)" title="Fermer la console (Échap)">
           <svg class="icon" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
@@ -2352,12 +2368,99 @@
 
       $('jarvis-open-btn')?.addEventListener('click', openJarvisModal);
       $('dock-peek-trigger')?.addEventListener('click', openJarvisModal);
-      $('jarvis-drawer-handle')?.addEventListener('click', closeJarvisModal);
       $('jarvis-close-btn')?.addEventListener('click', closeJarvisModal);
 
       $('home-ask-input')?.addEventListener('click', () => {
         openJarvisModal();
       });
+
+      // -----------------------------------------------------------------------
+      // Redimensionnement fluide / Étirement par glisser-déposer de la console
+      // -----------------------------------------------------------------------
+      const drawerHandle = $('jarvis-drawer-handle');
+      const jarvisModal = $('jarvis-modal');
+      let isDraggingDrawer = false;
+      let startDragY = 0;
+      let startModalH = 0;
+
+      function updateExpandIcon() {
+        const modal = $('jarvis-modal');
+        const icon = $('jarvis-expand-icon');
+        const btn = $('jarvis-expand-btn');
+        if (!modal || !icon) return;
+        const h = modal.getBoundingClientRect().height;
+        const isExp = h > window.innerHeight * 0.65;
+        if (isExp) {
+          icon.innerHTML = '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/>';
+          if (btn) btn.title = 'Réduire la console (ou double-clic sur la poignée)';
+        } else {
+          icon.innerHTML = '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>';
+          if (btn) btn.title = 'Agrandir la console (ou double-clic sur la poignée)';
+        }
+      }
+
+      function toggleDrawerExpanded() {
+        const modal = $('jarvis-modal');
+        if (!modal) return;
+        modal.style.transition = 'height 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
+        const currentH = modal.getBoundingClientRect().height;
+        if (currentH > window.innerHeight * 0.65) {
+          modal.style.height = '48dvh';
+        } else {
+          modal.style.height = '88dvh';
+        }
+        setTimeout(() => {
+          modal.style.transition = '';
+          updateExpandIcon();
+        }, 320);
+      }
+
+      if (drawerHandle && jarvisModal) {
+        drawerHandle.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0) return;
+          isDraggingDrawer = true;
+          startDragY = e.clientY;
+          startModalH = jarvisModal.getBoundingClientRect().height;
+          drawerHandle.setPointerCapture(e.pointerId);
+          jarvisModal.style.transition = 'none';
+          drawerHandle.classList.add('dragging');
+        });
+
+        drawerHandle.addEventListener('pointermove', (e) => {
+          if (!isDraggingDrawer || !drawerHandle.hasPointerCapture(e.pointerId)) return;
+          const deltaY = startDragY - e.clientY;
+          const newHeight = Math.min(
+            window.innerHeight * 0.92,
+            Math.max(220, startModalH + deltaY)
+          );
+          jarvisModal.style.height = `${newHeight}px`;
+        });
+
+        const stopDrag = (e) => {
+          if (!isDraggingDrawer) return;
+          isDraggingDrawer = false;
+          jarvisModal.style.transition = '';
+          drawerHandle.classList.remove('dragging');
+          try {
+            if (drawerHandle.hasPointerCapture(e.pointerId)) {
+              drawerHandle.releasePointerCapture(e.pointerId);
+            }
+          } catch {}
+          updateExpandIcon();
+        };
+
+        drawerHandle.addEventListener('pointerup', stopDrag);
+        drawerHandle.addEventListener('pointercancel', stopDrag);
+        drawerHandle.addEventListener('lostpointercapture', () => {
+          isDraggingDrawer = false;
+          jarvisModal.style.transition = '';
+          drawerHandle.classList.remove('dragging');
+        });
+
+        drawerHandle.addEventListener('dblclick', toggleDrawerExpanded);
+      }
+
+      $('jarvis-expand-btn')?.addEventListener('click', toggleDrawerExpanded);
       let micPressStartTime = 0;
       let suppressNextClick = false;
 
