@@ -21,10 +21,10 @@ class TestPhaseAModernization(unittest.TestCase):
     def test_groq_models_priority_order(self):
         """Vérifie la chaîne de priorité des modèles Groq de production."""
         expected = [
-            "openai/gpt-oss-120b",
-            "openai/gpt-oss-20b",
             "llama-3.3-70b-versatile",
             "llama-3.1-8b-instant",
+            "llama-3.1-70b-versatile",
+            "llama3-70b-8192",
         ]
         self.assertEqual(ai_brain.GROQ_MODELS_PRIORITY, expected)
         self.assertEqual(ai_brain.DEFAULT_PREFERRED_GROQ_MODELS[:4], expected)
@@ -36,7 +36,7 @@ class TestPhaseAModernization(unittest.TestCase):
                 {"id": "whisper-large-v3"},
                 {"id": "llama-guard-3-8b"},
                 {"id": "llama-3.3-70b-versatile"},
-                {"id": "openai/gpt-oss-120b"},
+                {"id": "llama-3.1-8b-instant"},
                 {"id": "qwen-2.5-32b"},
             ]
         }
@@ -48,8 +48,8 @@ class TestPhaseAModernization(unittest.TestCase):
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
             discovered = ai_brain.get_available_groq_chat_models("fake_key_123", force_refresh=True)
-            self.assertIn("openai/gpt-oss-120b", discovered)
             self.assertIn("llama-3.3-70b-versatile", discovered)
+            self.assertIn("llama-3.1-8b-instant", discovered)
             self.assertIn("qwen-2.5-32b", discovered)
             self.assertNotIn("whisper-large-v3", discovered)
             self.assertNotIn("llama-guard-3-8b", discovered)

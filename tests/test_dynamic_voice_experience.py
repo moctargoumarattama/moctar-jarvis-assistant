@@ -388,7 +388,9 @@ class DynamicVoiceExperienceTests(unittest.TestCase):
         from voice_semantic_engine import VOICE_SEMANTIC_SYSTEM_PROMPT
 
         self.assertIn("copilote d'ingénierie d'élite", VOICE_SEMANTIC_SYSTEM_PROMPT)
-        self.assertIn("ChatGPT Voice / Claude", VOICE_SEMANTIC_SYSTEM_PROMPT)
+        self.assertIn("centres de commandement autonomes", VOICE_SEMANTIC_SYSTEM_PROMPT)
+        self.assertNotIn("ChatGPT", VOICE_SEMANTIC_SYSTEM_PROMPT)
+        self.assertNotIn("Ollama", VOICE_SEMANTIC_SYSTEM_PROMPT)
         self.assertIn("étape logique suivante", VOICE_SEMANTIC_SYSTEM_PROMPT)
         self.assertIn("bon sens d'ingénieur", VOICE_SEMANTIC_SYSTEM_PROMPT)
         self.assertTrue(VOICE_SEMANTIC_SYSTEM_PROMPT.strip().endswith("'Moctar'."))

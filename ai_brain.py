@@ -1898,14 +1898,12 @@ _FAST_VOICE_SESSION_TURNS: dict[str, list[dict[str, str]]] = {}
 _GROQ_MODELS_CACHE: tuple[float, list[str]] = (0.0, [])
 
 GROQ_MODELS_PRIORITY: list[str] = [
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
+    "llama-3.1-70b-versatile",
+    "llama3-70b-8192",
 ]
 DEFAULT_PREFERRED_GROQ_MODELS: list[str] = [
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
     "llama-3.1-70b-versatile",
@@ -1961,7 +1959,7 @@ def get_available_groq_chat_models(api_key: str, force_refresh: bool = False) ->
                         i for i in raw_ids
                         if not any(k in i.lower() for k in ("whisper", "guard", "embed", "tts", "audio", "moderation", "vision"))
                     ]
-                    APPROVED_FAMILIES = ("gpt", "llama", "mixtral", "gemma", "qwen", "deepseek")
+                    APPROVED_FAMILIES = ("llama", "mixtral", "gemma", "qwen", "deepseek")
                     for pref in candidates:
                         if pref in chat_ids and pref not in discovered:
                             discovered.append(pref)
