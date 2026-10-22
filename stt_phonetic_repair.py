@@ -78,6 +78,7 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     (re.compile(r"\b(?:[aà]|au)\s+(?:niam[eé]|nyamey)\b", re.I), "à Niamey", "city_niamey"),
 
     # 7. Nom de Moctar & Phonétique & Surnoms familiers
+    (re.compile(r"\b(?:c['’]est\s+(?:le\s+)?)?m(?:\.|\s)*o(?:\.|\s)*c(?:\.|\s)*t(?:\.|\s)*a(?:\.|\s)*r(?:\.|\b)", re.I), "Moctar", "wake_moctar_acronym"),
     (re.compile(r"\b(?:m['’\s]?occupe\s+tard|moccupe\s+tard|m['’\s]?occaque|moccaque)\b", re.I), "Moctar", "wake_moctar_repair"),
     (re.compile(r"\b(?:mokta|moktar|mokhtar|mouctar|mouktar|motard|mocktab|moctab|moktab)\b", re.I), "Moctar", "wake_moctar_variants"),
     (re.compile(r"\b(?:yo\s+)?(?:moc|mok|moque)\b", re.I), "Moc", "wake_moc"),

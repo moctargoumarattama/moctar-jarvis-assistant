@@ -279,16 +279,18 @@ VOICE_BUTLER_GREETINGS = (
 _WAKE_ONLY_SENTINEL = "__MOCTAR_WAKE_ONLY__"
 
 _VOICE_WAKE_PREFIX_RE = re.compile(
-    r"^\s*(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|et\s+vous|you)\s+)?"
+    r"^\s*(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|et\s+vous|you|c['’]est\s+(?:le\s+)?)\s*)?"
     r"(?:yo\s+moctar|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|"
     r"m['’]?occupe\s+tard|m['’]?occaque|moccupe\s+tard|moccaque|"
+    r"m(?:\.|\s)*o(?:\.|\s)*c(?:\.|\s)*t(?:\.|\s)*a(?:\.|\s)*r(?:\.|\b)|"
     r"moc|mok|mokti|jarvis|elmo)\b[\s,.:;!?-]*",
     re.IGNORECASE,
 )
 _VOICE_WAKE_ANYWHERE_RE = re.compile(
-    r"\b(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|et\s+vous|you)\s+)?"
+    r"\b(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|et\s+vous|you|c['’]est\s+(?:le\s+)?)\s*)?"
     r"(yo\s+moctar|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|"
     r"m['’]?occupe\s+tard|m['’]?occaque|moccupe\s+tard|moccaque|"
+    r"m(?:\.|\s)*o(?:\.|\s)*c(?:\.|\s)*t(?:\.|\s)*a(?:\.|\s)*r(?:\.|\b)|"
     r"moc|mok|mokti|jarvis|elmo|yo\s+elmo|allo\s+moctar|dis\s+moctar)\b[\s,.:;!?-]*",
     re.IGNORECASE,
 )
@@ -364,6 +366,9 @@ def is_direct_voice_command(text: str) -> bool:
         return True
     # 10. Présence et surnoms complices ("tu es là", "t'es là", "moc", "mokti")
     if re.search(r"\b(?:tu\s+es\s+l[aà]|t['’]es\s+l[aà]|es[- ]tu\s+l[aà]|moc|mokti)\b", norm):
+        return True
+    # 11. Vision et Analyse d'Écran ("qu'est-ce que tu vois sur mon écran", "regarde mon écran", "analyse mon écran", "regarde les erreurs")
+    if re.search(r"\b(?:qu['’]est[- ]ce\s+que\s+tu\s+vois|que\s+vois[- ]tu|regarde|analyse|lis|d[ée]cris)\s+(?:sur\s+|[aà]\s+)?(?:mon\s+|l['’])?[ée]cran\b", norm) or re.search(r"\b(?:regarde\s+les\s+erreurs|analyse\s+les\s+erreurs|vois[- ]tu\s+des\s+erreurs|qu['’]y\s+a[- ]t[- ]il\s+[aà]\s+l['’][ée]cran)\b", norm):
         return True
     return False
 

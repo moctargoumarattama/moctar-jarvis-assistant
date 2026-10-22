@@ -211,6 +211,47 @@ def get_active_window_info() -> Dict[str, Any]:
     return result
 
 
+def list_open_windows() -> list[str]:
+    """Liste les titres des fenêtres ouvertes et visibles sur le bureau."""
+    titles: list[str] = []
+    # Linux (wmctrl)
+    if sys.platform.startswith("linux") or os.name == "posix":
+        wmctrl_bin = shutil.which("wmctrl")
+        if wmctrl_bin:
+            try:
+                env = _get_linux_display_env()
+                proc = subprocess.run([wmctrl_bin, "-l"], capture_output=True, text=True, timeout=1.5, env=env)
+                if proc.returncode == 0:
+                    for line in proc.stdout.strip().splitlines():
+                        parts = line.split(maxsplit=3)
+                        if len(parts) >= 4:
+                            t = parts[3].strip()
+                            if t and not t.startswith("Desktop") and t not in titles:
+                                titles.append(t)
+            except Exception:
+                pass
+    # Windows
+    elif sys.platform == "win32":
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            def enum_windows_proc(hwnd, lparam):
+                if user32.IsWindowVisible(hwnd):
+                    length = user32.GetWindowTextLengthW(hwnd)
+                    if length > 0:
+                        buff = ctypes.create_unicode_buffer(length + 1)
+                        user32.GetWindowTextW(hwnd, buff, length + 1)
+                        t = buff.value.strip()
+                        if t and t not in titles and t not in ("Program Manager", "Settings"):
+                            titles.append(t)
+                return True
+            EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+            user32.EnumWindows(EnumWindowsProc(enum_windows_proc), 0)
+        except Exception:
+            pass
+    return titles
+
+
 def _resolve_canonical_app(proc_name: Optional[str], title: Optional[str]) -> str:
     """Résout le nom d'application canonique depuis le nom de processus ou le titre."""
     norm_proc = (proc_name or "").lower()

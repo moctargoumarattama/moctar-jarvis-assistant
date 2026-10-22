@@ -10,6 +10,7 @@ import locale
 import os
 import re
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from typing import Any, Dict, Optional
@@ -285,6 +286,59 @@ def get_system_telemetry(_psutil_module: Any = psutil) -> Dict[str, Any]:
         )
 
 
+def _take_screenshot(filename: Path, pyautogui_module: Any = pyautogui) -> bool:
+    """Capture robuste de l'affichage avec multi-repli (pyautogui, PIL, scrot, maim, gnome-screenshot, import)."""
+    # 1. Configuration X11 Linux
+    display_env = os.environ.copy()
+    try:
+        import desktop_window_manager
+        for k, v in desktop_window_manager._get_linux_display_env().items():
+            if k not in os.environ:
+                os.environ[k] = v
+            display_env[k] = v
+    except Exception:
+        pass
+
+    # 2. Essai pyautogui
+    try:
+        shot = pyautogui_module.screenshot()
+        if shot is not None:
+            shot.save(filename)
+            if filename.exists() and filename.stat().st_size > 0:
+                return True
+    except Exception:
+        pass
+
+    # 3. Essai PIL.ImageGrab
+    try:
+        from PIL import ImageGrab
+        shot = ImageGrab.grab()
+        if shot is not None:
+            shot.save(filename)
+            if filename.exists() and filename.stat().st_size > 0:
+                return True
+    except Exception:
+        pass
+
+    # 4. Utilitaires CLI Linux (scrot, maim, gnome-screenshot, import)
+    if sys.platform.startswith("linux") or os.name == "posix":
+        for cmd in (
+            ["scrot", str(filename)],
+            ["maim", str(filename)],
+            ["gnome-screenshot", "-f", str(filename)],
+            ["import", "-window", "root", str(filename)],
+        ):
+            try:
+                if shutil.which(cmd[0]):
+                    subprocess.run(cmd, check=True, timeout=5, env=display_env)
+                    if filename.exists() and filename.stat().st_size > 0:
+                        return True
+            except Exception:
+                pass
+
+    return filename.exists() and filename.stat().st_size > 0
+
+
 def capture_screenshot(pyautogui_module: Any = pyautogui) -> Dict[str, Any]:
     """Capture une capture d'écran de l'affichage principal et l'enregistre sur le disque local.
 
@@ -312,13 +366,21 @@ def capture_screenshot(pyautogui_module: Any = pyautogui) -> Dict[str, Any]:
             config.SCREENSHOTS_DIR
             / f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         )
-        pyautogui_module.screenshot().save(filename)
+        ok = _take_screenshot(filename, pyautogui_module=pyautogui_module)
+        if ok:
+            return format_action_result(
+                action=action_name,
+                success=True,
+                message=f"Capture enregistrée : {filename.name}.",
+                data={"file_path": str(filename), "name": filename.name},
+                error=None,
+            )
         return format_action_result(
             action=action_name,
-            success=True,
-            message=f"Capture enregistree : {filename.name}.",
-            data={"file_path": str(filename), "name": filename.name},
-            error=None,
+            success=False,
+            message="Impossible de capturer l'affichage (aucun serveur graphique accessible).",
+            data=None,
+            error="Display unavailable",
         )
     except Exception as exc:
         return format_action_result(
@@ -670,80 +732,93 @@ def analyze_screen(
             config.SCREENSHOTS_DIR
             / f"screen_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         )
-        # Configuration X11 Linux (Dell M4800)
-        try:
-            import desktop_window_manager
-            for k, v in desktop_window_manager._get_linux_display_env().items():
-                if k not in os.environ:
-                    os.environ[k] = v
-        except Exception:
-            pass
 
-        # Détection immédiate des fenêtres pour enrichir le résultat
+        # 1. Détection immédiate des fenêtres actives pour enrichir l'analyse
         active_win_summary = ""
+        open_windows_list: list[str] = []
         try:
             import desktop_window_manager
             win_info = desktop_window_manager.get_active_window_info()
             if win_info.get("available") and win_info.get("window_title"):
                 app_lbl = win_info.get("app_name") or "Application"
                 active_win_summary = f"Fenêtre active au premier plan : {app_lbl} ('{win_info.get('window_title')}')."
+            if hasattr(desktop_window_manager, "list_open_windows"):
+                open_windows_list = desktop_window_manager.list_open_windows()
         except Exception:
             pass
 
-        try:
-            screenshot = pyautogui_module.screenshot()
-            if screenshot is not None:
-                screenshot.save(filename)
-        except Exception:
-            from PIL import ImageGrab
-            try:
-                from PIL import ImageGrab
-                screenshot = ImageGrab.grab()
-            except Exception:
-                import subprocess
-                try:
-                    subprocess.run(["scrot", str(filename)], check=True, timeout=5)
-                except Exception:
-                    subprocess.run(["import", "-window", "root", str(filename)], check=True, timeout=5)
-                screenshot = None
-            if screenshot is not None:
-                screenshot.save(filename)
+        # 2. Capture robuste de l'affichage
+        screenshot_ok = _take_screenshot(filename, pyautogui_module=pyautogui_module)
 
-        import ai_brain
-        try:
-            analysis = ai_brain.ask_ai(
-                question,
-                images=[str(filename)],
-                max_predict=300,
-                temperature=0.2,
-                system_prompt=(
-                    "Tu es M.O.C.T.A.R, un assistant doué d'analyse visuelle d'écran. "
-                    "Décris précisément et de façon concise ce qui est affiché à l'écran, "
-                    "les fenêtres actives, les éventuels messages d'erreur ou le contenu demandé."
-                ),
-            )
-            return format_action_result(
-                action=action_name,
-                success=True,
-                message=str(analysis).strip(),
-                data={"file_path": str(filename), "analysis": str(analysis).strip()},
-                error=None,
-            )
-        except Exception as gemini_err:
-            if active_win_summary:
-                msg = f"Voici ce qui est ouvert à l'écran : {active_win_summary}"
-            else:
-                msg = (
-                    f"Capture enregistrée ({filename.name}), mais l'analyse Gemini Cloud est indisponible. "
-                    "Vérifie la connexion réseau et la configuration Gemini."
+        # 3. Vérification si l'utilisateur demande spécifiquement les erreurs
+        is_error_query = any(w in question.lower() for w in ("erreur", "error", "bug", "probleme", "problème", "echoue", "échec"))
+        recent_log_hint = ""
+        if is_error_query:
+            try:
+                if sys.platform.startswith("linux") or os.name == "posix":
+                    p = subprocess.run(
+                        ["journalctl", "-u", "jarvis.service", "-n", "10", "--no-pager"],
+                        capture_output=True, text=True, timeout=2,
+                    )
+                    if p.returncode == 0 and p.stdout:
+                        err_lines = [line.strip() for line in p.stdout.splitlines() if any(tag in line for tag in ("ERROR", "WARNING", "Exception", "Traceback", "failed"))]
+                        if err_lines:
+                            recent_log_hint = f" Dernières anomalies journalisées : {' | '.join(err_lines[-2:])}."
+            except Exception:
+                pass
+
+        # 4. Analyse visuelle via Gemini Cloud Vision
+        if screenshot_ok:
+            import ai_brain
+            try:
+                analysis = ai_brain.ask_ai(
+                    question,
+                    images=[str(filename)],
+                    max_predict=300,
+                    temperature=0.2,
+                    system_prompt=(
+                        "Tu es M.O.C.T.A.R, un assistant doué d'analyse visuelle d'écran. "
+                        "Décris précisément et de façon concise ce qui est affiché à l'écran, "
+                        "les fenêtres actives, les éventuels messages d'erreur ou le contenu demandé. "
+                        "Termine naturellement par 'Moctar'."
+                    ),
                 )
-            return format_action_result(
-                action=action_name,
-                success=True,
-                message=msg,
-                data={"file_path": str(filename), "analysis": active_win_summary or None},
-                error=str(gemini_err),
-            )
+                res_msg = str(analysis).strip()
+                if recent_log_hint and not any(k in res_msg.lower() for k in ("journal", "anomalie")):
+                    res_msg = f"{res_msg}{recent_log_hint}"
+                return format_action_result(
+                    action=action_name,
+                    success=True,
+                    message=res_msg,
+                    data={"file_path": str(filename), "analysis": res_msg},
+                    error=None,
+                )
+            except Exception as gemini_err:
+                pass
+
+        # 5. Repli contextuel de haut niveau si Gemini Vision est temporairement indisponible ou en cas de coupure API
+        context_parts = []
+        if active_win_summary:
+            context_parts.append(active_win_summary)
+        if open_windows_list:
+            other_wins = [w for w in open_windows_list if active_win_summary and w not in active_win_summary]
+            if other_wins:
+                context_parts.append(f"Autres fenêtres ouvertes : {', '.join(other_wins[:3])}.")
+        if recent_log_hint:
+            context_parts.append(recent_log_hint.strip())
+
+        if context_parts:
+            msg = f"Voici ce qui est visible sur votre espace de travail, Moctar : {' '.join(context_parts)}"
+        else:
+            msg = "Votre écran est actif avec l'environnement M.O.C.T.A.R en cours d'exécution, Moctar."
+
+        return format_action_result(
+            action=action_name,
+            success=True,
+            message=msg,
+            data={"file_path": str(filename) if screenshot_ok else None, "analysis": msg},
+            error=None,
+        )
     except Exception as exc:
         return format_action_result(
             action=action_name,

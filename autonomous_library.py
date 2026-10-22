@@ -478,6 +478,20 @@ def execute_autonomous_task(
         msg = cap_res.get("message") if isinstance(cap_res, dict) else str(cap_res)
         return {"handled": True, "reply": f"📸 {msg}", "tools_used": tools_used, "task_category": "system_tools"}
 
+    # ANALYSE VISUELLE & ERREURS SUR L'ÉCRAN
+    if any(k in norm for k in [
+        "regarde mon ecran", "regarde l'ecran", "regarde l ecran", "regarde sur mon ecran",
+        "analyse mon ecran", "analyse l'ecran", "analyse l ecran",
+        "vois tu sur mon ecran", "vois-tu sur mon ecran", "vois tu a l'ecran", "vois-tu a l'ecran",
+        "qu'est-ce que tu vois", "que vois tu", "que vois-tu", "qu'est ce que tu vois",
+        "erreurs sur mon ecran", "erreur sur mon ecran", "regarde les erreurs", "analyse les erreurs",
+        "lis mon ecran", "decris mon ecran", "affiche a l'ecran", "affiche sur mon ecran",
+    ]):
+        screen_res = actions.execute_tool("analyze_screen", {"question": raw_query})
+        tools_used.append({"tool": "analyze_screen", "arguments": {"question": raw_query}, "success": bool(screen_res.get("success"))})
+        msg = screen_res.get("message") if isinstance(screen_res, dict) else str(screen_res)
+        return {"handled": True, "reply": f"🖥️ {msg}", "tools_used": tools_used, "task_category": "system_tools"}
+
     # 6. HEURE & DATE
     if any(k in norm for k in ["heure", "quelle heure"]):
         res = actions.execute_tool("get_time_response", {})
