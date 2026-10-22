@@ -1,30 +1,30 @@
 /**
  * M.O.C.T.A.R — Moteur Graphique HUD 3D Cybernétique & Assistant Vocal Haute Fidélité
  * 
- * 1. MOTEUR 3D CINÉMATIQUE (Inspiré des vidéos TikTok @techenclair) :
- *    - Mode Arc Plasma (Image 5) : Tore circulaire frontal face caméra (plan XY), flux régulier de plasma cyan/bleu, anneaux néon concentriques.
- *    - Mode Quantum Core (Image 4) : Cœur solaire blanc-chaud, anneaux gyroscopiques à 0°, 45°, 90°, 135°, nébuleuse quantique sphérique.
- *    - Mode Globe 3D (Image 3) : Terre satellite NASA réaliste, nuages dynamiques, anneau orbital incliné, radar vert sur Moctar (Rabat).
- *    - Positionnement 3D rehaussé (Y = +22) pour ne JAMAIS être masqué par le bandeau inférieur.
- * 
- * 2. CONTRÔLE DES VUES PERSISTANT :
- *    - Aucun retour arrière intempestif vers l'état initial (sauvegarde de la vue sur l'API + verrou utilisateur).
- * 
- * 3. SYSTÈME AUDIO & MICROPHONE BIDIRECTIONNEL :
- *    - Pas de déclenchement fantôme en boucle (pas d'enregistrement de silence intempestif).
- *    - Bouton MICRO explicite : Marche / Arrêt direct avec retour visuel immédiat.
- *    - VU-mètre audio en direct montrant les ondes de votre voix.
- *    - Bouton STOP qui coupe instantanément le micro et la parole.
+ * Architecture Unifiée & Résiliente :
+ * 1. Cycle de vie découplé : L'horloge, la télémétrie matérielle et les contrôles UI
+ *    démarrent immédiatement sans dépendre de WebGL (zéro écran noir / zéro blocage).
+ * 2. Moteur 3D Cinématique Three.js (Arc Plasma, Cœur Quantique, Globe 3D Réaliste NASA) :
+ *    - Positionnement rehaussé (Y = +38) pour dégager 100% de visibilité au-dessus du ruban inférieur.
+ *    - Correction stricte de toutes les références de maillage (aucun ReferenceError).
+ * 3. Persistance des Vues 3D :
+ *    - La télémétrie n'écrase JAMAIS la vue choisie par l'utilisateur.
+ *    - Mémorisation locale (localStorage) + synchronisation API backend.
+ * 4. Moteur Vocal Bidirectionnel Unifié (MoctarVoice) :
+ *    - Même moteur éprouvé que le Dashboard NOC.
+ *    - Prise en charge push-to-talk et mains libres (Wake-Word « Yo Moctar »).
+ *    - VU-mètre audio en direct animé par RMS réel.
+ *    - Bouton STOP d'interruption immédiate 0 ms.
  */
 
 'use strict';
 
 (function () {
   // --- Paramètres & Constantes 3D ---
-  const SCENE_Y_OFFSET = 20; // Rehausse la scène pour dégager 100% de visibilité
-  const GLOBE_RADIUS = 88;
-  const CLOUD_RADIUS = 89.6;
-  const ATMOS_RADIUS = 96;
+  const SCENE_Y_OFFSET = 38; // Rehaussé largement pour ne jamais entrer en collision avec le bandeau inférieur
+  const GLOBE_RADIUS = 86;
+  const CLOUD_RADIUS = 87.8;
+  const ATMOS_RADIUS = 94;
   const PLASMA_PARTICLE_COUNT = 3400;
   const QUANTUM_PARTICLE_COUNT = 2800;
   const STAR_COUNT = 1500;
@@ -32,14 +32,17 @@
   // Coordonnées de Moctar (Dell Precision M4800 / Rabat)
   const DEFAULT_COORDS = { lat: 34.020882, lon: -6.841650, label: "Rabat · Dell Precision M4800" };
 
-  // Palettes de couleurs
-  const COLOR_CYAN = new THREE.Color(0x00f3ff);
-  const COLOR_ELECTRIC = new THREE.Color(0x00aaff);
-  const COLOR_DEEP_BLUE = new THREE.Color(0x002db3);
-  const COLOR_WHITE = new THREE.Color(0xffffff);
-  const COLOR_MAGENTA = new THREE.Color(0xd900ff);
-  const COLOR_GOLD = new THREE.Color(0xffb700);
-  const COLOR_GREEN = new THREE.Color(0x00ff88);
+  // Hexagones de couleurs (sécurisés, utilisables sans THREE immédiat)
+  const HEX_CYAN = 0x00f3ff;
+  const HEX_ELECTRIC = 0x00aaff;
+  const HEX_DEEP_BLUE = 0x002db3;
+  const HEX_WHITE = 0xffffff;
+  const HEX_MAGENTA = 0xd900ff;
+  const HEX_GOLD = 0xffb700;
+  const HEX_GREEN = 0x00ff88;
+
+  // Couleurs THREE.Color instanciées dynamiquement
+  let COLOR_CYAN, COLOR_ELECTRIC, COLOR_DEEP_BLUE, COLOR_WHITE, COLOR_MAGENTA, COLOR_GOLD, COLOR_GREEN;
 
   // Éléments du DOM
   const container = document.getElementById('hud-viewport');
@@ -78,8 +81,7 @@
 
   // États du système
   let currentView = 'plasma';
-  let lastUserManualViewTime = 0; // Protège contre les écrasements réseau 2s
-  let clock = new THREE.Clock();
+  let clock = null;
   let userCoords = { ...DEFAULT_COORDS };
   let isDragging = false;
   let previousMousePos = { x: 0, y: 0 };
@@ -108,9 +110,28 @@
     'abonnez-vous',
   ];
 
+  // --- INITIALISATION DES COULEURS THREE.JS ---
+  function initColors() {
+    if (typeof THREE === 'undefined' || !THREE.Color) return;
+    COLOR_CYAN = new THREE.Color(HEX_CYAN);
+    COLOR_ELECTRIC = new THREE.Color(HEX_ELECTRIC);
+    COLOR_DEEP_BLUE = new THREE.Color(HEX_DEEP_BLUE);
+    COLOR_WHITE = new THREE.Color(HEX_WHITE);
+    COLOR_MAGENTA = new THREE.Color(HEX_MAGENTA);
+    COLOR_GOLD = new THREE.Color(HEX_GOLD);
+    COLOR_GREEN = new THREE.Color(HEX_GREEN);
+  }
+
   // --- 1. INITIALISATION DU MOTEUR 3D ---
   function initThree() {
+    if (typeof THREE === 'undefined') {
+      console.warn("Three.js non chargé.");
+      return;
+    }
     if (!container || !canvas) return;
+
+    initColors();
+    clock = new THREE.Clock();
 
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
@@ -118,17 +139,23 @@
     scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0x02060e, 0.0008);
 
-    camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 4000);
-    camera.position.set(0, 0, currentCameraZ);
+    camera = new THREE.PerspectiveCamera(48, width / height, 0.1, 4000);
+    camera.position.set(0, 10, currentCameraZ);
+    camera.lookAt(0, 26, 0);
 
-    renderer = new THREE.WebGLRenderer({
-      canvas: canvas,
-      antialias: true,
-      alpha: true,
-      powerPreference: 'high-performance',
-    });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    try {
+      renderer = new THREE.WebGLRenderer({
+        canvas: canvas,
+        antialias: true,
+        alpha: true,
+        powerPreference: 'high-performance',
+      });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    } catch (e) {
+      console.error("Échec création WebGLRenderer:", e);
+      return;
+    }
 
     textureLoader = new THREE.TextureLoader();
 
@@ -144,19 +171,24 @@
     rimLight.position.set(-400, -200, -400);
     scene.add(rimLight);
 
-    // Création des composants
-    createStarfield();
-    createCircularPlasmaReactor();
-    createRadiantQuantumCore();
-    createRealisticEarthGlobe();
+    // Création des composants 3D
+    try { createStarfield(); } catch (err) { console.warn("Erreur createStarfield:", err); }
+    try { createCircularPlasmaReactor(); } catch (err) { console.warn("Erreur createCircularPlasmaReactor:", err); }
+    try { createRadiantQuantumCore(); } catch (err) { console.warn("Erreur createRadiantQuantumCore:", err); }
+    try { createRealisticEarthGlobe(); } catch (err) { console.warn("Erreur createRealisticEarthGlobe:", err); }
 
     // Contrôles 3D
     setup3DControls();
 
-    // Appliquer la vue par défaut
-    applyView(currentView, false);
+    // Récupérer la vue préférée mémorisée
+    let savedView = 'plasma';
+    try {
+      savedView = localStorage.getItem('moctar_hud_view') || 'plasma';
+    } catch (_) {}
 
-    // Boucle de rendu
+    applyView(savedView, false);
+
+    // Démarrer la boucle de rendu 60 FPS
     animate();
   }
 
@@ -192,10 +224,10 @@
     scene.add(starField);
   }
 
-  // --- MODE 1 : RÉACTEUR À ARC PLASMA CIRCULAIRE (Image 5 TikTok) ---
+  // --- MODE 1 : RÉACTEUR À ARC PLASMA CIRCULAIRE (Image 5) ---
   function createCircularPlasmaReactor() {
     plasmaGroup = new THREE.Group();
-    plasmaGroup.position.y = SCENE_Y_OFFSET; // Rehaussé au-dessus du bandeau
+    plasmaGroup.position.y = SCENE_Y_OFFSET;
 
     // Anneau néon intérieur parfaitement circulaire
     const innerGeo = new THREE.TorusGeometry(72, 1.5, 16, 120);
@@ -219,7 +251,7 @@
     plasmaOuterRing = new THREE.Mesh(outerGeo, outerMat);
     plasmaGroup.add(plasmaOuterRing);
 
-    // Particules de plasma en flux circulaire stable (pas de déformation en bretzel)
+    // Particules de plasma en flux circulaire stable
     const geo = new THREE.BufferGeometry();
     const positions = new Float32Array(PLASMA_PARTICLE_COUNT * 3);
     const colors = new Float32Array(PLASMA_PARTICLE_COUNT * 3);
@@ -229,26 +261,22 @@
     plasmaSpeeds = new Float32Array(PLASMA_PARTICLE_COUNT);
     plasmaZOffsets = new Float32Array(PLASMA_PARTICLE_COUNT);
 
-    const baseRadius = 82;
-
     for (let i = 0; i < PLASMA_PARTICLE_COUNT; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const rOffset = (Math.random() - 0.5) * 16;
-      const r = baseRadius + rOffset;
-      const z = (Math.random() - 0.5) * 14;
+      plasmaAngles[i] = Math.random() * Math.PI * 2.0;
+      plasmaRadii[i] = 68 + Math.random() * 26;
+      plasmaSpeeds[i] = (Math.random() > 0.5 ? 1 : -1) * (0.8 + Math.random() * 1.6);
+      plasmaZOffsets[i] = (Math.random() - 0.5) * 8.0;
+
+      const u = plasmaAngles[i];
+      const r = plasmaRadii[i];
 
       const idx = i * 3;
-      positions[idx] = r * Math.cos(theta);
-      positions[idx + 1] = r * Math.sin(theta);
-      positions[idx + 2] = z;
+      positions[idx] = r * Math.cos(u);
+      positions[idx + 1] = r * Math.sin(u);
+      positions[idx + 2] = plasmaZOffsets[i];
 
-      plasmaAngles[i] = theta;
-      plasmaRadii[i] = r;
-      plasmaSpeeds[i] = 1.0 + Math.random() * 2.0;
-      plasmaZOffsets[i] = z;
-
-      const rand = Math.random();
-      const c = rand > 0.82 ? COLOR_WHITE : rand > 0.35 ? COLOR_CYAN : COLOR_ELECTRIC;
+      const isCyan = Math.random() > 0.35;
+      const c = isCyan ? COLOR_CYAN : COLOR_ELECTRIC;
       colors[idx] = c.r;
       colors[idx + 1] = c.g;
       colors[idx + 2] = c.b;
@@ -258,7 +286,7 @@
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const pMat = new THREE.PointsMaterial({
-      size: 2.7,
+      size: 2.2,
       vertexColors: true,
       transparent: true,
       opacity: 0.9,
@@ -274,10 +302,10 @@
     scene.add(plasmaGroup);
   }
 
-  // --- MODE 2 : CŒUR QUANTIQUE NEURONAL (Image 4 TikTok) ---
+  // --- MODE 2 : CŒUR QUANTIQUE RAYONNANT (Image 4) ---
   function createRadiantQuantumCore() {
     quantumGroup = new THREE.Group();
-    quantumGroup.position.y = SCENE_Y_OFFSET; // Rehaussé au-dessus du bandeau
+    quantumGroup.position.y = SCENE_Y_OFFSET;
 
     // Cœur central sphérique incandescent blanc-chaud
     const coreGeo = new THREE.SphereGeometry(22, 32, 32);
@@ -290,7 +318,7 @@
     quantumCoreMesh = new THREE.Mesh(coreGeo, coreMat);
     quantumGroup.add(quantumCoreMesh);
 
-    // Halo d'énergie coronale
+    // Halo d'énergie coronale cyan
     const haloGeo = new THREE.SphereGeometry(35, 32, 32);
     const haloMat = new THREE.MeshBasicMaterial({
       color: COLOR_CYAN,
@@ -299,9 +327,7 @@
       blending: THREE.AdditiveBlending,
     });
     quantumHaloMesh = new THREE.Mesh(haloGeo, haloMat);
-    quantumGroup.add(haloHalo(haloMesh));
-
-    function haloHalo(mesh) { return mesh; }
+    quantumGroup.add(quantumHaloMesh);
 
     // 4 anneaux gyroscopiques à 0°, 45°, 90°, 135°
     const configs = [
@@ -381,12 +407,12 @@
     scene.add(quantumGroup);
   }
 
-  // --- MODE 3 : GLOBE 3D RÉALISTE NASA (Image 3 TikTok) ---
+  // --- MODE 3 : GLOBE 3D RÉALISTE NASA (Image 3) ---
   function createRealisticEarthGlobe() {
     globeGroup = new THREE.Group();
-    globeGroup.position.y = SCENE_Y_OFFSET; // Rehaussé au-dessus du bandeau
+    globeGroup.position.y = SCENE_Y_OFFSET;
 
-    // 1. Sphère terrestre
+    // 1. Sphère terrestre avec texture satellite haute résolution
     const earthGeo = new THREE.SphereGeometry(GLOBE_RADIUS, 64, 64);
     const earthTex = textureLoader.load('/static/textures/earth_atmos_2048.jpg');
     earthTex.anisotropy = 4;
@@ -401,7 +427,7 @@
     earthMesh = new THREE.Mesh(earthGeo, earthMat);
     globeGroup.add(earthMesh);
 
-    // 2. Couche de nuages dynamiques
+    // 2. Couche de nuages dynamiques semi-transparents
     const cloudsGeo = new THREE.SphereGeometry(CLOUD_RADIUS, 64, 64);
     const cloudsTex = textureLoader.load('/static/textures/earth_clouds_1024.png');
 
@@ -440,7 +466,7 @@
     orbitalRingMesh.rotation.y = Math.PI * 0.12;
     globeGroup.add(orbitalRingMesh);
 
-    // 5. Radar vert pulsant sur Moctar
+    // 5. Radar vert pulsant sur Moctar (Rabat)
     const markerGeo = new THREE.SphereGeometry(2.4, 16, 16);
     const markerMat = new THREE.MeshBasicMaterial({ color: COLOR_GREEN });
     radarMarker = new THREE.Mesh(markerGeo, markerMat);
@@ -485,7 +511,7 @@
     const v = (viewName || '').toLowerCase().trim();
     if (['globe', 'earth', 'terre'].includes(v)) {
       currentView = 'globe';
-    } else if (['quantum', 'core', 'neural'].includes(v)) {
+    } else if (['quantum', 'core', 'neural', 'quantique'].includes(v)) {
       currentView = 'quantum';
     } else {
       currentView = 'plasma';
@@ -495,7 +521,7 @@
     if (quantumGroup) quantumGroup.visible = currentView === 'quantum';
     if (plasmaGroup) plasmaGroup.visible = currentView === 'plasma';
 
-    // Mise à jour visuelle des boutons
+    // Mise à jour visuelle des boutons de vue
     [btnPlasmaView, btnQuantumView, btnGlobeView].forEach((b) => b && b.classList.remove('active'));
     if (currentView === 'plasma' && btnPlasmaView) btnPlasmaView.classList.add('active');
     if (currentView === 'quantum' && btnQuantumView) btnQuantumView.classList.add('active');
@@ -503,9 +529,12 @@
 
     targetCameraZ = currentView === 'globe' ? 275 : 285;
 
-    // Si action utilisateur : enregistrer l'horodatage et synchroniser avec l'API backend
+    // Si action utilisateur : persister dans localStorage et synchroniser avec l'API backend
     if (isUserAction) {
-      lastUserManualViewTime = Date.now();
+      try {
+        localStorage.setItem('moctar_hud_view', currentView);
+      } catch (_) {}
+
       fetch('/api/hud/view', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -516,6 +545,8 @@
 
   // --- CONTRÔLES SOURIS, TOUCH & ZOOM ---
   function setup3DControls() {
+    if (!canvas) return;
+
     function onDown(e) {
       isDragging = true;
       const x = e.touches ? e.touches[0].clientX : e.clientX;
@@ -561,7 +592,7 @@
     }, { passive: false });
   }
 
-  // --- 2. GESTION DU MICROPHONE & MOTEUR VOCAL EXPLICITE ---
+  // --- 2. GESTION DU MICROPHONE & MOTEUR VOCAL UNIFIÉ (MoctarVoice) ---
   function initVoiceEngine() {
     if (!window.MoctarVoice) {
       console.warn("MoctarVoice non disponible.");
@@ -569,7 +600,7 @@
     }
 
     jarvisVoice = window.MoctarVoice.create({
-      followupMs: 0, // Désactivé par défaut pour éviter les enregistrements de silence en boucle
+      followupMs: 30000, // 30s d'écoute active pour les enchaînements fluides
       mediaDevices: window.navigator ? window.navigator.mediaDevices : null,
       MediaRecorder: window.MediaRecorder,
       AudioContext: window.AudioContext || window.webkitAudioContext,
@@ -577,46 +608,62 @@
       interactUrl: '/api/voice/interact',
       onState: handleVoiceStateChange,
       onInteractResult: handleVoiceInteractResult,
+      speak: speakJarvisText,
       language: 'fr-FR',
     });
 
     handleVoiceStateChange('off');
+
+    // Réactiver l'écoute si l'utilisateur l'avait activée précédemment
+    let savedWakeword = false;
+    try {
+      savedWakeword = localStorage.getItem('jarvis_wakeword_active') === 'true';
+    } catch (_) {}
+
+    if (savedWakeword && !document.hidden && jarvisVoice) {
+      jarvisVoice.enable().catch(() => {});
+    }
   }
 
   function handleVoiceStateChange(phase, detail = {}) {
+    const isMicActive = jarvisVoice && jarvisVoice.enabled;
     const messages = {
       off: '● MICRO COUPÉ',
       starting: '🟢 INITIALISATION...',
-      wake: '🟢 EN VEILLE (Cliquez sur le micro)',
-      listening: '🔴 ENREGISTREMENT... (PARLEZ)',
+      wake: '🟢 EN VEILLE — Dites « Yo Moctar »',
+      listening: '🎙️ EN ÉCOUTE... (PARLEZ)',
       processing: '⚡ ANALYSE M.O.C.T.A.R...',
-      speaking: '🔊 SYNTHÈSE M.O.C.T.A.R...',
-      paused: '⏸️ VEILLE',
+      speaking: '🔊 M.O.C.T.A.R RÉPOND...',
+      paused: '⏸️ VEILLE SUSPENDUE',
       error: '⚠️ ERREUR MICRO',
-      unsupported: '❌ NON SUPPORTÉ',
+      unsupported: '❌ MICRO NON SUPPORTÉ',
     };
 
     if (voiceStateBadge) {
       voiceStateBadge.setAttribute('data-state', phase);
-      voiceStateBadge.textContent = messages[phase] || '● EN LIGNE';
+      voiceStateBadge.textContent = messages[phase] || (isMicActive ? '🟢 MICRO ACTIF' : '● MICRO COUPÉ');
     }
 
     if (btnMic) {
-      if (phase === 'listening') {
+      if (isMicActive) {
         btnMic.classList.add('active');
-        btnMic.textContent = '🔴 PARLEZ MAINTENANT';
+        if (phase === 'listening') {
+          btnMic.textContent = '🔴 ENREGISTREMENT...';
+        } else {
+          btnMic.textContent = '🔴 COUPER LE MICRO';
+        }
       } else {
         btnMic.classList.remove('active');
         btnMic.textContent = '🎙️ ACTIVER MICRO';
       }
     }
 
-    // Animation du VU-mètre en direct
+    // VU-mètre audio en direct
     if (vumeterEl) {
       const bars = vumeterEl.querySelectorAll('.vbar');
-      const rms = detail.rms || 0;
-      if (phase === 'listening' && rms > 0.005) {
-        bars.forEach((bar, idx) => {
+      const rms = detail.rms || (jarvisVoice ? jarvisVoice.rms : 0) || 0;
+      if ((phase === 'listening' || phase === 'wake') && rms > 0.005) {
+        bars.forEach((bar) => {
           const height = Math.min(24, Math.max(4, rms * 180 * (0.8 + Math.random() * 0.5)));
           bar.style.height = `${height}px`;
           bar.style.background = '#00ff88';
@@ -624,7 +671,7 @@
       } else {
         bars.forEach((bar) => {
           bar.style.height = '4px';
-          bar.style.background = 'rgba(0, 243, 255, 0.3)';
+          bar.style.background = isMicActive ? 'rgba(0, 255, 136, 0.4)' : 'rgba(0, 243, 255, 0.2)';
         });
       }
     }
@@ -641,19 +688,34 @@
       userTextEl.textContent = `« ${rawUser} »`;
     }
 
-    if (data.reply_text && assistantTextEl) {
-      assistantTextEl.textContent = data.reply_text;
+    const reply = data.reply_text || data.reply || '';
+    if (reply && assistantTextEl) {
+      assistantTextEl.textContent = reply;
     }
 
-    // Basculement 3D si demandé
-    if (data.action === 'open_app' && data.url === '/hud') {
-      if (data.title && data.title.includes('Globe')) {
-        applyView('globe', true);
-      } else if (data.title && data.title.includes('Plasma')) {
-        applyView('plasma', true);
-      } else if (data.title && data.title.includes('Quantique')) {
-        applyView('quantum', true);
-      }
+    // Basculement 3D automatique si demandé vocalement
+    const textToCheck = (rawUser + ' ' + reply + ' ' + (data.title || '')).toLowerCase();
+    if (textToCheck.includes('globe') || textToCheck.includes('terre') || textToCheck.includes('earth') || textToCheck.includes('satellite')) {
+      applyView('globe', true);
+    } else if (textToCheck.includes('quantique') || textToCheck.includes('quantum') || textToCheck.includes('core') || textToCheck.includes('noyau')) {
+      applyView('quantum', true);
+    } else if (textToCheck.includes('plasma') || textToCheck.includes('réacteur') || textToCheck.includes('arc') || textToCheck.includes('reactor')) {
+      applyView('plasma', true);
+    }
+
+    if (textToCheck.includes('localise') || textToCheck.includes('rabat') || textToCheck.includes('position')) {
+      applyView('globe', true);
+      const phi = (90 - userCoords.lat) * (Math.PI / 180);
+      const theta = (userCoords.lon + 180) * (Math.PI / 180);
+      rotationTargets.globe.x = 0.22;
+      rotationTargets.globe.y = -(theta - Math.PI / 2);
+    }
+
+    // Gestion de l'audio si présent
+    if (data.audio_url) {
+      playAudioUrl(data.audio_url);
+    } else if (reply) {
+      speakJarvisText(reply);
     }
   }
 
@@ -670,20 +732,17 @@
     }
 
     try {
-      if (isRecordingManual || jarvisVoice.state === 'listening') {
+      if (jarvisVoice.enabled) {
         // Couper le micro
-        isRecordingManual = false;
-        jarvisVoice.stopManual();
         jarvisVoice.disable();
-        handleVoiceStateChange('off');
+        stopAllSpeech();
+        try { localStorage.setItem('jarvis_wakeword_active', 'false'); } catch (_) {}
       } else {
-        // Allumer le micro et démarrer l'enregistrement
-        isRecordingManual = true;
-        if (!jarvisVoice.enabled) {
-          await jarvisVoice.enable();
-        }
+        // Allumer le micro et démarrer l'écoute active
+        try { window.speechSynthesis?.resume(); } catch (_) {}
+        await jarvisVoice.enable();
         await jarvisVoice.startManual();
-        handleVoiceStateChange('listening');
+        try { localStorage.setItem('jarvis_wakeword_active', 'true'); } catch (_) {}
       }
     } catch (err) {
       console.warn("Erreur toggleMicrophone:", err);
@@ -695,27 +754,80 @@
   function stopAllSpeech() {
     isRecordingManual = false;
     if (jarvisVoice) {
-      jarvisVoice.stopManual();
-      jarvisVoice.disable();
+      try { jarvisVoice.stopManual(); } catch (_) {}
+      try { jarvisVoice.disable(); } catch (_) {}
     }
-    if (window.speechSynthesis && window.speechSynthesis.speaking) {
-      window.speechSynthesis.cancel();
+    if (window.speechSynthesis) {
+      try { window.speechSynthesis.cancel(); } catch (_) {}
     }
     if (activeAudioElement) {
       try {
         activeAudioElement.pause();
         activeAudioElement.currentTime = 0;
-      } catch (e) {}
+      } catch (_) {}
       activeAudioElement = null;
     }
     const audios = document.querySelectorAll('audio');
     audios.forEach((a) => {
-      try { a.pause(); a.currentTime = 0; } catch (e) {}
+      try { a.pause(); a.currentTime = 0; } catch (_) {}
     });
 
     handleVoiceStateChange('off');
     if (assistantTextEl) {
       assistantTextEl.textContent = "Interrompu et micro désactivé, Moctar.";
+    }
+  }
+
+  // Synthèse vocale de secours (Web Speech)
+  function speakJarvisText(text) {
+    const clean = String(text || '')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/[*_#>[\]()]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!clean || !window.speechSynthesis) return Promise.resolve(false);
+    try { window.speechSynthesis.cancel(); } catch (_) {}
+
+    return new Promise((resolve) => {
+      const utter = new SpeechSynthesisUtterance(clean);
+      utter.lang = 'fr-FR';
+      utter.rate = 1.05;
+      utter.pitch = 0.95;
+      utter.onend = () => {
+        handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
+        resolve(true);
+      };
+      utter.onerror = () => {
+        handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
+        resolve(false);
+      };
+      window.speechSynthesis.speak(utter);
+    });
+  }
+
+  // Lecture d'URL audio MP3/WAV
+  function playAudioUrl(url) {
+    if (!url) return;
+    try {
+      const audio = new Audio(url);
+      activeAudioElement = audio;
+      handleVoiceStateChange('speaking');
+      audio.onended = () => {
+        activeAudioElement = null;
+        handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
+      };
+      audio.onerror = () => {
+        activeAudioElement = null;
+        handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
+      };
+      audio.play().catch(() => {
+        activeAudioElement = null;
+        handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
+      });
+    } catch (_) {
+      handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
     }
   }
 
@@ -741,37 +853,13 @@
       if (res.ok) {
         const data = await res.json();
         handleVoiceInteractResult(data);
-        handleVoiceStateChange('speaking');
-
-        if (data.audio_url) {
-          playAudioUrl(data.audio_url);
-        } else if (data.reply_text && window.speechSynthesis) {
-          const utter = new SpeechSynthesisUtterance(data.reply_text);
-          utter.lang = 'fr-FR';
-          utter.onend = () => handleVoiceStateChange('off');
-          window.speechSynthesis.speak(utter);
-        }
       } else {
-        handleVoiceStateChange('off');
+        if (assistantTextEl) assistantTextEl.textContent = "Erreur de communication avec le serveur, Moctar.";
+        handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
       }
     } catch (e) {
-      handleVoiceStateChange('off');
-    }
-  }
-
-  function playAudioUrl(url) {
-    try {
-      const audio = new Audio(url);
-      activeAudioElement = audio;
-      audio.onended = () => {
-        handleVoiceStateChange('off');
-        activeAudioElement = null;
-      };
-      audio.play().catch(() => {
-        handleVoiceStateChange('off');
-      });
-    } catch (e) {
-      handleVoiceStateChange('off');
+      if (assistantTextEl) assistantTextEl.textContent = "Réseau indisponible, Moctar.";
+      handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
     }
   }
 
@@ -840,6 +928,15 @@
     }
 
     window.addEventListener('resize', onResize);
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        if (jarvisVoice && jarvisVoice.enabled) jarvisVoice.suspend();
+        stopAllSpeech();
+      } else {
+        if (jarvisVoice && jarvisVoice.listeningDesired) jarvisVoice.resume();
+      }
+    });
   }
 
   function onResize() {
@@ -849,10 +946,10 @@
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   }
 
-  // --- HORLOGE NUMÉRIQUE ---
+  // --- HORLOGE NUMÉRIQUE HAUTE PRÉCISION ---
   function startClock() {
     function tick() {
       const now = new Date();
@@ -874,7 +971,7 @@
   function startTelemetrySync() {
     async function sync() {
       try {
-        const res = await fetch('/api/hud/state');
+        const res = await fetch('/api/hud/state', { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
           if (cpuValEl && data.cpu_percent !== undefined) {
@@ -886,17 +983,29 @@
           if (hostValEl && data.hostname) {
             hostValEl.textContent = data.hostname;
           }
+          return;
+        }
+      } catch (_) {}
 
-          // Ne changer la vue QUE si l'utilisateur n'a pas cliqué récemment (verrou de 20s)
-          if (data.view && data.view !== currentView) {
-            if (Date.now() - lastUserManualViewTime > 20000) {
-              applyView(data.view, false);
-            }
+      // Fallback sur /api/snapshot utilisé par le Dashboard NOC
+      try {
+        const snapRes = await fetch('/api/snapshot', { cache: 'no-store' });
+        if (snapRes.ok) {
+          const snap = await snapRes.json();
+          if (cpuValEl && snap.cpu && snap.cpu.total !== undefined) {
+            cpuValEl.textContent = `${snap.cpu.total}%`;
+          }
+          if (ramValEl && snap.memory && snap.memory.percent !== undefined) {
+            ramValEl.textContent = `${snap.memory.percent}%`;
+          }
+          if (hostValEl && snap.host && snap.host.hostname) {
+            hostValEl.textContent = snap.host.hostname;
           }
         }
-      } catch (e) {}
+      } catch (_) {}
     }
-    setInterval(sync, 1400);
+
+    setInterval(sync, 2000);
     sync();
   }
 
@@ -904,12 +1013,15 @@
   function animate() {
     requestAnimationFrame(animate);
 
-    const delta = clock.getDelta();
-    const elapsed = clock.getElapsedTime();
+    if (!renderer || !scene || !camera) return;
+
+    const delta = clock ? clock.getDelta() : 0.016;
+    const elapsed = clock ? clock.getElapsedTime() : Date.now() * 0.001;
 
     // 1. Zoom caméra doux
     currentCameraZ += (targetCameraZ - currentCameraZ) * 0.08;
     camera.position.z = currentCameraZ;
+    camera.lookAt(0, 26, 0);
 
     // 2. Rotation douce des groupes
     const activeGrp = currentView === 'globe' ? globeGroup : currentView === 'quantum' ? quantumGroup : plasmaGroup;
@@ -997,14 +1109,33 @@
     renderer.render(scene, camera);
   }
 
-  // --- INITIALISATION AU CHARGEMENT ---
-  window.addEventListener('DOMContentLoaded', () => {
-    initThree();
-    initVoiceEngine();
-    setupUIEventListeners();
+  // --- INITIALISATION SÉCURISÉE AU CHARGEMENT ---
+  function boot() {
+    // 1. Fonctions vitales de l'interface : Toujours actives quoi qu'il arrive
     startClock();
     startTelemetrySync();
-  });
+    setupUIEventListeners();
+
+    // 2. Moteur vocal unifié
+    try {
+      initVoiceEngine();
+    } catch (err) {
+      console.warn("Erreur démarrage initVoiceEngine:", err);
+    }
+
+    // 3. Moteur 3D WebGL isolé dans un try-catch
+    try {
+      initThree();
+    } catch (err) {
+      console.error("Erreur démarrage Three.js WebGL:", err);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
 
   // Interface externe
   window.MocHUD = {

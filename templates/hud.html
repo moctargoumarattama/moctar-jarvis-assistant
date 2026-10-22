@@ -252,10 +252,23 @@
       transition: all 0.3s ease;
     }
 
+    .voice-state-pill[data-state="off"] {
+      color: var(--muted);
+      border-color: rgba(98, 130, 158, 0.3);
+      box-shadow: none;
+    }
+
+    .voice-state-pill[data-state="wake"] {
+      color: var(--green);
+      border-color: rgba(0, 255, 136, 0.45);
+      box-shadow: 0 0 14px rgba(0, 255, 136, 0.35);
+    }
+
     .voice-state-pill[data-state="listening"] {
       color: var(--gold);
       border-color: var(--gold);
-      box-shadow: 0 0 16px rgba(255, 183, 0, 0.45);
+      box-shadow: 0 0 18px rgba(255, 183, 0, 0.55);
+      animation: pulse-ring 1.4s infinite;
     }
 
     .voice-state-pill[data-state="processing"] {
@@ -270,28 +283,34 @@
       box-shadow: 0 0 16px var(--cyan-glow);
     }
 
+    .voice-state-pill[data-state="error"] {
+      color: var(--red);
+      border-color: rgba(255, 59, 48, 0.5);
+      box-shadow: 0 0 14px rgba(255, 59, 48, 0.4);
+    }
+
     /* --- Ruban Inférieur Flottant Compact --- */
     .hud-bottom-ribbon {
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      max-width: 840px;
+      gap: 5px;
+      max-width: 800px;
       margin: 0 auto;
       width: 100%;
     }
 
     .transcript-box {
-      background: rgba(4, 14, 28, 0.5);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      background: rgba(3, 10, 22, 0.65);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
       border: 1px solid var(--chip-border);
       border-radius: 12px;
-      padding: 8px 16px;
+      padding: 6px 14px;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
       display: flex;
       flex-direction: column;
       gap: 3px;
-      min-height: 40px;
+      min-height: 36px;
       transition: all 0.3s ease;
     }
 
