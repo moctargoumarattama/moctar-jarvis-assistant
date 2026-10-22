@@ -142,6 +142,7 @@ def _normalize(text: str) -> str:
         return ""
     text = unicodedata.normalize("NFKD", text.casefold())
     text = "".join(c for c in text if not unicodedata.combining(c))
+    text = text.strip(" .,:;!?'\"’«»")
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -389,15 +390,19 @@ def execute_autonomous_task(
             }
 
     # 4. CONTRÔLE MÉDIA UNIVERSEL EN 0 MS (PLAYERCTL, SPOTIFY, LECTEUR ACTIF)
+    norm_stripped = norm.strip(" .,:;!?'\"’«»")
     is_media_pause = any(k in norm for k in [
-        "mets pause", "mets en pause", "stop la musique", "coupe la musique",
-        "pause musique", "arrete la musique", "arrête la musique",
-    ]) or norm in ("pause", "stop musique", "pause la musique")
+        "mets pause", "mets en pause", "mets sur pause", "en pause", "on pause",
+        "stop la musique", "coupe la musique", "pause la musique", "arrete la musique", "arrête la musique",
+        "pause musique", "pause youtube", "mets youtube en pause", "youtube en pause",
+        "pause la video", "pause la vidéo", "pause le son",
+    ]) or norm_stripped in ("pause", "stop", "stop musique", "pause la musique") or bool(re.search(r"\b(?:pause|en\s+pause|on\s+pause|pause\s+youtube|youtube\s+en\s+pause)\b", norm))
 
     is_media_play = any(k in norm for k in [
         "reprends la lecture", "remets la musique", "reprends la musique",
-        "relance la musique", "relance la lecture",
-    ]) or norm in ("lecture", "play", "reprise")
+        "relance la musique", "relance la lecture", "reprends la video", "reprends la vidéo",
+        "relance youtube", "remets youtube", "play musique",
+    ]) or norm in ("lecture", "play", "reprise") or bool(re.search(r"\b(?:reprends?\s+la\s+lecture|remets?\s+la\s+musique|relance\s+la\s+musique)\b", norm))
 
     is_media_next = any(k in norm for k in [
         "chanson suivante", "piste suivante", "musique suivante", "morceau suivant", "suivant",
@@ -410,7 +415,8 @@ def execute_autonomous_task(
 
     is_media_playlist = any(k in norm for k in [
         "lance ma playlist", "lance spotify", "ouvre spotify", "mets ma playlist",
-    ]) or norm in ("mets de la musique", "lance de la musique", "joue de la musique", "mets la musique", "lance la musique", "musique")
+        "mets de la musique", "lance de la musique", "joue de la musique", "mets la musique", "lance la musique", "musique",
+    ]) or norm in ("mets de la musique", "lance de la musique", "joue de la musique", "mets la musique", "lance la musique", "musique", "playlist", "spotify")
 
     if is_media_pause:
         res = actions.execute_tool("control_playback", {"action": "pause"})
@@ -588,7 +594,11 @@ def execute_autonomous_task(
         msg = res.get("message") if isinstance(res, dict) else str(res)
         return {"handled": True, "reply": f"🔋 {msg}", "tools_used": tools_used, "task_category": "system_tools"}
 
-    if any(k in norm for k in ["volume", "mute", "muet", "coupe le son", "monte le son", "baisse le son", "remets le son", "retablis le son", "demute"]):
+    if any(k in norm for k in [
+        "volume", "mute", "muet", "coupe le son", "monte le son", "baisse le son",
+        "remets le son", "retablis le son", "demute", "diminue le son", "diminue le volume",
+        "augmente le son", "augmente le volume", "baisse le volume", "monte le volume",
+    ]) or "diminue" in words or "augmente" in words:
         match_pct = re.search(r"(\d+)\s*(?:%|pourcent)?", norm)
         pct = int(match_pct.group(1)) if match_pct else None
         if any(w in norm for w in ("coupe", "muet", "mute")):
@@ -600,10 +610,10 @@ def execute_autonomous_task(
         elif pct is not None:
             level = pct
             act = "set"
-        elif "monte" in norm:
+        elif any(w in norm for w in ("monte", "augmente", "plus fort")):
             level = 80
             act = "up"
-        elif "baisse" in norm:
+        elif any(w in norm for w in ("baisse", "diminue", "moins fort", "reduis", "réduis")):
             level = 30
             act = "down"
         else:

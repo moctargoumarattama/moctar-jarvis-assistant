@@ -28,6 +28,7 @@ DEFAULT_HEIGHT = 1080
 def _get_linux_display_env() -> Dict[str, str]:
     """Prépare l'environnement graphique X11 pour communiquer avec le bureau sous Ubuntu."""
     env = os.environ.copy()
+    target_user = "moctar" if os.path.exists("/home/moctar") else os.environ.get("USER", "root")
     try:
         import desktop_window_manager
         for k, v in desktop_window_manager._get_linux_display_env().items():
@@ -37,6 +38,16 @@ def _get_linux_display_env() -> Dict[str, str]:
         pass
     if "DISPLAY" not in env:
         env["DISPLAY"] = ":0"
+    if "XAUTHORITY" not in env:
+        for auth_candidate in (
+            f"/home/{target_user}/.Xauthority",
+            "/home/moctar/.Xauthority",
+            os.path.expanduser("~/.Xauthority"),
+            "/root/.Xauthority",
+        ):
+            if os.path.exists(auth_candidate):
+                env["XAUTHORITY"] = auth_candidate
+                break
     return env
 
 

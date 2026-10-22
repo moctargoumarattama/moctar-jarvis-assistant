@@ -19,18 +19,78 @@ from actions.base import format_action_result
 LOGGER = logging.getLogger("moctar.media_actions")
 
 
+def _get_target_user_and_env() -> tuple[str, Dict[str, str], list[str]]:
+    """Détecte l'utilisateur cible (ex: moctar) et prépare l'environnement X11 / D-Bus / PulseAudio.
+
+    Retourne:
+        (target_user, env_dict, sudo_prefix_list)
+    """
+    target_user = "moctar" if os.path.exists("/home/moctar") else (
+        os.environ.get("SUDO_USER") or os.environ.get("USER") or "root"
+    )
+    display = os.environ.get("DISPLAY", ":0")
+
+    # Détection XAUTHORITY
+    xauth = os.environ.get("XAUTHORITY")
+    if not xauth or not os.path.exists(xauth):
+        for candidate in (
+            f"/home/{target_user}/.Xauthority",
+            os.path.expanduser(f"~{target_user}/.Xauthority") if target_user != "root" else "",
+            os.path.expanduser("~/.Xauthority"),
+            "/root/.Xauthority",
+        ):
+            if candidate and os.path.exists(candidate):
+                xauth = candidate
+                break
+        if not xauth:
+            xauth = f"/home/{target_user}/.Xauthority"
+
+    # Détection XDG_RUNTIME_DIR & DBUS
+    runtime_dir = "/run/user/1000"
+    if not os.path.exists(runtime_dir):
+        if os.environ.get("XDG_RUNTIME_DIR") and os.path.exists(os.environ.get("XDG_RUNTIME_DIR", "")):
+            runtime_dir = os.environ["XDG_RUNTIME_DIR"]
+
+    bus_path = f"{runtime_dir}/bus"
+    dbus_addr = os.environ.get("DBUS_SESSION_BUS_ADDRESS") or f"unix:path={bus_path}"
+    pulse_server = f"unix:{runtime_dir}/pulse/native"
+
+    env = os.environ.copy()
+    env["DISPLAY"] = display
+    env["XAUTHORITY"] = xauth
+    env["XDG_RUNTIME_DIR"] = runtime_dir
+    env["DBUS_SESSION_BUS_ADDRESS"] = dbus_addr
+    env["PULSE_SERVER"] = pulse_server
+
+    sudo_prefix: list[str] = []
+    is_linux = sys.platform.startswith("linux") or os.name == "posix"
+    is_root = hasattr(os, "getuid") and os.getuid() == 0 and target_user != "root"
+
+    if is_linux and is_root:
+        sudo_prefix = [
+            "sudo", "-u", target_user,
+            "env",
+            f"DISPLAY={display}",
+            f"XAUTHORITY={xauth}",
+            f"XDG_RUNTIME_DIR={runtime_dir}",
+            f"DBUS_SESSION_BUS_ADDRESS={dbus_addr}",
+            f"PULSE_SERVER={pulse_server}",
+            f"PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin:{os.environ.get('PATH', '')}",
+        ]
+
+    return target_user, env, sudo_prefix
+
+
+def _run_linux_cmd(cmd_args: list[str], timeout: float = 2.0) -> subprocess.CompletedProcess:
+    """Exécute une commande multimédia sous Linux avec les privilèges et l'environnement de l'utilisateur actif."""
+    target_user, env, sudo_prefix = _get_target_user_and_env()
+    full_cmd = (sudo_prefix + cmd_args) if sudo_prefix else cmd_args
+    return subprocess.run(full_cmd, capture_output=True, text=True, timeout=timeout, env=env)
+
+
 def _get_linux_env() -> Dict[str, str]:
     """Prépare l'environnement graphique X11 / PulseAudio pour les commandes multimédias."""
-    env = os.environ.copy()
-    try:
-        import desktop_window_manager
-        for k, v in desktop_window_manager._get_linux_display_env().items():
-            if k not in env:
-                env[k] = v
-    except Exception:
-        pass
-    if "DISPLAY" not in env:
-        env["DISPLAY"] = ":0"
+    _, env, _ = _get_target_user_and_env()
     return env
 
 
@@ -45,7 +105,6 @@ def control_playback(action: str) -> Dict[str, Any]:
     """
     act = (action or "").lower().strip()
     action_name = "control_playback"
-    env = _get_linux_env()
 
     # Mapping vers les commandes playerctl et les touches multimédias
     playerctl_map = {
@@ -70,38 +129,61 @@ def control_playback(action: str) -> Dict[str, Any]:
     executed = False
 
     # 1. Technologie Linux prioritaire : playerctl (MPRIS - Spotify, Chrome, Firefox, VLC)
+    # On transmet -a (--all-players) pour forcer la mise en pause / reprise sur tous les lecteurs actifs
     if shutil.which("playerctl"):
         try:
-            res = subprocess.run(
-                ["playerctl", cmd_verb],
-                capture_output=True,
-                text=True,
-                timeout=2.0,
-                env=env,
-            )
+            playerctl_args = ["playerctl"]
+            if act in ("pause", "stop", "play", "resume"):
+                playerctl_args.extend(["-a", cmd_verb])
+            else:
+                playerctl_args.append(cmd_verb)
+
+            res = _run_linux_cmd(playerctl_args, timeout=2.0)
             if res.returncode == 0:
                 executed = True
                 LOGGER.info("⚡ [MEDIA PLAYERCTL (0ms)]: %s exécuté avec succès", cmd_verb)
+            else:
+                LOGGER.debug("playerctl exit code %s: %s", res.returncode, res.stderr)
         except Exception as err:
             LOGGER.debug("playerctl failed: %s", err)
 
-    # 2. Fallback Linux : xdotool (simulation touche clavier multimédia)
-    if not executed and shutil.which("xdotool"):
+    # 2. Contrôle ciblé YouTube / Navigateur Web (Chrome, Firefox, Brave) via xdotool
+    # Si YouTube est en cours de lecture dans un onglet actif ou en arrière-plan
+    if shutil.which("xdotool"):
         try:
-            res = subprocess.run(
-                ["xdotool", "key", xdo_key],
-                capture_output=True,
-                text=True,
-                timeout=1.5,
-                env=env,
-            )
+            search_res = _run_linux_cmd(["xdotool", "search", "--name", "[Yy]ou[Tt]ube"], timeout=1.5)
+            stdout_text = getattr(search_res, "stdout", "") or ""
+            yt_win_ids = []
+            if isinstance(stdout_text, str):
+                yt_win_ids = [line.strip() for line in stdout_text.strip().splitlines() if line.strip()]
+
+            if yt_win_ids:
+                LOGGER.info("⚡ [MEDIA XDOTOOL YOUTUBE]: %d fenêtre(s) YouTube détectée(s)", len(yt_win_ids))
+                for win_id in yt_win_ids[:3]:
+                    if act in ("pause", "stop", "play", "resume"):
+                        # Raccourci natif universel YouTube : 'k' bascule pause/play sans défilement de page
+                        _run_linux_cmd(["xdotool", "key", "--window", win_id, "k"], timeout=1.0)
+                        executed = True
+                    elif act == "next":
+                        _run_linux_cmd(["xdotool", "key", "--window", win_id, "Shift+n"], timeout=1.0)
+                        executed = True
+                    elif act == "previous":
+                        _run_linux_cmd(["xdotool", "key", "--window", win_id, "Shift+p"], timeout=1.0)
+                        executed = True
+        except Exception as yt_err:
+            LOGGER.debug("xdotool youtube search/key failed: %s", yt_err)
+
+    # 3. Fallback Linux : simulation touche multimédia globale (XF86AudioPlay, etc.)
+    if shutil.which("xdotool"):
+        try:
+            res = _run_linux_cmd(["xdotool", "key", xdo_key], timeout=1.5)
             if res.returncode == 0:
                 executed = True
                 LOGGER.info("⚡ [MEDIA XDOTOOL (0ms)]: Touche %s simulée", xdo_key)
         except Exception as err:
             LOGGER.debug("xdotool key failed: %s", err)
 
-    # 3. Fallback universel : pyautogui
+    # 4. Fallback universel : pyautogui
     if not executed:
         try:
             import pyautogui
@@ -131,9 +213,8 @@ def control_playback(action: str) -> Dict[str, Any]:
 def launch_playlist() -> Dict[str, Any]:
     """Lance la playlist Spotify ou YouTube Music par défaut sur l'hôte."""
     action_name = "launch_playlist"
-    env = _get_linux_env()
     reply_msg = "Initialisation du flux audio. Votre playlist est lancée, Moctar."
-
+    target_user, env, sudo_prefix = _get_target_user_and_env()
     playlist_uri = os.getenv("SPOTIFY_PLAYLIST_URI", "").strip()
 
     launched = False
@@ -141,31 +222,37 @@ def launch_playlist() -> Dict[str, Any]:
     if playlist_uri:
         if shutil.which("spotify"):
             try:
-                subprocess.Popen(["spotify", f"--uri={playlist_uri}"], env=env)
+                cmd = (sudo_prefix + ["spotify", f"--uri={playlist_uri}"]) if sudo_prefix else ["spotify", f"--uri={playlist_uri}"]
+                subprocess.Popen(cmd, env=env)
                 launched = True
             except Exception:
                 pass
         if not launched and shutil.which("xdg-open"):
             try:
-                subprocess.Popen(["xdg-open", playlist_uri], env=env)
+                cmd = (sudo_prefix + ["xdg-open", playlist_uri]) if sudo_prefix else ["xdg-open", playlist_uri]
+                subprocess.Popen(cmd, env=env)
                 launched = True
             except Exception:
                 pass
 
-    # 2. Si pas d'URI ou échec, lancer Spotify ou YouTube Music par défaut
-    if not launched:
-        if shutil.which("spotify"):
-            try:
-                subprocess.Popen(["spotify"], env=env)
-                launched = True
-            except Exception:
-                pass
+    # 2. Si pas d'URI ou échec, lancer Spotify par défaut
+    if not launched and shutil.which("spotify"):
+        try:
+            cmd = (sudo_prefix + ["spotify"]) if sudo_prefix else ["spotify"]
+            subprocess.Popen(cmd, env=env)
+            launched = True
+        except Exception:
+            pass
 
     # 3. Repli Web (YouTube Music)
     if not launched:
         try:
-            webbrowser.open_new_tab("https://music.youtube.com")
-            launched = True
+            if sudo_prefix and shutil.which("xdg-open"):
+                subprocess.Popen(sudo_prefix + ["xdg-open", "https://music.youtube.com"], env=env)
+                launched = True
+            else:
+                webbrowser.open_new_tab("https://music.youtube.com")
+                launched = True
         except Exception:
             pass
 
@@ -188,29 +275,28 @@ def adjust_system_volume(action: str, percent: Optional[int] = None) -> Dict[str
     act = (action or "").lower().strip()
     action_name = "adjust_system_volume"
     reply_msg = "Niveau audio ajusté, Moctar."
-    env = _get_linux_env()
     executed = False
 
     # 1. pactl (Linux moderne avec PulseAudio / PipeWire)
     if shutil.which("pactl"):
         try:
             if act == "up":
-                subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+10%"], check=True, timeout=1.5, env=env)
-                subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"], check=False, timeout=1.5, env=env)
+                _run_linux_cmd(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+10%"], timeout=1.5)
+                _run_linux_cmd(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"], timeout=1.5)
                 executed = True
             elif act == "down":
-                subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-10%"], check=True, timeout=1.5, env=env)
+                _run_linux_cmd(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-10%"], timeout=1.5)
                 executed = True
             elif act == "mute":
-                subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "1"], check=True, timeout=1.5, env=env)
+                _run_linux_cmd(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "1"], timeout=1.5)
                 executed = True
             elif act in ("unmute", "demute"):
-                subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"], check=True, timeout=1.5, env=env)
+                _run_linux_cmd(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"], timeout=1.5)
                 executed = True
             elif act == "set" and percent is not None:
                 clamped = max(0, min(100, int(percent)))
-                subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{clamped}%"], check=True, timeout=1.5, env=env)
-                subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"], check=False, timeout=1.5, env=env)
+                _run_linux_cmd(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{clamped}%"], timeout=1.5)
+                _run_linux_cmd(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"], timeout=1.5)
                 executed = True
         except Exception as pactl_err:
             LOGGER.debug("pactl failed: %s", pactl_err)
@@ -219,20 +305,20 @@ def adjust_system_volume(action: str, percent: Optional[int] = None) -> Dict[str
     if not executed and shutil.which("amixer"):
         try:
             if act == "up":
-                subprocess.run(["amixer", "-D", "pulse", "sset", "Master", "10%+"], check=True, timeout=1.5, env=env)
+                _run_linux_cmd(["amixer", "-D", "pulse", "sset", "Master", "10%+"], timeout=1.5)
                 executed = True
             elif act == "down":
-                subprocess.run(["amixer", "-D", "pulse", "sset", "Master", "10%-"], check=True, timeout=1.5, env=env)
+                _run_linux_cmd(["amixer", "-D", "pulse", "sset", "Master", "10%-"], timeout=1.5)
                 executed = True
             elif act == "mute":
-                subprocess.run(["amixer", "-D", "pulse", "sset", "Master", "mute"], check=True, timeout=1.5, env=env)
+                _run_linux_cmd(["amixer", "-D", "pulse", "sset", "Master", "mute"], timeout=1.5)
                 executed = True
             elif act in ("unmute", "demute"):
-                subprocess.run(["amixer", "-D", "pulse", "sset", "Master", "unmute"], check=True, timeout=1.5, env=env)
+                _run_linux_cmd(["amixer", "-D", "pulse", "sset", "Master", "unmute"], timeout=1.5)
                 executed = True
             elif act == "set" and percent is not None:
                 clamped = max(0, min(100, int(percent)))
-                subprocess.run(["amixer", "-D", "pulse", "sset", "Master", f"{clamped}%"], check=True, timeout=1.5, env=env)
+                _run_linux_cmd(["amixer", "-D", "pulse", "sset", "Master", f"{clamped}%"], timeout=1.5)
                 executed = True
         except Exception as amix_err:
             LOGGER.debug("amixer failed: %s", amix_err)

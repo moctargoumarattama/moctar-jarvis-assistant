@@ -342,8 +342,14 @@ def is_direct_voice_command(text: str) -> bool:
     # 3. Météo & Climat
     if re.search(r"\b(?:m[ée]t[ée]o|quel\s+temps|quel\s+degr[ée]|combien\s+de\s+degr[ée]s?|pleut[- ]il|est[- ]ce\s+qu['’]il\s+pleut|il\s+fait\s+quel\s+degr[ée]|fait\s+quel\s+degr[ée])\b", norm):
         return True
-    # 4. Multimédia & Audio
-    if re.search(r"\b(?:arr[êe]te\s+la\s+musique|stop\s+la\s+musique|pause\s+la\s+musique|coupe\s+le\s+son|mute|remets\s+le\s+son|monte\s+le\s+son|baisse\s+le\s+son)\b", norm):
+    # 4. Multimédia & Audio (Lecture, Pause, Volume, Spotify, YouTube)
+    if re.search(r"\b(?:arr[êe]te\s+la\s+musique|stop\s+la\s+musique|pause\s+la\s+musique|pause\s+youtube|mets\s+youtube\s+en\s+pause|youtube\s+en\s+pause|pause\s+la\s+vid[ée]o|mets\s+en\s+pause|mets\s+sur\s+pause|en\s+pause|on\s+pause|pause)\b", norm):
+        return True
+    if re.search(r"\b(?:mets\s+la\s+musique|mets\s+de\s+la\s+musique|lance\s+la\s+musique|lance\s+de\s+la\s+musique|joue\s+de\s+la\s+musique|joue\s+la\s+musique|lance\s+ma\s+playlist|lance\s+spotify|ouvre\s+spotify|reprends?\s+la\s+lecture|remets\s+la\s+musique|relance\s+la\s+musique)\b", norm):
+        return True
+    if re.search(r"\b(?:chanson\s+suivante|piste\s+suivante|musique\s+suivante|morceau\s+suivant|suivant|chanson\s+pr[ée]c[ée]dente|piste\s+pr[ée]c[ée]dente|musique\s+pr[ée]c[ée]dente|pr[ée]c[ée]dent)\b", norm):
+        return True
+    if re.search(r"\b(?:coupe\s+le\s+son|mute|remets\s+le\s+son|monte\s+le\s+son|baisse\s+le\s+son|diminue\s+le\s+son|augmente\s+le\s+son|diminue\s+le\s+volume|augmente\s+le\s+volume|baisse\s+le\s+volume|monte\s+le\s+volume|coupe\s+le\s+volume|r[èe]gle\s+le\s+volume|mets\s+le\s+volume)\b", norm):
         return True
     # 5. Gestion Système, Contexte & Organisation
     if re.search(r"\b(?:briefing|o[uù]\s+en\s+est[- ]on|optimise\s+le\s+syst[èe]me|mode\s+optimisation|fin\s+de\s+journ[ée]e|bonne\s+nuit|liste\s+mes\s+t[aâ]ches|mes\s+todos)\b", norm):

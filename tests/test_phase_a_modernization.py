@@ -9,6 +9,7 @@ import actions.workspace_layout as workspace_layout
 import ai_brain
 import autonomous_library
 import config
+import main
 import weather_service
 
 
@@ -180,11 +181,55 @@ class TestPhaseAModernization(unittest.TestCase):
                 self.assertEqual(res["reply"], "Initialisation du flux audio. Votre playlist est lancée, Moctar.")
 
             # Volume
-            for phrase in ["Monte le son", "Baisse le son", "Coupe le son", "Mets le volume à 35%"]:
+            for phrase in ["Monte le son", "Baisse le son", "Coupe le son", "Mets le volume à 35%", "Diminue le volume, diminue le volume.", "Augmente le volume"]:
                 res = autonomous_library.execute_autonomous_task(phrase)
                 self.assertTrue(res["handled"])
                 self.assertEqual(res["task_category"], "system_tools")
                 self.assertEqual(res["reply"], "Niveau audio ajusté, Moctar.")
+
+    def test_voice_direct_commands_media_and_volume(self):
+        """Vérifie que les ordres directs multimédias et volume ne sont jamais ignorés hors session."""
+        phrases = [
+            "Mets la musique.",
+            "Diminue le volume, diminue le volume.",
+            "Pause.",
+            "Mets YouTube en pause",
+            "Bien, on pause.",
+            "Augmente le son",
+            "Coupe le son",
+            "Piste suivante",
+            "Lance Spotify",
+        ]
+        for phrase in phrases:
+            self.assertTrue(
+                main.is_direct_voice_command(phrase),
+                f"La phrase '{phrase}' devrait être acceptée en commande directe sans mot-clé.",
+            )
+
+    def test_media_actions_youtube_targeting(self):
+        """Vérifie que le contrôle média cible spécifiquement les fenêtres YouTube via la touche 'k'."""
+        with patch("shutil.which", return_value="/usr/bin/xdotool"):
+            with patch("subprocess.run") as mock_sub:
+                # Simuler la détection d'une fenêtre YouTube
+                def fake_run(cmd, *args, **kwargs):
+                    mock_res = MagicMock()
+                    mock_res.returncode = 0
+                    if "search" in cmd:
+                        mock_res.stdout = "1234567\n"
+                    else:
+                        mock_res.stdout = ""
+                    return mock_res
+
+                mock_sub.side_effect = fake_run
+
+                res = media_actions.control_playback("pause")
+                self.assertTrue(res["success"])
+                self.assertEqual(res["message"], "Lecture mise en pause, Moctar.")
+
+                # Vérifier qu'une commande xdotool key --window 1234567 k a été envoyée
+                calls = [call_args[0][0] for call_args in mock_sub.call_args_list]
+                yt_key_calls = [c for c in calls if "key" in c and "1234567" in c and "k" in c]
+                self.assertTrue(len(yt_key_calls) > 0, "La touche 'k' doit être envoyée à la fenêtre YouTube détectée.")
 
     # -------------------------------------------------------------------------
     # 3. Positionnement Géométrique des Fenêtres — Mode Bureau
