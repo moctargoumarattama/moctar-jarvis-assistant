@@ -37,16 +37,16 @@ except Exception:
 DEFAULT_MODEL = config.gemini_model
 DEFAULT_BASE_URL = config.GEMINI_BASE_URL
 GENERATION_CONFIG = {
-    "temperature": 0.2,
+    "temperature": 0.6,
     "max_tokens": 350,
     "top_p": 0.8,
 }
 MOCTAR_SYSTEM_PROMPT = (
-    "Tu es M.O.C.T.A.R, l'intelligence artificielle cybernétique et copilote d'ingénierie de Moctar. "
-    "Ton style allie la précision d'un centre de commandement futuriste (NOC) à la fluidité d'un associé technique d'élite. "
-    "Tes réponses orales sont ultra-réactives, posées, analytiques et concises (1 à 3 phrases maximum). "
-    "Pas de jargon théâtral de bande dessinée, mais une prestance technologique moderne, directe et chirurgicale. "
-    "Termine toujours tes interventions vocales en t'adressant à lui par 'Moctar.'"
+    "Tu es M.O.C.T.A.R, l'intelligence cybernétique et copilote d'ingénierie d'élite de Moctar. "
+    "Ton style allie l'acuité technique d'un centre de commandement à la chaleur et la complicité d'un vrai partenaire. "
+    "Tes réponses orales sont naturelles, posées, vivantes et concises (1 à 2 phrases percutantes). "
+    "Ne termine PAS toutes tes phrases par 'Moctar.' de façon mécanique : utilise son prénom avec parcimonie et fluidité. "
+    "Pose spontanément une courte question de clarification dès qu'une intention est ouverte ou mérite d'être affinée."
 )
 PROVIDER_FAILURE_TTL_SECONDS = 30.0
 GEMINI_BACKUP_MODEL = "gemini-2.5-flash"
@@ -1528,7 +1528,7 @@ class AIBrain:
         self._record_provider_result("gemini", result)
         return result
 
-    def _chat_gemini(self, messages, tools=None, temperature=0.2):
+    def _chat_gemini(self, messages, tools=None, temperature=0.6):
         """Translate model/tool turns without letting the SDK execute local actions."""
         error = {"content": "Le moteur IA est indisponible pour le moment.",
                  "tool_calls": [], "finish_reason": "error"}

@@ -47,6 +47,21 @@ def _tokenize(text: str) -> List[str]:
 
 from contextlib import contextmanager
 
+DEFAULT_MOCTAR_PROFILE: Dict[str, Any] = {
+    "name": "Moctar",
+    "hardware": "Dell Precision M4800 (Linux Ubuntu)",
+    "role": "Ingénieur & Pilote des systèmes",
+    "tone_preference": "Naturel, chaleureux, direct, concis et complice",
+    "preferred_editor": "VS Code",
+    "preferred_shell": "bash / zsh",
+    "favorite_sports_teams": ["Real Madrid"],
+    "favorite_competitions": ["Ligue 1", "Champions League", "Liga", "Premier League"],
+    "recent_topics": [],
+    "known_preferences": {},
+    "last_interaction": None,
+    "total_turns": 0,
+}
+
 
 class AssistantMemory:
     """Gestionnaire de mémoire duale industrielle (SQLite locale + historique glissant)."""
@@ -312,6 +327,147 @@ class AssistantMemory:
             return f"On avançait sur {topic}. On continue là-dessus, Moctar ?"
 
         return None
+
+    # ==========================================================================
+    # 1b. PROFIL CONTINU DE MOCTAR (APPRENTISSAGE AUTONOME MULTI-CONVERSATIONS)
+    # ==========================================================================
+
+    def get_moctar_profile(self) -> Dict[str, Any]:
+        """Récupère le profil vivant de Moctar ou initialise le profil par défaut."""
+        default_profile = dict(DEFAULT_MOCTAR_PROFILE)
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT content FROM memories WHERE category = 'user_profile' AND key = 'moctar' LIMIT 1"
+                )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    try:
+                        data = json.loads(row[0])
+                        if isinstance(data, dict):
+                            # Fusion sur les valeurs par défaut pour garantir la présence de toutes les clés
+                            for k, v in default_profile.items():
+                                if k not in data:
+                                    data[k] = v
+                            return data
+                    except Exception:
+                        pass
+        except Exception as exc:
+            logger.error("Erreur lors de la lecture du profil Moctar : %s", exc)
+
+        # Initialisation idempotente si absent
+        self.save_fact(
+            category="user_profile",
+            key="moctar",
+            value=json.dumps(default_profile, ensure_ascii=False),
+            importance=5,
+        )
+        return default_profile
+
+    def update_moctar_profile(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Met à jour le profil persistant de Moctar avec fusion incrémentale."""
+        current = self.get_moctar_profile()
+        for k, v in updates.items():
+            current[k] = v
+        current["last_interaction"] = datetime.now().isoformat(timespec="seconds")
+        val_str = json.dumps(current, ensure_ascii=False)
+        self.save_fact(category="user_profile", key="moctar", value=val_str, importance=5)
+        return current
+
+    def record_conversation_turn_for_profile(self, user_text: str, assistant_reply: str) -> None:
+        """Met à jour le profil vivant de Moctar de façon autonome après chaque échange."""
+        if not user_text or not user_text.strip():
+            return
+
+        profile = self.get_moctar_profile()
+        profile["total_turns"] = int(profile.get("total_turns", 0)) + 1
+        profile["last_interaction"] = datetime.now().isoformat(timespec="seconds")
+
+        clean_user = user_text.strip()
+        low_user = clean_user.lower()
+
+        # 1. Détection du sujet principal pour l'historique récent des thèmes
+        topic = None
+        if any(w in low_user for w in ("foot", "match", "ligue 1", "champions league", "liga", "score", "real madrid", "classement")):
+            topic = "Résultats sportifs"
+        elif any(w in low_user for w in ("code", "vscode", "dev", "python", "script", "terminal", "bureau", "git", "docker")):
+            topic = "Développement & VS Code"
+        elif any(w in low_user for w in ("meteo", "météo", "temperature", "température", "niamey", "casablanca")):
+            topic = "Météo"
+        elif any(w in low_user for w in ("hud", "globe", "orbe", "terre", "3d")):
+            topic = "Interface HUD 3D"
+        elif any(w in low_user for w in ("cpu", "ram", "service", "systemctl", "vps", "processus", "disque")):
+            topic = "Surveillance système NOC"
+        elif any(w in low_user for w in ("musique", "chanson", "volume", "pause", "zik", "audio")):
+            topic = "Multimédia & Audio"
+        elif len(clean_user) >= 4:
+            topic = clean_user[:40]
+
+        if topic:
+            recent = profile.get("recent_topics", [])
+            if not isinstance(recent, list):
+                recent = []
+            if topic in recent:
+                recent.remove(topic)
+            recent.insert(0, topic)
+            profile["recent_topics"] = recent[:5]
+
+        # 2. Détection de préférences ou clubs sportifs mentionnés
+        fav_teams = set(profile.get("favorite_sports_teams", ["Real Madrid"]))
+        team_patterns = {
+            "real madrid": "Real Madrid",
+            "barça": "FC Barcelone",
+            "barcelone": "FC Barcelone",
+            "psg": "PSG",
+            "paris": "PSG",
+            "marseille": "OM",
+            "om": "OM",
+            "arsenal": "Arsenal",
+            "manchester city": "Manchester City",
+            "liverpool": "Liverpool",
+            "bayern": "Bayern Munich",
+        }
+        for pat, canonical in team_patterns.items():
+            if re.search(rf"\b(?:mon\s+club|mon\s+[ée]quipe|je\s+supporte|j['’]aime|fan\s+du)\s+.*{pat}\b", low_user) or (
+                pat in low_user and any(w in low_user for w in ("préféré", "prefere", "supporte"))
+            ):
+                fav_teams.add(canonical)
+        profile["favorite_sports_teams"] = list(fav_teams)
+
+        # 3. Préférences d'outils et de villes
+        known_prefs = profile.get("known_preferences", {})
+        if "vscode" in low_user or "visual studio code" in low_user:
+            known_prefs["editor"] = "VS Code"
+        if "chrome" in low_user:
+            known_prefs["browser"] = "Chrome"
+        if any(w in low_user for w in ("niamey", "niger")):
+            known_prefs["primary_city"] = "Niamey"
+        elif any(w in low_user for w in ("casablanca", "casa", "maroc")):
+            known_prefs["secondary_city"] = "Casablanca"
+        profile["known_preferences"] = known_prefs
+
+        # Enregistrement persistant autonome
+        self.update_moctar_profile(profile)
+
+    def get_moctar_profile_prompt_snippet(self) -> str:
+        """Génère un bloc textuel contextuel et vivant du profil de Moctar pour injection LLM."""
+        profile = self.get_moctar_profile()
+        recent_topics = profile.get("recent_topics", [])
+        topics_str = ", ".join(recent_topics) if recent_topics else "Général"
+        teams = ", ".join(profile.get("favorite_sports_teams", ["Real Madrid"]))
+        turn_count = profile.get("total_turns", 0)
+
+        lines = [
+            "[PROFIL CONTINU DE MOCTAR (PERSONNALISATION VIVANTE)]",
+            f"- Utilisateur : {profile.get('name', 'Moctar')} (Ingénieur & Architecte sur {profile.get('hardware', 'Dell Precision M4800')})",
+            f"- Ton souhaité : {profile.get('tone_preference', 'Humain, chaleureux, direct et complice')}",
+            f"- Équipes & Sports suivis : {teams}",
+            f"- Sujets récents abordés : {topics_str}",
+            f"- Volume d'échanges partagés : {turn_count} tours de conversation",
+            "- Directive de posture : Ne termine PAS tes phrases par 'Moctar.' à chaque fois. Parle-lui avec naturel et fluidité, et pose de courtes questions de clarification dès que nécessaire.",
+        ]
+        return "\n".join(lines)
 
     def search_facts(
         self,

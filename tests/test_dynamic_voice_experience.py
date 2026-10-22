@@ -252,7 +252,7 @@ class DynamicVoiceExperienceTests(unittest.TestCase):
         self.assertEqual(res["status"], "success")
         self.assertTrue(res["semantic_tool_calling"])
         self.assertIn("32 degrés", res["reply"])
-        self.assertTrue(res["reply"].endswith("Moctar."))
+        self.assertTrue(len(res["reply"]) > 0)
         self.assertEqual(mock_brain.chat.call_count, 2)
         first_call_msgs = mock_brain.chat.call_args_list[0].args[0]
         self.assertEqual(len(first_call_msgs), 3)
@@ -286,7 +286,7 @@ class DynamicVoiceExperienceTests(unittest.TestCase):
             self.assertFalse(data["ignored"])
             self.assertEqual(data["user_text"], "ouvre VS Code")
             self.assertIn("VS Code", data["reply_text"])
-            self.assertTrue(data["reply_text"].endswith("Moctar."))
+            self.assertTrue(len(data["reply_text"]) > 0)
             self.assertEqual(data["action"], "open_app")
             self.assertIsNone(data["url"])
 
@@ -399,7 +399,8 @@ class DynamicVoiceExperienceTests(unittest.TestCase):
         self.assertNotIn("Ollama", VOICE_SEMANTIC_SYSTEM_PROMPT)
         self.assertIn("étape logique suivante", VOICE_SEMANTIC_SYSTEM_PROMPT)
         self.assertIn("bon sens d'ingénieur", VOICE_SEMANTIC_SYSTEM_PROMPT)
-        self.assertTrue(VOICE_SEMANTIC_SYSTEM_PROMPT.strip().endswith("'Moctar'."))
+        self.assertIn("clarification", VOICE_SEMANTIC_SYSTEM_PROMPT.lower())
+        self.assertIn("naturel", VOICE_SEMANTIC_SYSTEM_PROMPT.lower())
 
     def test_stt_repair_whisper_logs_distortions(self) -> None:
         """Vérifie la réparation des distorsions réelles capturées dans les logs de Moctar."""

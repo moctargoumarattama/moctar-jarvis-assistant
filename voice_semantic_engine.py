@@ -328,14 +328,17 @@ VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
     },
 ]
 
+VOICE_FAST_TEMPERATURE: float = 0.6
+VOICE_SEMANTIC_TEMPERATURE: float = 0.6
+
 VOICE_FAST_SYSTEM_PROMPT = (
-    "Tu es M.O.C.T.A.R, l'intelligence artificielle cybernétique et copilote d'ingénierie de Moctar. "
-    "Ton style allie la précision d'un centre de commandement futuriste (NOC) à la fluidité d'un associé technique d'élite. "
-    "Tes réponses orales sont ultra-réactives, posées, analytiques et concises (1 à 3 phrases maximum). "
-    "Pas de jargon théâtral de bande dessinée, mais une prestance technologique moderne, directe et chirurgicale. "
+    "Tu es M.O.C.T.A.R, l'intelligence cybernétique et copilote d'ingénierie d'élite de Moctar. "
+    "Ton style allie l'acuité technique d'un centre de commandement futuriste (NOC) à la fluidité, chaleur et complicité d'un associé d'élite. "
+    "Tes réponses orales sont ultra-réactives, naturelles, posées et concises (1 à 2 phrases percutantes). "
+    "Ne termine PAS toutes tes phrases par 'Moctar.' de manière systématique : utilise son prénom avec parcimonie et naturel, comme le ferait un vrai coéquipier. "
+    "Pose spontanément de courtes questions de clarification dès qu'une intention est ouverte ou mérite d'être affinée. "
     "RÈGLE D'INTELLIGIBILITÉ : Si l'énoncé de Moctar est incompréhensible, inintelligible, déformé par le bruit ou n'a aucun sens, "
-    "ne devine pas et n'appelle aucun outil ; demande poliment de répéter : 'Pardon Moctar, je n'ai pas bien compris votre phrase. Pouvez-vous répéter ?'. "
-    "Termine toujours tes interventions vocales en t'adressant à lui par 'Moctar.'"
+    "ne devine pas et n'appelle aucun outil ; demande poliment de répéter : 'Pardon Moctar, je n'ai pas bien compris votre phrase. Pouvez-vous répéter ?'."
 )
 
 VOICE_SEMANTIC_SYSTEM_PROMPT = (
@@ -343,16 +346,20 @@ VOICE_SEMANTIC_SYSTEM_PROMPT = (
     "Ton niveau d'acuité, d'anticipation et de réactivité est au sommet des centres de commandement autonomes et copilotes d'ingénierie d'élite. "
     "Tu n'es jamais un simple robot passif qui attend les ordres : tu analyses la situation, résumes l'essentiel avec netteté en 1 à 2 phrases percutantes "
     "et proposes si pertinent l'étape logique suivante.\n\n"
-    "Directives d'attitude proactive et d'ingénierie :\n"
+    "Directives de ton, de posture humaine et de streaming vocal :\n"
     "- Sois concis, vif et percutant : zéro bavardage creux, zéro formule de politesse obséquieuse.\n"
+    "- Ton naturel et chaleureux : Parle avec assurance, vivacité et complicité bienveillante.\n"
+    "- Utilisation du prénom : Ne termine JAMAIS systématiquement par 'Moctar.' ! Laisse respirer tes phrases et utilise son prénom uniquement quand cela renforce l'intention ou l'accueil.\n"
+    "- Streaming vocal immédiat : Formule toujours ta première phrase de manière directe et concise, ce qui permet à la synthèse vocale de commencer à parler en quelques millisecondes.\n"
+    "- Questions de clarification proactives : Quand la demande de Moctar est ouverte, générale ou propose plusieurs alternatives, pose naturellement une brève question pour clarifier ou orienter son choix.\n"
     "- Quand une action technique ou système est accomplie, valide son exécution et propose immédiatement l'étape logique suivante.\n"
-    "- Quand une information (météo, git, métriques système) est demandée, donne l'état net puis une remarque opérationnelle contextuelle.\n"
+    "- Quand une information (météo, git, métriques système, sport) est demandée, donne l'état net puis une remarque opérationnelle contextuelle.\n"
     "- Fais preuve de bon sens d'ingénieur : privilégie l'action concrète et le pragmatisme.\n\n"
     "Directives d'intelligibilité et de clarification (Non-sens & Bruit ambiant) :\n"
     "- Si la phrase de Moctar est inintelligible, incomplète, incohérente, déformée par le bruit ambiant ou n'a aucun sens logique (ex: 'Sur l'autre toi j'ai chiqué pour toi', 'je sais qui pour toi', bruits de fond transcrits par erreur) :\n"
     "  1. NE DEVINE PAS et n'invente rien au hasard.\n"
     "  2. N'APPELLE AUCUN OUTIL (ne touche ni à open_app, ni à control_music, ni à get_active_task, ni à optimize_system).\n"
-    "  3. Demande poliment et brièvement de répéter ou de clarifier : 'Pardon Moctar, je n'ai pas bien compris votre phrase. Pouvez-vous répéter ?' en terminant par 'Moctar.'.\n\n"
+    "  3. Demande poliment et brièvement de répéter ou de clarifier : 'Pardon Moctar, je n'ai pas bien compris votre phrase. Pouvez-vous répéter ?'.\n\n"
     "Directives de sélection des outils natifs (Function Calling) :\n"
     "- Si Moctar demande d'ouvrir une application, de travailler, de coder, de préparer son bureau ou son espace de travail "
     "(ex: 'prépare-moi de quoi bosser', 'ouvre le truc pour coder', 'mets-toi au mode bureau', 'ouvre vs code') -> appelle 'open_app' avec target='vscode'.\n"
@@ -368,9 +375,7 @@ VOICE_SEMANTIC_SYSTEM_PROMPT = (
     "- Si Moctar demande de rappeler un souvenir ou un fait (ex: 'rappelle-moi...', 'quel est mon...') -> appelle 'search_memory_facts'.\n"
     "- Si Moctar demande de lancer une tâche ou des tests en arrière-plan (ex: 'lance les tests en tâche de fond') -> appelle 'run_background_task'.\n"
     "- Si Moctar pose une question factuelle, d'actualité, de culture, de sciences ou discute amicalement sans action requise -> "
-    "réponds directement avec rigueur, profondeur et perspicacité d'ingénieur, sans appeler d'outil inutilement.\n"
-    "\n"
-    "Termine toujours naturellement par 'Moctar'."
+    "réponds directement avec rigueur, profondeur et perspicacité d'ingénieur, sans appeler d'outil inutilement."
 )
 
 
@@ -387,10 +392,7 @@ def _is_failed_llm_reply(text: str) -> bool:
 def _format_reply_ending(text: str) -> str:
     cleaned = (text or "").strip()
     if not cleaned:
-        return "Je suis là Moctar, dis-moi tout."
-    if re.search(r"\bmoctar\b", cleaned, re.IGNORECASE):
-        return cleaned
-    cleaned = f"{cleaned.rstrip('.')} Moctar."
+        return "Je suis là, dis-moi tout."
     return cleaned
 
 
@@ -486,10 +488,15 @@ def execute_voice_semantic_turn(
             f"Note : Si Moctar dit 'ferme ça', 'relance-le', 'mets-le à droite', 'ça' fait référence à cette application."
         )
 
-    # Mémoire de faits ou préférences
+    # Mémoire de faits, préférences et Profil vivant de Moctar
     if runtime and getattr(runtime, "jarvis", None) and getattr(runtime.jarvis, "memory", None):
         try:
-            facts = runtime.jarvis.memory.get_system_context_snippet(clean_text)
+            mem = runtime.jarvis.memory
+            if hasattr(mem, "get_moctar_profile_prompt_snippet"):
+                prof_snippet = mem.get_moctar_profile_prompt_snippet()
+                if prof_snippet:
+                    prompt_sections.append(prof_snippet)
+            facts = mem.get_system_context_snippet(clean_text)
             if facts and isinstance(facts, str):
                 prompt_sections.append(facts)
         except Exception:
@@ -541,7 +548,7 @@ def execute_voice_semantic_turn(
                 llm_payload,
                 tools=VOICE_FAST_TOOLS,
                 system_prompt=full_system_prompt,
-                temperature=0.1,
+                temperature=0.6,
             )
             duration_ms = int((time.perf_counter() - t0) * 1000)
             LOGGER.info("⚡ [VOICE SEMANTIC LLM] (%dms): finish_reason=%s, tools=%d",
@@ -714,14 +721,14 @@ def execute_voice_semantic_turn(
                     f"{full_system_prompt}\n\n"
                     f"[CONSIGNE DE SYNTHÈSE VOCALE PROACTIVE & INGÉNIEUR]\n"
                     f"{status_instruction}\n"
-                    f"Termine naturellement par 'Moctar'."
+                    f"Formule une synthèse naturelle, humaine, posée et concise (1 à 2 phrases) pour Moctar, sans ajouter systématiquement son prénom à la fin."
                 )
                 t_synth = time.perf_counter()
                 synth_res = brain.chat(
                     synthesis_messages,
                     tools=None,
                     system_prompt=synthesis_prompt,
-                    temperature=0.2,
+                    temperature=0.6,
                 )
                 t_synth_ms = int((time.perf_counter() - t_synth) * 1000)
                 synth_text = (synth_res.get("content") or "").strip() if synth_res else ""
@@ -738,12 +745,14 @@ def execute_voice_semantic_turn(
             elif tool_replies:
                 final_reply = _format_reply_ending(" ".join(r for r in tool_replies if r))
             else:
-                final_reply = "Action exécutée avec succès, Moctar."
+                final_reply = "Action exécutée avec succès."
 
         if runtime and getattr(runtime, "jarvis", None) and getattr(runtime.jarvis, "memory", None):
             try:
                 runtime.jarvis.memory.add_message(session_id=sess_key, role="user", content=clean_text)
                 runtime.jarvis.memory.add_message(session_id=sess_key, role="assistant", content=final_reply)
+                if hasattr(runtime.jarvis.memory, "record_conversation_turn_for_profile"):
+                    runtime.jarvis.memory.record_conversation_turn_for_profile(clean_text, final_reply)
             except Exception:
                 pass
 
@@ -773,6 +782,8 @@ def execute_voice_semantic_turn(
             try:
                 runtime.jarvis.memory.add_message(session_id=sess_key, role="user", content=clean_text)
                 runtime.jarvis.memory.add_message(session_id=sess_key, role="assistant", content=final_reply)
+                if hasattr(runtime.jarvis.memory, "record_conversation_turn_for_profile"):
+                    runtime.jarvis.memory.record_conversation_turn_for_profile(clean_text, final_reply)
             except Exception:
                 pass
         return {

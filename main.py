@@ -254,21 +254,31 @@ async def generate_cached_tts_chunks(
     if not cleaned:
         raise ValueError("Le texte à synthétiser est vide.")
 
-    # Synthèse complète pour rétrocompatibilité
-    _, _, full_key = await generate_cached_tts_with_key(cleaned, voice, rate=rate, pitch=pitch)
-    full_url = f"/api/voice/tts/cache/{full_key}.mp3"
-
     sentences = split_speech_sentences(cleaned)
     if len(sentences) <= 1:
+        _, _, full_key = await generate_cached_tts_with_key(cleaned, voice, rate=rate, pitch=pitch)
+        full_url = f"/api/voice/tts/cache/{full_key}.mp3"
         return full_url, [full_url]
 
     async def _synth_sentence(sentence: str) -> str:
         _, _, k = await generate_cached_tts_with_key(sentence, voice, rate=rate, pitch=pitch)
         return f"/api/voice/tts/cache/{k}.mp3"
 
-    tasks = [_synth_sentence(s) for s in sentences]
-    chunk_urls = await asyncio.gather(*tasks, return_exceptions=False)
-    return full_url, list(chunk_urls)
+    async def _synth_full() -> str:
+        _, _, k = await generate_cached_tts_with_key(cleaned, voice, rate=rate, pitch=pitch)
+        return f"/api/voice/tts/cache/{k}.mp3"
+
+    # Lancement entièrement concurrent de toutes les synthèses en parallèle
+    full_task = asyncio.create_task(_synth_full())
+    chunk_tasks = [asyncio.create_task(_synth_sentence(s)) for s in sentences]
+
+    # Attente prioritaire de la première phrase pour le streaming immédiat
+    first_chunk = await chunk_tasks[0]
+    other_chunks = await asyncio.gather(*chunk_tasks[1:], return_exceptions=False)
+    full_url = await full_task
+
+    chunk_urls = [first_chunk] + list(other_chunks)
+    return full_url, chunk_urls
 
 
 VOICE_SESSION_DURATION_SECONDS = float(os.getenv("VOICE_SESSION_DURATION_SECONDS", "0.0"))
@@ -1686,10 +1696,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             if autonomous_res.get("handled") is True:
                 display_user_text = command_text
-                raw_reply = str(autonomous_res.get("reply") or "").strip()
-                if not re.search(r"\bmoctar\b", raw_reply, re.IGNORECASE):
-                    raw_reply = f"{raw_reply.rstrip('.')} Moctar."
-                reply_text = raw_reply
+                reply_text = str(autonomous_res.get("reply") or "").strip()
                 cat = autonomous_res.get("task_category") or "locale"
                 LOGGER.info(
                     "⚡ [VOICE AUTONOMOUS ACTION (0ms)]: '%s' -> '%s' (cat=%s, action=%s, url=%s)",
@@ -1713,6 +1720,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     try:
                         runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
                         runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
+                        if hasattr(runtime.jarvis.memory, "record_conversation_turn_for_profile"):
+                            runtime.jarvis.memory.record_conversation_turn_for_profile(command_text, reply_text)
                     except Exception:
                         pass
             elif (is_devops_service or is_system_command(command_text)) and getattr(runtime, "jarvis", None) and hasattr(runtime.jarvis, "execute_prompt_async"):
@@ -1726,12 +1735,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     LOGGER.warning("Erreur AgentCore lors de /api/voice/interact : %s", exc)
                     agent_result = {
                         "status": "error",
-                        "reply": "Je suis à l'écoute Moctar, mais une erreur interne est survenue sur l'infrastructure.",
+                        "reply": "Je suis à l'écoute, mais une erreur interne est survenue sur l'infrastructure.",
                     }
                 reply_text = str(
                     agent_result.get("reply")
                     or agent_result.get("response")
-                    or "Bien reçu, Moctar."
+                    or "Bien reçu."
                 ).strip()
             else:
                 # Cœur Sémantique Natif LLM avec Tool Calling & Mémoire Multi-Tours (< 500 ms)
@@ -1748,16 +1757,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 reply_text = str(
                     agent_result.get("reply")
                     or agent_result.get("response")
-                    or "À vos ordres Moctar."
+                    or "À vos ordres."
                 ).strip()
-                if not re.search(r"\bmoctar\b", reply_text, re.IGNORECASE):
-                    reply_text = f"{reply_text.rstrip('.')} Moctar."
                 agent_result["reply"] = reply_text
 
                 if runtime.jarvis and getattr(runtime.jarvis, "memory", None) and not agent_result.get("memory_persisted"):
                     try:
                         runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
                         runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
+                        if hasattr(runtime.jarvis.memory, "record_conversation_turn_for_profile"):
+                            runtime.jarvis.memory.record_conversation_turn_for_profile(command_text, reply_text)
                     except Exception:
                         pass
 

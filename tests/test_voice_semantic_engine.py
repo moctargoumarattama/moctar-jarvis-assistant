@@ -39,7 +39,7 @@ class VoiceSemanticEngineTests(unittest.TestCase):
             self.assertEqual(res["action"], "open_app")
             self.assertIsNone(res["url"])
             self.assertEqual(res["title"], "Visual Studio Code")
-            self.assertTrue(res["reply"].endswith("Moctar."))
+            self.assertTrue(len(res["reply"]) > 0)
             self.assertTrue(any(t["tool"] == "open_app" for t in res["tools_used"]))
 
     def test_semantic_intent_weather_invokes_get_weather(self) -> None:
@@ -64,7 +64,7 @@ class VoiceSemanticEngineTests(unittest.TestCase):
         ):
             res = execute_voice_semantic_turn("il fait quel degré à Casa ?", runtime=mock_runtime)
             self.assertEqual(res["status"], "success")
-            self.assertTrue(res["reply"].endswith("Moctar."))
+            self.assertIn("Casablanca", res["reply"])
             self.assertTrue(any(t["tool"] == "get_weather" for t in res["tools_used"]))
 
     def test_semantic_intent_music_invokes_control_music(self) -> None:
@@ -80,7 +80,7 @@ class VoiceSemanticEngineTests(unittest.TestCase):
 
         res = execute_voice_semantic_turn("coupe le son", runtime=mock_runtime)
         self.assertEqual(res["status"], "success")
-        self.assertTrue(res["reply"].endswith("Moctar."))
+        self.assertTrue(len(res["reply"]) > 0)
         self.assertTrue(any(t["tool"] == "control_music" for t in res["tools_used"]))
 
     def test_semantic_intent_system_optimization_invokes_optimize_system(self) -> None:
@@ -96,7 +96,7 @@ class VoiceSemanticEngineTests(unittest.TestCase):
 
         res = execute_voice_semantic_turn("purge la mémoire vive", runtime=mock_runtime)
         self.assertEqual(res["status"], "success")
-        self.assertTrue(res["reply"].endswith("Moctar."))
+        self.assertTrue(len(res["reply"]) > 0)
         self.assertTrue(any(t["tool"] == "optimize_system" for t in res["tools_used"]))
 
     def test_semantic_conversational_turn_without_tools(self) -> None:
@@ -127,7 +127,7 @@ class VoiceSemanticEngineTests(unittest.TestCase):
         self.assertEqual(res["status"], "success")
         self.assertEqual(res["action"], "open_browser")
         self.assertEqual(res["url"], "https://www.youtube.com")
-        self.assertTrue(res["reply"].endswith("Moctar."))
+        self.assertTrue(len(res["reply"]) > 0)
 
 
 if __name__ == "__main__":

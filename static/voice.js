@@ -294,6 +294,36 @@
     }
 
     /**
+     * Bip sonore synthétique discret de début de prise de parole (520Hz -> 780Hz sur 60 ms).
+     */
+    function playStartSpeechChime() {
+      try {
+        const ctx = audioCtx || (AudioContextClass ? new AudioContextClass() : null);
+        if (!ctx) return;
+        if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+          ctx.resume().catch(() => {});
+        }
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(520, now);
+        osc.frequency.exponentialRampToValueAtTime(780, now + 0.06);
+
+        gain.gain.setValueAtTime(0.04, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.065);
+      } catch {
+        // Fallback muet sécurisé si AudioContext bloqué ou indisponible
+      }
+    }
+
+    /**
      * Bip sonore synthétique discret de confirmation de fin de prise de parole (880Hz -> 1320Hz sur 90 ms).
      */
     function playEndSpeechChime() {
@@ -778,13 +808,19 @@
             message: `🔊 Moctar : "${replyText}"`,
           });
           let played = false;
-          if (Array.isArray(payload.audio_chunks) && payload.audio_chunks.length > 1) {
-            for (const chunkUrl of payload.audio_chunks) {
+          const chunksToPlay = (Array.isArray(payload.audio_chunks) && payload.audio_chunks.length > 0)
+            ? payload.audio_chunks
+            : (payload.first_chunk_audio_url ? [payload.first_chunk_audio_url] : (payload.audio_url ? [payload.audio_url] : []));
+
+          if (chunksToPlay.length > 1) {
+            for (const chunkUrl of chunksToPlay) {
               if (generation !== current.generation || destroyed || suspended || userBargedIn) break;
               const ok = await playAudioUrl(chunkUrl);
               if (userBargedIn) break;
               played = ok || played;
             }
+          } else if (chunksToPlay.length === 1 && !userBargedIn) {
+            played = await playAudioUrl(chunksToPlay[0]);
           } else if (payload.audio_url && !userBargedIn) {
             played = await playAudioUrl(payload.audio_url);
           }
@@ -878,6 +914,8 @@
       if (recorder && recorder.state === 'recording') return true;
       phraseStartTime = getNow();
       recordingElapsedMs = 0;
+      updateSolarVoiceState('listening');
+      playStartSpeechChime();
 
       // Capture le tampon circulaire pré-roll de 800 ms dans l'ordre chronologique
       if (preRollCount > 0) {

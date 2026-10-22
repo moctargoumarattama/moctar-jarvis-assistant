@@ -20,7 +20,7 @@
   window.__MOCTAR_HUD_BOOTED__ = true;
 
   // --- Paramètres & Constantes 3D Cadrés au Millimètre ---
-  const SCENE_Y_OFFSET = 8; // Centré dans la fenêtre libre entre le bandeau haut et le ruban bas
+  const SCENE_Y_OFFSET = 18; // Rehaussé pour un dégagement total au-dessus du ruban de sous-titres bas
   const GLOBE_RADIUS = 64;
   const CLOUD_RADIUS = 65.4;
   const ATMOS_RADIUS = 70;
@@ -1229,12 +1229,18 @@
       activeGrp.rotation.y += (tgt.y - activeGrp.rotation.y) * 0.08;
       activeGrp.rotation.x += (tgt.x - activeGrp.rotation.x) * 0.08;
 
-      const breathScale = 1.0 + liveVoiceRms * 0.45;
+      const phasePulse = currentVoicePhase === 'listening'
+        ? Math.sin(elapsed * 4.5) * 0.04
+        : currentVoicePhase === 'processing'
+        ? Math.sin(elapsed * 7.0) * 0.025
+        : 0;
+      const breathScale = 1.0 + liveVoiceRms * 0.45 + phasePulse;
       activeGrp.scale.set(breathScale, breathScale, breathScale);
 
       if (!isDragging) {
         if (currentView === 'globe') {
-          tgt.y += delta * 0.11;
+          const spinMultiplier = currentVoicePhase === 'processing' ? 2.5 : 1.0;
+          tgt.y += delta * 0.11 * spinMultiplier;
         } else {
           tgt.y = Math.sin(elapsed * 0.35) * 0.06;
         }
@@ -1264,18 +1270,25 @@
         plasmaInnerRing.scale.set(pulse, pulse, pulse);
       }
       if (plasmaOuterRing) {
-        plasmaOuterRing.rotation.z -= delta * 0.45 * voiceBoost;
+        const pBoost = currentVoicePhase === 'processing' ? 2.2 : 1.0;
+        plasmaOuterRing.rotation.z -= delta * 0.45 * voiceBoost * pBoost;
       }
     }
 
     if (currentView === 'quantum' && quantumParticles) {
       const positions = quantumParticles.geometry.attributes.position.array;
-      const corePulse = 1.0 + Math.sin(elapsed * 5) * 0.06 + liveVoiceRms * 0.4;
+      const phaseCorePulse = currentVoicePhase === 'listening'
+        ? Math.sin(elapsed * 6) * 0.08
+        : currentVoicePhase === 'processing'
+        ? Math.sin(elapsed * 10) * 0.06
+        : 0;
+      const corePulse = 1.0 + Math.sin(elapsed * 5) * 0.06 + liveVoiceRms * 0.4 + phaseCorePulse;
 
       if (quantumCoreMesh) quantumCoreMesh.scale.set(corePulse, corePulse, corePulse);
 
+      const qBoost = currentVoicePhase === 'processing' ? 2.5 : 1.0;
       quantumFilamentRings.forEach((ring, idx) => {
-        ring.rotation.z += delta * (0.35 + idx * 0.18) * voiceBoost;
+        ring.rotation.z += delta * (0.35 + idx * 0.18) * voiceBoost * qBoost;
       });
 
       for (let i = 0; i < QUANTUM_PARTICLE_COUNT; i++) {
@@ -1294,9 +1307,11 @@
 
     if (currentView === 'globe') {
       if (cloudsMesh) cloudsMesh.rotation.y += delta * 0.035;
-      if (orbitalRingMesh) orbitalRingMesh.rotation.z += delta * 0.18 * voiceBoost;
+      const spinBoost = currentVoicePhase === 'processing' ? 2.8 : 1.0;
+      if (orbitalRingMesh) orbitalRingMesh.rotation.z += delta * 0.18 * voiceBoost * spinBoost;
       if (radarPulseRing) {
-        const pScale = 1.0 + ((elapsed * 2.6) % 2.4);
+        const pulseRate = currentVoicePhase === 'listening' ? 4.2 : currentVoicePhase === 'processing' ? 6.0 : 2.6;
+        const pScale = 1.0 + ((elapsed * pulseRate) % 2.4);
         radarPulseRing.scale.set(pScale, pScale, pScale);
         radarPulseRing.material.opacity = Math.max(0, 1.0 - (pScale - 1.0) / 2.4);
       }
