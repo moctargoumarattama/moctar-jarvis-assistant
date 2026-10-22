@@ -469,7 +469,12 @@ def open_app(target: str = "", app: str = "", name: str = "", **kwargs: Any) -> 
                 env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus}"
 
             if hasattr(os, "getuid") and os.getuid() == 0 and target_user != "root":
-                full_cmd = f"sudo -u {target_user} DISPLAY={display} XAUTHORITY={xauth} {command} >/dev/null 2>&1 &"
+                full_cmd = (
+                    f"sudo -u {target_user} env DISPLAY={display} XAUTHORITY={xauth} "
+                    f"XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS={bus} "
+                    f"PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin:$PATH "
+                    f"{command} >/tmp/jarvis_app_launch.log 2>&1 &"
+                )
                 subprocess.Popen(full_cmd, shell=True, env=env)
             else:
                 subprocess.Popen(f"{command} >/dev/null 2>&1 &", shell=True, env=env)

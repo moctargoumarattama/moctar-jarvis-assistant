@@ -1471,22 +1471,27 @@
         }
       }
       function startStream() {
-        if (state.stream) state.stream.close();
+        if (state.stream) {
+          try { state.stream.close(); } catch {}
+        }
         const stream = new EventSource('/api/stream'); state.stream = stream;
         stream.addEventListener('snapshot', event => {
-          try { render(JSON.parse(event.data)); }
+          try { render(JSON.parse(event.data), true); }
           catch { setStream(false, 'Une mesure invalide a été reçue. En attente du prochain relevé.'); }
         });
-        stream.onopen = () => { if (state.snapshot && Date.now() - state.lastReceipt < 7500) setStream(true); };
+        stream.onopen = () => { if (state.snapshot && Date.now() - state.lastReceipt < 12000) setStream(true); };
         stream.onerror = () => { setStream(false); renderServices(state.snapshot?.services, state.snapshot?.actions?.restart_enabled === true); probeSnapshot(); };
       }
       async function probeSnapshot() {
-        if (state.probePending || Date.now() - state.lastProbe < 10000) return;
+        if (state.probePending || Date.now() - state.lastProbe < 4000) return;
         state.probePending = true; state.lastProbe = Date.now();
         try {
           const response = await apiFetch('/api/snapshot', {}, 5000);
           if (!response.ok) throw new Error('Le collecteur est indisponible (HTTP ' + response.status + ').');
-          render(await response.json(), false);
+          render(await response.json(), true);
+          if (!state.stream || state.stream.readyState === EventSource.CLOSED) {
+            startStream();
+          }
         } catch (error) {
           if (error.name !== 'AbortError') setStream(false, error.message || 'Impossible de joindre le collecteur.');
           // EventSource owns retry scheduling; last measurements remain visible.
@@ -1616,12 +1621,12 @@
       function updateClock() { const now = new Date(); set('clock-time', clockFormat.format(now)); $('clock-time').dateTime = now.toISOString(); set('clock-date', shortDateFormat.format(now).toUpperCase()); window.NocLiveMetrics?.tick(now.getTime()); }
       updateClock(); setInterval(updateClock, 1000);
       setInterval(() => {
-        if (state.snapshot && Date.now() - state.lastReceipt > 7500) {
+        if (state.snapshot && Date.now() - state.lastReceipt > 12000) {
           setStream(false, 'Aucun nouveau relevé depuis ' + ageLabel((Date.now() - state.lastReceipt) / 1000) + '. Reconnexion automatique en cours.');
           renderServices(state.snapshot.services, state.snapshot.actions?.restart_enabled === true);
           probeSnapshot();
         }
-      }, 2000);
+      }, 2500);
       /* ============================================================
          INTEGRATION JARVIS AUTONOMOUS AGENT CORE (ReAct + Web Speech)
          ============================================================ */

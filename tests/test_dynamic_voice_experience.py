@@ -414,9 +414,17 @@ class DynamicVoiceExperienceTests(unittest.TestCase):
         t5, _ = stt_phonetic_repair.repair_stt_transcript("Et on va passer à ceci.")
         self.assertIn("on va passer à ceci", t5.lower())
 
+        # 5. 'Mote bureau.' -> 'mode bureau.'
+        t6, _ = stt_phonetic_repair.repair_stt_transcript("Mote bureau.")
+        self.assertIn("mode bureau", t6.lower())
+
+        # 6. 'MockTab, mode bureau.' -> 'Moctar, mode bureau.'
+        t7, _ = stt_phonetic_repair.repair_stt_transcript("MockTab, mode bureau.")
+        self.assertIn("moctar", t7.lower())
+
     def test_is_direct_voice_command_identity_and_job(self) -> None:
         """Vérifie que les questions d'identité et de rôle sont reconnues comme des ordres opérationnels directs."""
-        for phrase in ("C'est quoi ton job ?", "Tu es qui toi ?", "Quel est ton job ?", "Tu sers à quoi ?", "On va passer à ceci"):
+        for phrase in ("C'est quoi ton job ?", "Tu es qui toi ?", "Quel est ton job ?", "Tu sers à quoi ?", "On va passer à ceci", "Mote bureau.", "Mode bureau"):
             self.assertTrue(main.is_direct_voice_command(phrase), f"Échec is_direct_voice_command pour '{phrase}'")
 
     def test_handle_instant_local_command_job_and_transition(self) -> None:

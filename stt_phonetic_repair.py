@@ -40,7 +40,7 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     (re.compile(r"\b(?:ou|ouvr?e?)\s+(?:vs\s*cod[et]?|vscod[et]?)\b", re.I), "ouvre VS Code", "vscode_open"),
     (re.compile(r"\b(?:visuel|visual)\s+studio(?:\s+code)?\b", re.I), "Visual Studio Code", "vscode_canonical"),
     (re.compile(r"\bvs\s*cod[et]?\b", re.I), "VS Code", "vscode_token"),
-    (re.compile(r"\bbonne?\s+bureau\b", re.I), "mode bureau", "work_desktop"),
+    (re.compile(r"\b(?:bonne?|mote|mot|monte)\s+bureau\b", re.I), "mode bureau", "work_desktop"),
     (re.compile(r"\b(?:met|mets)[-\s]toi\s+au\s+mode\s+bureau\b", re.I), "mets-toi au mode bureau", "work_mode"),
     (re.compile(r"\bplein\s+ecran\b", re.I), "plein écran", "fullscreen_accent"),
     
@@ -79,7 +79,7 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
 
     # 7. Nom de Moctar & Phonétique & Surnoms familiers
     (re.compile(r"\b(?:m['’\s]?occupe\s+tard|moccupe\s+tard|m['’\s]?occaque|moccaque)\b", re.I), "Moctar", "wake_moctar_repair"),
-    (re.compile(r"\b(?:mokta|moktar|mokhtar|mouctar|mouktar|motard)\b", re.I), "Moctar", "wake_moctar_variants"),
+    (re.compile(r"\b(?:mokta|moktar|mokhtar|mouctar|mouktar|motard|mocktab|moctab|moktab)\b", re.I), "Moctar", "wake_moctar_variants"),
     (re.compile(r"\b(?:yo\s+)?(?:moc|mok|moque)\b", re.I), "Moc", "wake_moc"),
     (re.compile(r"\b(?:t['’]es\s+l[aà]|tu\s+es\s+l[aà])\b", re.I), "tu es là", "wake_are_you_there"),
 

@@ -1118,7 +1118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 async with runtime.changed:
                     if runtime.revision == revision or runtime.latest is None:
                         try:
-                            await asyncio.wait_for(runtime.changed.wait(), timeout=15)
+                            await asyncio.wait_for(runtime.changed.wait(), timeout=5)
                         except asyncio.TimeoutError:
                             continue
                     revision = runtime.revision
@@ -1129,7 +1129,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     break
                 yield {"event": "snapshot", "id": str(revision), "retry": 2000, "data": data}
 
-        return CountedEventSourceResponse(events(), runtime=runtime, ping=15, send_timeout=10, headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache, no-store"})
+        return CountedEventSourceResponse(
+            events(),
+            runtime=runtime,
+            ping=5,
+            send_timeout=8,
+            headers={
+                "X-Accel-Buffering": "no",
+                "Cache-Control": "no-cache, no-transform, no-store",
+                "Connection": "keep-alive",
+            },
+        )
 
     @application.post("/api/vps/report")
     async def vps_report(request: Request):
