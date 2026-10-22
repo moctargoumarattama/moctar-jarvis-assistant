@@ -109,8 +109,8 @@ main.cosmos-home > .connection-banner {
   --pc: var(--cyan);
   position: relative; isolation: isolate;
   flex: 1 1 0; min-height: 0; width: 100%;
-  display: flex; flex-direction: column; justify-content: space-between; gap: 6px;
-  padding: 12px 14px 12px; margin: 0;
+  display: flex; flex-direction: column; justify-content: space-between; gap: 5px;
+  padding: 10px 14px 10px; margin: 0;
   text-align: left; font: inherit; color: var(--text);
   border-radius: 18px; overflow: hidden; cursor: pointer;
   pointer-events: auto;
@@ -166,16 +166,16 @@ main.cosmos-home > .connection-banner {
 }
 .orb-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .orb-main strong {
-  font: 600 clamp(20px, 3.6vh, 30px) / 1 var(--mono); color: #f3f7ff; letter-spacing: -.02em;
+  font: 600 clamp(19px, 3.2vh, 28px) / 1 var(--mono); color: #f3f7ff; letter-spacing: -.02em;
   text-shadow: 0 0 22px color-mix(in srgb, var(--pc) 35%, transparent);
   font-variant-numeric: tabular-nums;
 }
 .orb-main small { font-size: 11px; color: #8fa3bf; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .orb-sub { font-size: 11px; color: #91a5c1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.orb-bars { display: grid; gap: 5px; }
-.orb-bar { display: grid; grid-template-columns: 46px 1fr 52px; align-items: center; gap: 8px; font-size: 10px; }
-.orb-bar i { font-style: normal; color: #8094b1; letter-spacing: .08em; }
+.orb-bars { display: grid; gap: 4px; }
+.orb-bar { display: grid; grid-template-columns: 50px 1fr 46px; align-items: center; gap: 8px; font-size: 10px; line-height: 1.25; }
+.orb-bar i { font-style: normal; color: #8094b1; letter-spacing: .08em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .orb-bar b { height: 4px; border-radius: 4px; background: rgba(255, 255, 255, .07); overflow: hidden; }
 .orb-bar em {
   display: block; height: 100%; width: 0; border-radius: inherit;
@@ -184,7 +184,11 @@ main.cosmos-home > .connection-banner {
 }
 .orb-bar em[data-tone="warning"] { background: linear-gradient(90deg, #c9913d, var(--amber)); }
 .orb-bar em[data-tone="error"] { background: linear-gradient(90deg, #c2465c, var(--red)); }
-.orb-bar > span { font: 500 10px var(--mono); color: #c7d5e8; text-align: right; font-variant-numeric: tabular-nums; }
+.orb-bar > span { font: 500 10px var(--mono); color: #c7d5e8; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.orb-bar:nth-child(n+3) { display: none; }
+@media (min-height: 1050px) {
+  .orb-bar:nth-child(n+3) { display: grid; }
+}
 
 .orb-dots { display: flex; gap: 6px; }
 .orb-dot {
@@ -422,7 +426,7 @@ body.cosmos-lite dialog::backdrop { -webkit-backdrop-filter: none; backdrop-filt
   main.cosmos-home { padding: 10px 14px 8px; gap: 10px 14px; }
   .cosmos-col { gap: 9px; }
   .orb-tile { padding: 9px 12px; gap: 4px; }
-  .orb-bar:nth-child(3), .orb-event:nth-child(n+3) { display: none; }
+  .orb-bar:nth-child(n+3), .orb-event:nth-child(n+3) { display: none; }
   .core-hint { display: none; }
   .cosmos-ask { height: 44px; }
 }
