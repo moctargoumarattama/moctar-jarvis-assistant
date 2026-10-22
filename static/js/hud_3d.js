@@ -1,38 +1,36 @@
 /**
  * M.O.C.T.A.R — Moteur Graphique HUD 3D Cybernétique & Assistant Vocal Haute Fidélité
- * 
- * Architecture Unifiée & Résiliente :
- * 1. Cycle de vie découplé : L'horloge, la télémétrie matérielle et les contrôles UI
- *    démarrent immédiatement sans dépendre de WebGL (zéro écran noir / zéro blocage).
- * 2. Moteur 3D Cinématique Three.js (Arc Plasma, Cœur Quantique, Globe 3D Réaliste NASA) :
- *    - Positionnement rehaussé (Y = +38) pour dégager 100% de visibilité au-dessus du ruban inférieur.
- *    - Correction stricte de toutes les références de maillage (aucun ReferenceError).
- * 3. Persistance des Vues 3D :
- *    - La télémétrie n'écrase JAMAIS la vue choisie par l'utilisateur.
- *    - Mémorisation locale (localStorage) + synchronisation API backend.
- * 4. Moteur Vocal Bidirectionnel Unifié (MoctarVoice) :
- *    - Même moteur éprouvé que le Dashboard NOC.
- *    - Prise en charge push-to-talk et mains libres (Wake-Word « Yo Moctar »).
- *    - VU-mètre audio en direct animé par RMS réel.
- *    - Bouton STOP d'interruption immédiate 0 ms.
+ *
+ * Architecture Unifiée sur le Modèle du Dashboard NOC :
+ * 1. Protection Anti-Cache & Anti-Collision (window.__MOCTAR_HUD_BOOTED__).
+ * 2. Démarrage Synchrone 0 ms : Horloge, Télémétrie (/api/snapshot + /api/events SSE + /api/hud/state)
+ *    et Contrôles UI actifs instantanément avant même le chargement 3D.
+ * 3. Double Moteur Graphique 60 FPS (Three.js WebGL avec Sprites Radiaux + Fallback Holographique Canvas 2D) :
+ *    - Cadrage centré (SCENE_Y_OFFSET = +8, Camera Z = 375, Rayon = 66) : Zéro chevauchement avec les boutons du haut ou le ruban du bas.
+ *    - Texture procédurale Terre + Satellite NASA haute résolution.
+ * 4. Moteur Vocal Unifié (MoctarVoice + Pont SolarEngine 60 FPS) :
+ *    - VU-mètre 5 barres et pulsation 3D pilotés à 60 FPS par le signal RMS réel.
+ *    - Zéro duplication audio (voice.js gère le flux TTS nativement).
  */
 
 'use strict';
 
 (function () {
-  // --- Paramètres & Constantes 3D ---
-  const SCENE_Y_OFFSET = 38; // Rehaussé largement pour ne jamais entrer en collision avec le bandeau inférieur
-  const GLOBE_RADIUS = 86;
-  const CLOUD_RADIUS = 87.8;
-  const ATMOS_RADIUS = 94;
-  const PLASMA_PARTICLE_COUNT = 3400;
-  const QUANTUM_PARTICLE_COUNT = 2800;
-  const STAR_COUNT = 1500;
+  if (window.__MOCTAR_HUD_BOOTED__) return;
+  window.__MOCTAR_HUD_BOOTED__ = true;
+
+  // --- Paramètres & Constantes 3D Cadrés au Millimètre ---
+  const SCENE_Y_OFFSET = 8; // Centré dans la fenêtre libre entre le bandeau haut et le ruban bas
+  const GLOBE_RADIUS = 64;
+  const CLOUD_RADIUS = 65.4;
+  const ATMOS_RADIUS = 70;
+  const PLASMA_PARTICLE_COUNT = 2800;
+  const QUANTUM_PARTICLE_COUNT = 2400;
+  const STAR_COUNT = 1400;
 
   // Coordonnées de Moctar (Dell Precision M4800 / Rabat)
   const DEFAULT_COORDS = { lat: 34.020882, lon: -6.841650, label: "Rabat · Dell Precision M4800" };
 
-  // Hexagones de couleurs (sécurisés, utilisables sans THREE immédiat)
   const HEX_CYAN = 0x00f3ff;
   const HEX_ELECTRIC = 0x00aaff;
   const HEX_DEEP_BLUE = 0x002db3;
@@ -41,34 +39,35 @@
   const HEX_GOLD = 0xffb700;
   const HEX_GREEN = 0x00ff88;
 
-  // Couleurs THREE.Color instanciées dynamiquement
   let COLOR_CYAN, COLOR_ELECTRIC, COLOR_DEEP_BLUE, COLOR_WHITE, COLOR_MAGENTA, COLOR_GOLD, COLOR_GREEN;
 
   // Éléments du DOM
-  const container = document.getElementById('hud-viewport');
-  const canvas = document.getElementById('hud-canvas');
-  const btnPlasmaView = document.getElementById('btn-view-plasma');
-  const btnQuantumView = document.getElementById('btn-view-quantum');
-  const btnGlobeView = document.getElementById('btn-view-globe');
-  const btnLocate = document.getElementById('btn-action-locate');
-  const btnMic = document.getElementById('hud-mic-btn');
-  const btnStop = document.getElementById('hud-stop-btn');
-  const voiceStateBadge = document.getElementById('voice-state-badge');
-  const userTextEl = document.getElementById('hud-user-transcript');
-  const assistantTextEl = document.getElementById('hud-assistant-reply');
-  const gpsCoordsEl = document.getElementById('hud-gps-coords');
-  const cpuValEl = document.getElementById('hud-cpu-val');
-  const ramValEl = document.getElementById('hud-ram-val');
-  const hostValEl = document.getElementById('hud-host-val');
-  const clockTimeEl = document.getElementById('hud-clock-time');
-  const clockDateEl = document.getElementById('hud-clock-date');
-  const cmdForm = document.getElementById('hud-cmd-form');
-  const cmdInput = document.getElementById('hud-cmd-input');
-  const vumeterEl = document.getElementById('hud-vumeter');
+  const $ = (id) => document.getElementById(id);
+  const container = $('hud-viewport');
+  const canvas = $('hud-canvas');
+  const btnPlasmaView = $('btn-view-plasma');
+  const btnQuantumView = $('btn-view-quantum');
+  const btnGlobeView = $('btn-view-globe');
+  const btnLocate = $('btn-action-locate');
+  const btnMic = $('hud-mic-btn');
+  const btnStop = $('hud-stop-btn');
+  const voiceStateBadge = $('voice-state-badge');
+  const userTextEl = $('hud-user-transcript');
+  const assistantTextEl = $('hud-assistant-reply');
+  const gpsCoordsEl = $('hud-gps-coords');
+  const cpuValEl = $('hud-cpu-val');
+  const ramValEl = $('hud-ram-val');
+  const hostValEl = $('hud-host-val');
+  const clockTimeEl = $('hud-clock-time');
+  const clockDateEl = $('hud-clock-date');
+  const cmdForm = $('hud-cmd-form');
+  const cmdInput = $('hud-cmd-input');
+  const vumeterEl = $('hud-vumeter');
 
   let renderer, scene, camera;
   let textureLoader;
   let starField;
+  let particleGlowTex = null;
 
   // Groupes 3D
   let globeGroup, earthMesh, cloudsMesh, atmosMesh, orbitalRingMesh, radarMarker, radarPulseRing;
@@ -87,18 +86,20 @@
   let previousMousePos = { x: 0, y: 0 };
   let rotationTargets = {
     plasma: { x: 0.08, y: 0 },
-    quantum: { x: 0.12, y: 0 },
+    quantum: { x: 0.14, y: 0 },
     globe: { x: 0.18, y: -0.6 },
   };
-  let currentCameraZ = 285;
-  let targetCameraZ = 285;
+  let currentCameraZ = 370;
+  let targetCameraZ = 370;
 
-  // Moteur Audio & Voix
+  // État Audio & Voix en temps réel (Pont SolarEngine 60 FPS)
   let jarvisVoice = null;
-  let isRecordingManual = false;
+  let liveVoiceRms = 0;
+  let liveVoiceSpeaking = false;
+  let currentVoicePhase = 'off';
   let activeAudioElement = null;
 
-  // Liste noire des hallucinations Whisper pour ne jamais polluer l'interface
+  // Liste noire des hallucinations Whisper
   const HALLUCINATION_BLACK_LIST = [
     'sous-titrage',
     'sous-titres',
@@ -110,7 +111,137 @@
     'abonnez-vous',
   ];
 
-  // --- INITIALISATION DES COULEURS THREE.JS ---
+  // =========================================================================
+  // 0. PONT SOLARENGINE 60 FPS (Identique au Dashboard NOC)
+  // =========================================================================
+  const HudSolarBridge = {
+    setVoiceActivity(rms = 0, isSpeaking = false) {
+      const clamped = Number.isFinite(rms) ? Math.max(0, Math.min(1, Number(rms))) : 0;
+      liveVoiceRms = clamped > 0.004 ? clamped : liveVoiceRms * 0.6;
+      if (liveVoiceRms < 0.002) liveVoiceRms = 0;
+      liveVoiceSpeaking = Boolean(isSpeaking || liveVoiceRms > 0.025);
+      renderVumeter(liveVoiceRms, liveVoiceSpeaking);
+    },
+    setVoiceState(nextState) {
+      if (nextState === 'idle' && jarvisVoice && jarvisVoice.enabled) {
+        handleVoiceStateChange('wake');
+      } else if (nextState === 'listening' || nextState === 'speaking' || nextState === 'thinking') {
+        handleVoiceStateChange(nextState === 'thinking' ? 'processing' : nextState);
+      }
+    },
+  };
+  window.SolarEngine = window.SolarEngine || HudSolarBridge;
+
+  function renderVumeter(rms, speaking) {
+    if (!vumeterEl) return;
+    const bars = vumeterEl.querySelectorAll('.vbar');
+    const isMicOn = Boolean(jarvisVoice && jarvisVoice.enabled);
+    if ((speaking || currentVoicePhase === 'listening' || currentVoicePhase === 'speaking') && rms > 0.004) {
+      bars.forEach((bar, idx) => {
+        const wave = 0.65 + 0.55 * Math.sin(Date.now() * 0.02 + idx * 1.1);
+        const h = Math.min(22, Math.max(5, Math.round(rms * 240 * wave)));
+        bar.style.height = `${h}px`;
+        bar.style.background = '#00ff88';
+        bar.style.boxShadow = '0 0 6px #00ff88';
+      });
+    } else if (currentVoicePhase === 'speaking') {
+      bars.forEach((bar, idx) => {
+        const h = Math.round(5 + 10 * Math.abs(Math.sin(Date.now() * 0.012 + idx * 0.9)));
+        bar.style.height = `${h}px`;
+        bar.style.background = '#00f3ff';
+        bar.style.boxShadow = '0 0 6px #00f3ff';
+      });
+    } else {
+      bars.forEach((bar) => {
+        bar.style.height = '4px';
+        bar.style.background = isMicOn ? 'rgba(0, 255, 136, 0.45)' : 'rgba(0, 243, 255, 0.25)';
+        bar.style.boxShadow = 'none';
+      });
+    }
+  }
+
+  // =========================================================================
+  // 1. TEXTURES PROCÉDURALES HAUTE FIDÉLITÉ (Zéro Écran Noir)
+  // =========================================================================
+  function createGlowSpriteTexture() {
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 64;
+    const ctx = c.getContext('2d');
+    const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+    grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    grad.addColorStop(0.35, 'rgba(0, 243, 255, 0.85)');
+    grad.addColorStop(0.7, 'rgba(0, 120, 255, 0.25)');
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(c);
+  }
+
+  function createProceduralEarthTexture() {
+    const c = document.createElement('canvas');
+    c.width = 1024;
+    c.height = 512;
+    const ctx = c.getContext('2d');
+
+    // Fond océanique profond
+    const oceanGrad = ctx.createLinearGradient(0, 0, 0, 512);
+    oceanGrad.addColorStop(0, '#04142c');
+    oceanGrad.addColorStop(0.5, '#07264e');
+    oceanGrad.addColorStop(1, '#04142c');
+    ctx.fillStyle = oceanGrad;
+    ctx.fillRect(0, 0, 1024, 512);
+
+    // Grille holographique latitude / longitude
+    ctx.strokeStyle = 'rgba(0, 243, 255, 0.18)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= 1024; x += 64) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, 512);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= 512; y += 64) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(1024, y);
+      ctx.stroke();
+    }
+
+    // Silhouettes continentales stylisées (Afrique, Europe, Asie, Amériques)
+    ctx.fillStyle = 'rgba(16, 118, 168, 0.72)';
+    ctx.strokeStyle = 'rgba(0, 243, 255, 0.65)';
+    ctx.lineWidth = 1.5;
+
+    const continents = [
+      // Afrique
+      [[480, 195], [535, 190], [585, 225], [600, 275], [565, 365], [525, 385], [500, 320], [465, 255]],
+      // Europe
+      [[475, 110], [545, 95], [595, 115], [580, 175], [520, 180], [470, 165]],
+      // Asie
+      [[595, 105], [760, 95], [855, 150], [820, 255], [725, 285], [645, 235], [595, 175]],
+      // Amérique du Nord
+      [[145, 95], [285, 85], [320, 165], [255, 235], [185, 210]],
+      // Amérique du Sud
+      [[275, 255], [355, 280], [340, 395], [295, 435], [265, 345]],
+      // Australie
+      [[770, 330], [855, 325], [865, 395], [785, 405]],
+    ];
+
+    continents.forEach((poly) => {
+      ctx.beginPath();
+      poly.forEach(([px, py], idx) => {
+        if (idx === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    return new THREE.CanvasTexture(c);
+  }
+
   function initColors() {
     if (typeof THREE === 'undefined' || !THREE.Color) return;
     COLOR_CYAN = new THREE.Color(HEX_CYAN);
@@ -122,26 +253,29 @@
     COLOR_GREEN = new THREE.Color(HEX_GREEN);
   }
 
-  // --- 1. INITIALISATION DU MOTEUR 3D ---
+  // =========================================================================
+  // 2. MOTEUR 3D THREE.JS + FALLBACK HOLOGRAPHIQUE 2D
+  // =========================================================================
   function initThree() {
+    if (!container || !canvas) return;
     if (typeof THREE === 'undefined') {
-      console.warn("Three.js non chargé.");
+      initFallback2DCanvas();
       return;
     }
-    if (!container || !canvas) return;
 
     initColors();
     clock = new THREE.Clock();
+    particleGlowTex = createGlowSpriteTexture();
 
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
 
     scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x02060e, 0.0008);
+    scene.fog = new THREE.FogExp2(0x02060e, 0.0007);
 
-    camera = new THREE.PerspectiveCamera(48, width / height, 0.1, 4000);
-    camera.position.set(0, 10, currentCameraZ);
-    camera.lookAt(0, 26, 0);
+    camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 4000);
+    camera.position.set(0, 0, currentCameraZ);
+    camera.lookAt(0, 0, 0);
 
     try {
       renderer = new THREE.WebGLRenderer({
@@ -153,46 +287,40 @@
       renderer.setSize(width, height);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     } catch (e) {
-      console.error("Échec création WebGLRenderer:", e);
+      console.warn("WebGL indisponible, bascule sur le moteur holographique 2D:", e);
+      initFallback2DCanvas();
       return;
     }
 
     textureLoader = new THREE.TextureLoader();
 
-    // Éclairage spatial réaliste
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.15);
     scene.add(ambientLight);
 
-    const sunLight = new THREE.DirectionalLight(0xe8f5ff, 1.8);
+    const sunLight = new THREE.DirectionalLight(0xe8f5ff, 1.9);
     sunLight.position.set(400, 300, 500);
     scene.add(sunLight);
 
-    const rimLight = new THREE.DirectionalLight(0x0055ff, 1.2);
+    const rimLight = new THREE.DirectionalLight(0x0088ff, 1.3);
     rimLight.position.set(-400, -200, -400);
     scene.add(rimLight);
 
-    // Création des composants 3D
-    try { createStarfield(); } catch (err) { console.warn("Erreur createStarfield:", err); }
-    try { createCircularPlasmaReactor(); } catch (err) { console.warn("Erreur createCircularPlasmaReactor:", err); }
-    try { createRadiantQuantumCore(); } catch (err) { console.warn("Erreur createRadiantQuantumCore:", err); }
-    try { createRealisticEarthGlobe(); } catch (err) { console.warn("Erreur createRealisticEarthGlobe:", err); }
+    try { createStarfield(); } catch (err) { console.warn(err); }
+    try { createCircularPlasmaReactor(); } catch (err) { console.warn(err); }
+    try { createRadiantQuantumCore(); } catch (err) { console.warn(err); }
+    try { createRealisticEarthGlobe(); } catch (err) { console.warn(err); }
 
-    // Contrôles 3D
     setup3DControls();
 
-    // Récupérer la vue préférée mémorisée
     let savedView = 'plasma';
     try {
       savedView = localStorage.getItem('moctar_hud_view') || 'plasma';
     } catch (_) {}
-
     applyView(savedView, false);
 
-    // Démarrer la boucle de rendu 60 FPS
     animate();
   }
 
-  // --- CHAMP D'ÉTOILES ---
   function createStarfield() {
     const geo = new THREE.BufferGeometry();
     const positions = new Float32Array(STAR_COUNT * 3);
@@ -200,9 +328,9 @@
 
     for (let i = 0; i < STAR_COUNT; i++) {
       const idx = i * 3;
-      positions[idx] = (Math.random() - 0.5) * 2800;
-      positions[idx + 1] = (Math.random() - 0.5) * 2800;
-      positions[idx + 2] = (Math.random() - 0.5) * 2800;
+      positions[idx] = (Math.random() - 0.5) * 2600;
+      positions[idx + 1] = (Math.random() - 0.5) * 2600;
+      positions[idx + 2] = (Math.random() - 0.5) * 2600;
 
       const c = Math.random() > 0.4 ? COLOR_CYAN : COLOR_WHITE;
       colors[idx] = c.r;
@@ -214,44 +342,45 @@
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const mat = new THREE.PointsMaterial({
-      size: 1.8,
+      size: 4.2,
+      map: particleGlowTex,
       vertexColors: true,
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.85,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
     });
 
     starField = new THREE.Points(geo, mat);
     scene.add(starField);
   }
 
-  // --- MODE 1 : RÉACTEUR À ARC PLASMA CIRCULAIRE (Image 5) ---
   function createCircularPlasmaReactor() {
     plasmaGroup = new THREE.Group();
     plasmaGroup.position.y = SCENE_Y_OFFSET;
 
-    // Anneau néon intérieur parfaitement circulaire
-    const innerGeo = new THREE.TorusGeometry(72, 1.5, 16, 120);
+    // Anneau néon intérieur
+    const innerGeo = new THREE.TorusGeometry(54, 1.3, 16, 120);
     const innerMat = new THREE.MeshBasicMaterial({
       color: COLOR_CYAN,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.9,
       blending: THREE.AdditiveBlending,
     });
     plasmaInnerRing = new THREE.Mesh(innerGeo, innerMat);
     plasmaGroup.add(plasmaInnerRing);
 
     // Anneau néon extérieur
-    const outerGeo = new THREE.TorusGeometry(92, 1.2, 16, 140);
+    const outerGeo = new THREE.TorusGeometry(69, 1.0, 16, 140);
     const outerMat = new THREE.MeshBasicMaterial({
-      color: COLOR_DEEP_BLUE,
+      color: COLOR_ELECTRIC,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.65,
       blending: THREE.AdditiveBlending,
     });
     plasmaOuterRing = new THREE.Mesh(outerGeo, outerMat);
     plasmaGroup.add(plasmaOuterRing);
 
-    // Particules de plasma en flux circulaire stable
     const geo = new THREE.BufferGeometry();
     const positions = new Float32Array(PLASMA_PARTICLE_COUNT * 3);
     const colors = new Float32Array(PLASMA_PARTICLE_COUNT * 3);
@@ -263,9 +392,9 @@
 
     for (let i = 0; i < PLASMA_PARTICLE_COUNT; i++) {
       plasmaAngles[i] = Math.random() * Math.PI * 2.0;
-      plasmaRadii[i] = 68 + Math.random() * 26;
-      plasmaSpeeds[i] = (Math.random() > 0.5 ? 1 : -1) * (0.8 + Math.random() * 1.6);
-      plasmaZOffsets[i] = (Math.random() - 0.5) * 8.0;
+      plasmaRadii[i] = 50 + Math.random() * 22;
+      plasmaSpeeds[i] = (Math.random() > 0.5 ? 1 : -1) * (0.8 + Math.random() * 1.5);
+      plasmaZOffsets[i] = (Math.random() - 0.5) * 6.0;
 
       const u = plasmaAngles[i];
       const r = plasmaRadii[i];
@@ -275,8 +404,7 @@
       positions[idx + 1] = r * Math.sin(u);
       positions[idx + 2] = plasmaZOffsets[i];
 
-      const isCyan = Math.random() > 0.35;
-      const c = isCyan ? COLOR_CYAN : COLOR_ELECTRIC;
+      const c = Math.random() > 0.35 ? COLOR_CYAN : COLOR_ELECTRIC;
       colors[idx] = c.r;
       colors[idx + 1] = c.g;
       colors[idx + 2] = c.b;
@@ -286,10 +414,12 @@
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const pMat = new THREE.PointsMaterial({
-      size: 2.2,
+      size: 4.5,
+      map: particleGlowTex,
       vertexColors: true,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.92,
+      depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
 
@@ -302,48 +432,44 @@
     scene.add(plasmaGroup);
   }
 
-  // --- MODE 2 : CŒUR QUANTIQUE RAYONNANT (Image 4) ---
   function createRadiantQuantumCore() {
     quantumGroup = new THREE.Group();
     quantumGroup.position.y = SCENE_Y_OFFSET;
 
-    // Cœur central sphérique incandescent blanc-chaud
-    const coreGeo = new THREE.SphereGeometry(22, 32, 32);
+    const coreGeo = new THREE.SphereGeometry(16, 32, 32);
     const coreMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
-      opacity: 0.95,
+      opacity: 0.96,
       blending: THREE.AdditiveBlending,
     });
     quantumCoreMesh = new THREE.Mesh(coreGeo, coreMat);
     quantumGroup.add(quantumCoreMesh);
 
-    // Halo d'énergie coronale cyan
-    const haloGeo = new THREE.SphereGeometry(35, 32, 32);
+    const haloGeo = new THREE.SphereGeometry(26, 32, 32);
     const haloMat = new THREE.MeshBasicMaterial({
       color: COLOR_CYAN,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.38,
       blending: THREE.AdditiveBlending,
     });
     quantumHaloMesh = new THREE.Mesh(haloGeo, haloMat);
     quantumGroup.add(quantumHaloMesh);
 
-    // 4 anneaux gyroscopiques à 0°, 45°, 90°, 135°
     const configs = [
-      { x: 0, y: 0, z: 0, r: 68, c: COLOR_CYAN },
-      { x: Math.PI * 0.25, y: Math.PI * 0.15, z: 0, r: 78, c: COLOR_MAGENTA },
-      { x: Math.PI * 0.5, y: 0, z: Math.PI * 0.2, r: 88, c: COLOR_CYAN },
-      { x: -Math.PI * 0.25, y: Math.PI * 0.25, z: 0, r: 96, c: COLOR_ELECTRIC },
+      { x: 0, y: 0, z: 0, r: 50, c: COLOR_CYAN },
+      { x: Math.PI * 0.25, y: Math.PI * 0.15, z: 0, r: 58, c: COLOR_MAGENTA },
+      { x: Math.PI * 0.5, y: 0, z: Math.PI * 0.2, r: 66, c: COLOR_CYAN },
+      { x: -Math.PI * 0.25, y: Math.PI * 0.25, z: 0, r: 72, c: COLOR_ELECTRIC },
     ];
 
     quantumFilamentRings = [];
     configs.forEach((cfg) => {
-      const rGeo = new THREE.TorusGeometry(cfg.r, 1.1, 16, 120);
+      const rGeo = new THREE.TorusGeometry(cfg.r, 0.95, 16, 120);
       const rMat = new THREE.MeshBasicMaterial({
         color: cfg.c,
         transparent: true,
-        opacity: 0.52,
+        opacity: 0.58,
         blending: THREE.AdditiveBlending,
       });
       const ring = new THREE.Mesh(rGeo, rMat);
@@ -352,7 +478,6 @@
       quantumGroup.add(ring);
     });
 
-    // Nébuleuse de particules sphériques
     const geo = new THREE.BufferGeometry();
     quantumPositions = new Float32Array(QUANTUM_PARTICLE_COUNT * 3);
     quantumOriginals = new Float32Array(QUANTUM_PARTICLE_COUNT * 3);
@@ -364,7 +489,7 @@
       const v = Math.random();
       const theta = u * 2.0 * Math.PI;
       const phi = Math.acos(2.0 * v - 1.0);
-      const r = 32 + Math.random() * 80;
+      const r = 24 + Math.random() * 54;
 
       const x = r * Math.sin(phi) * Math.cos(theta);
       const y = r * Math.sin(phi) * Math.sin(theta);
@@ -391,10 +516,12 @@
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const pMat = new THREE.PointsMaterial({
-      size: 2.5,
+      size: 4.8,
+      map: particleGlowTex,
       vertexColors: true,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.88,
+      depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
 
@@ -407,54 +534,74 @@
     scene.add(quantumGroup);
   }
 
-  // --- MODE 3 : GLOBE 3D RÉALISTE NASA (Image 3) ---
   function createRealisticEarthGlobe() {
     globeGroup = new THREE.Group();
     globeGroup.position.y = SCENE_Y_OFFSET;
 
-    // 1. Sphère terrestre avec texture satellite haute résolution
     const earthGeo = new THREE.SphereGeometry(GLOBE_RADIUS, 64, 64);
-    const earthTex = textureLoader.load('/static/textures/earth_atmos_2048.jpg');
-    earthTex.anisotropy = 4;
+    const fallbackTex = createProceduralEarthTexture();
 
     const earthMat = new THREE.MeshPhongMaterial({
-      map: earthTex,
-      bumpScale: 0.06,
-      specular: new THREE.Color(0x1a3355),
-      shininess: 22,
+      map: fallbackTex,
+      emissive: new THREE.Color(0x041226),
+      emissiveIntensity: 0.45,
+      specular: new THREE.Color(0x1a3b66),
+      shininess: 24,
     });
+
+    // Chargement asynchrone de la vraie texture satellite NASA
+    if (textureLoader) {
+      textureLoader.load(
+        '/static/textures/earth_atmos_2048.jpg',
+        (nasaTex) => {
+          nasaTex.anisotropy = 4;
+          earthMat.map = nasaTex;
+          earthMat.needsUpdate = true;
+        },
+        undefined,
+        () => {}
+      );
+    }
 
     earthMesh = new THREE.Mesh(earthGeo, earthMat);
     globeGroup.add(earthMesh);
 
-    // 2. Couche de nuages dynamiques semi-transparents
-    const cloudsGeo = new THREE.SphereGeometry(CLOUD_RADIUS, 64, 64);
-    const cloudsTex = textureLoader.load('/static/textures/earth_clouds_1024.png');
-
+    const cloudsGeo = new THREE.SphereGeometry(CLOUD_RADIUS, 48, 48);
     const cloudsMat = new THREE.MeshLambertMaterial({
-      map: cloudsTex,
+      color: 0xffffff,
       transparent: true,
-      opacity: 0.78,
+      opacity: 0.0,
       blending: THREE.AdditiveBlending,
     });
+
+    if (textureLoader) {
+      textureLoader.load(
+        '/static/textures/earth_clouds_1024.png',
+        (cTex) => {
+          cloudsMat.map = cTex;
+          cloudsMat.opacity = 0.72;
+          cloudsMat.needsUpdate = true;
+        },
+        undefined,
+        () => {}
+      );
+    }
 
     cloudsMesh = new THREE.Mesh(cloudsGeo, cloudsMat);
     globeGroup.add(cloudsMesh);
 
-    // 3. Halo atmosphérique cyan
-    const atmosGeo = new THREE.SphereGeometry(ATMOS_RADIUS, 64, 64);
+    const atmosGeo = new THREE.SphereGeometry(ATMOS_RADIUS, 48, 48);
     const atmosMat = new THREE.MeshBasicMaterial({
       color: COLOR_CYAN,
       side: THREE.BackSide,
       transparent: true,
-      opacity: 0.28,
+      opacity: 0.26,
       blending: THREE.AdditiveBlending,
     });
     atmosMesh = new THREE.Mesh(atmosGeo, atmosMat);
     globeGroup.add(atmosMesh);
 
-    // 4. Anneau orbital incliné
-    const ringGeo = new THREE.TorusGeometry(GLOBE_RADIUS * 1.38, 0.75, 16, 140);
+    const ringGeo = new THREE.TorusGeometry(GLOBE_RADIUS * 1.28, 0.65, 16, 140);
     const ringMat = new THREE.MeshBasicMaterial({
       color: COLOR_CYAN,
       transparent: true,
@@ -466,12 +613,11 @@
     orbitalRingMesh.rotation.y = Math.PI * 0.12;
     globeGroup.add(orbitalRingMesh);
 
-    // 5. Radar vert pulsant sur Moctar (Rabat)
-    const markerGeo = new THREE.SphereGeometry(2.4, 16, 16);
+    const markerGeo = new THREE.SphereGeometry(2.0, 16, 16);
     const markerMat = new THREE.MeshBasicMaterial({ color: COLOR_GREEN });
     radarMarker = new THREE.Mesh(markerGeo, markerMat);
 
-    const pulseGeo = new THREE.RingGeometry(3.2, 5.0, 32);
+    const pulseGeo = new THREE.RingGeometry(2.6, 4.2, 32);
     const pulseMat = new THREE.MeshBasicMaterial({
       color: COLOR_GREEN,
       side: THREE.DoubleSide,
@@ -492,11 +638,11 @@
   }
 
   function setRadarGpsCoordinates(lat, lon) {
-    if (!radarMarker) return;
+    if (!radarMarker || typeof THREE === 'undefined') return;
     const phi = (90 - lat) * (Math.PI / 180);
     const theta = (lon + 180) * (Math.PI / 180);
 
-    const r = GLOBE_RADIUS + 1.2;
+    const r = GLOBE_RADIUS + 1.0;
     const x = -(r * Math.sin(phi) * Math.cos(theta));
     const z = r * Math.sin(phi) * Math.sin(theta);
     const y = r * Math.cos(phi);
@@ -504,6 +650,47 @@
     const pos = new THREE.Vector3(x, y, z);
     radarMarker.position.copy(pos);
     radarMarker.lookAt(pos.clone().multiplyScalar(2));
+  }
+
+  // --- FALLBACK HOLOGRAPHIQUE 2D (Si Three.js / WebGL absent) ---
+  function initFallback2DCanvas() {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    function render2D() {
+      requestAnimationFrame(render2D);
+      const w = (canvas.width = window.innerWidth);
+      const h = (canvas.height = window.innerHeight);
+      const cx = w / 2;
+      const cy = h * 0.46;
+      const t = Date.now() * 0.001;
+      const baseR = Math.min(w, h) * 0.22 * (1 + liveVoiceRms * 0.5);
+
+      ctx.clearRect(0, 0, w, h);
+
+      // Halo central
+      const grad = ctx.createRadialGradient(cx, cy, baseR * 0.1, cx, cy, baseR * 1.5);
+      grad.addColorStop(0, currentView === 'quantum' ? 'rgba(217, 0, 255, 0.35)' : 'rgba(0, 243, 255, 0.35)');
+      grad.addColorStop(1, 'rgba(2, 6, 14, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, baseR * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Anneaux concentriques
+      ctx.strokeStyle = '#00f3ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, baseR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(0, 170, 255, 0.55)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, baseR * 1.22, t % (Math.PI * 2), (t % (Math.PI * 2)) + Math.PI * 1.3);
+      ctx.stroke();
+    }
+    render2D();
   }
 
   // --- BASCULEMENT DE VUE ROBUSTE & PERSISTANT ---
@@ -521,15 +708,13 @@
     if (quantumGroup) quantumGroup.visible = currentView === 'quantum';
     if (plasmaGroup) plasmaGroup.visible = currentView === 'plasma';
 
-    // Mise à jour visuelle des boutons de vue
     [btnPlasmaView, btnQuantumView, btnGlobeView].forEach((b) => b && b.classList.remove('active'));
     if (currentView === 'plasma' && btnPlasmaView) btnPlasmaView.classList.add('active');
     if (currentView === 'quantum' && btnQuantumView) btnQuantumView.classList.add('active');
     if (currentView === 'globe' && btnGlobeView) btnGlobeView.classList.add('active');
 
-    targetCameraZ = currentView === 'globe' ? 275 : 285;
+    targetCameraZ = currentView === 'globe' ? 355 : 370;
 
-    // Si action utilisateur : persister dans localStorage et synchroniser avec l'API backend
     if (isUserAction) {
       try {
         localStorage.setItem('moctar_hud_view', currentView);
@@ -543,7 +728,6 @@
     }
   }
 
-  // --- CONTRÔLES SOURIS, TOUCH & ZOOM ---
   function setup3DControls() {
     if (!canvas) return;
 
@@ -584,58 +768,62 @@
     window.addEventListener('touchmove', onMove, { passive: true });
     window.addEventListener('touchend', onUp);
 
-    // Zoom molette
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       targetCameraZ += e.deltaY * 0.25;
-      targetCameraZ = Math.max(160, Math.min(650, targetCameraZ));
+      targetCameraZ = Math.max(220, Math.min(620, targetCameraZ));
     }, { passive: false });
   }
 
-  // --- 2. GESTION DU MICROPHONE & MOTEUR VOCAL UNIFIÉ (MoctarVoice) ---
+  // =========================================================================
+  // 3. MOTEUR VOCAL UNIFIÉ (Identique au Dashboard NOC)
+  // =========================================================================
   function initVoiceEngine() {
     if (!window.MoctarVoice) {
-      console.warn("MoctarVoice non disponible.");
+      handleVoiceStateChange('off');
       return;
     }
 
     jarvisVoice = window.MoctarVoice.create({
-      followupMs: 30000, // 30s d'écoute active pour les enchaînements fluides
+      followupMs: 45000,
       mediaDevices: window.navigator ? window.navigator.mediaDevices : null,
       MediaRecorder: window.MediaRecorder,
       AudioContext: window.AudioContext || window.webkitAudioContext,
       Audio: window.Audio,
+      SolarEngine: HudSolarBridge,
       interactUrl: '/api/voice/interact',
       onState: handleVoiceStateChange,
-      onInteractResult: handleVoiceInteractResult,
+      onInteractResult: (data) => handleVoiceInteractResult(data, false),
       speak: speakJarvisText,
       language: 'fr-FR',
     });
 
-    handleVoiceStateChange('off');
+    window.jarvisVoice = jarvisVoice;
+    handleVoiceStateChange(jarvisVoice.state || 'off');
 
-    // Réactiver l'écoute si l'utilisateur l'avait activée précédemment
     let savedWakeword = false;
     try {
       savedWakeword = localStorage.getItem('jarvis_wakeword_active') === 'true';
     } catch (_) {}
 
-    if (savedWakeword && !document.hidden && jarvisVoice) {
+    if (savedWakeword && !document.hidden) {
       jarvisVoice.enable().catch(() => {});
     }
   }
 
   function handleVoiceStateChange(phase, detail = {}) {
-    const isMicActive = jarvisVoice && jarvisVoice.enabled;
+    currentVoicePhase = phase || 'off';
+    const isMicActive = Boolean(jarvisVoice && (jarvisVoice.listeningDesired ?? jarvisVoice.enabled));
+
     const messages = {
       off: '● MICRO COUPÉ',
-      starting: '🟢 INITIALISATION...',
-      wake: '🟢 EN VEILLE — Dites « Yo Moctar »',
-      listening: '🎙️ EN ÉCOUTE... (PARLEZ)',
+      starting: '🟢 INITIALISATION MICRO...',
+      wake: '🟢 À L\'ÉCOUTE — Dites « Yo Moctar »',
+      listening: '🎙️ MOCTAR VOUS ÉCOUTE... (PARLEZ)',
       processing: '⚡ ANALYSE M.O.C.T.A.R...',
-      speaking: '🔊 M.O.C.T.A.R RÉPOND...',
+      speaking: '🔊 M.O.C.T.A.R VOUS PARLE...',
       paused: '⏸️ VEILLE SUSPENDUE',
-      error: '⚠️ ERREUR MICRO',
+      error: detail.message || '⚠️ ERREUR MICRO (Vérifiez HTTPS/Permissions)',
       unsupported: '❌ MICRO NON SUPPORTÉ',
     };
 
@@ -645,42 +833,25 @@
     }
 
     if (btnMic) {
-      if (isMicActive) {
+      if (isMicActive || phase === 'listening' || phase === 'wake' || phase === 'starting') {
         btnMic.classList.add('active');
-        if (phase === 'listening') {
-          btnMic.textContent = '🔴 ENREGISTREMENT...';
-        } else {
-          btnMic.textContent = '🔴 COUPER LE MICRO';
-        }
+        btnMic.textContent = phase === 'listening' ? '🔴 PARLEZ MAINTENANT' : '🔴 COUPER LE MICRO';
       } else {
         btnMic.classList.remove('active');
         btnMic.textContent = '🎙️ ACTIVER MICRO';
       }
     }
 
-    // VU-mètre audio en direct
-    if (vumeterEl) {
-      const bars = vumeterEl.querySelectorAll('.vbar');
-      const rms = detail.rms || (jarvisVoice ? jarvisVoice.rms : 0) || 0;
-      if ((phase === 'listening' || phase === 'wake') && rms > 0.005) {
-        bars.forEach((bar) => {
-          const height = Math.min(24, Math.max(4, rms * 180 * (0.8 + Math.random() * 0.5)));
-          bar.style.height = `${height}px`;
-          bar.style.background = '#00ff88';
-        });
-      } else {
-        bars.forEach((bar) => {
-          bar.style.height = '4px';
-          bar.style.background = isMicActive ? 'rgba(0, 255, 136, 0.4)' : 'rgba(0, 243, 255, 0.2)';
-        });
-      }
+    if (typeof detail.rms === 'number') {
+      HudSolarBridge.setVoiceActivity(detail.rms, Boolean(detail.isSpeaking));
+    } else {
+      renderVumeter(liveVoiceRms, liveVoiceSpeaking);
     }
   }
 
-  function handleVoiceInteractResult(data) {
+  function handleVoiceInteractResult(data, playAudioManually = false) {
     if (!data || data.ignored) return;
 
-    // Filtrer les hallucinations Whisper résiduelles
     const rawUser = String(data.user_text || '').trim();
     const isHallucination = HALLUCINATION_BLACK_LIST.some((h) => rawUser.toLowerCase().includes(h));
 
@@ -688,58 +859,82 @@
       userTextEl.textContent = `« ${rawUser} »`;
     }
 
-    const reply = data.reply_text || data.reply || '';
+    const reply = String(data.reply_text || data.reply || '').trim();
     if (reply && assistantTextEl) {
       assistantTextEl.textContent = reply;
     }
 
-    // Basculement 3D automatique si demandé vocalement
+    // Ouverture d'URL externe si demandée (ex: YouTube, Google)
+    let targetUrl = data.url;
+    if (!targetUrl && Array.isArray(data.tools_used)) {
+      for (const tu of data.tools_used) {
+        if (tu.data && tu.data.action === 'open_browser' && tu.data.url) {
+          targetUrl = tu.data.url;
+          break;
+        }
+      }
+    }
+    if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
+      try { window.open(targetUrl, '_blank', 'noopener,noreferrer'); } catch (_) {}
+    }
+
+    // Basculement 3D automatique si demandé vocalement ou par texte
     const textToCheck = (rawUser + ' ' + reply + ' ' + (data.title || '')).toLowerCase();
-    if (textToCheck.includes('globe') || textToCheck.includes('terre') || textToCheck.includes('earth') || textToCheck.includes('satellite')) {
+    if (textToCheck.includes('localise') || textToCheck.includes('rabat') || textToCheck.includes('ma position')) {
+      lockOnMoctarPosition();
+    } else if (textToCheck.includes('globe') || textToCheck.includes('terre') || textToCheck.includes('earth') || textToCheck.includes('satellite')) {
       applyView('globe', true);
     } else if (textToCheck.includes('quantique') || textToCheck.includes('quantum') || textToCheck.includes('core') || textToCheck.includes('noyau')) {
       applyView('quantum', true);
-    } else if (textToCheck.includes('plasma') || textToCheck.includes('réacteur') || textToCheck.includes('arc') || textToCheck.includes('reactor')) {
+    } else if (textToCheck.includes('plasma') || textToCheck.includes('réacteur') || textToCheck.includes('arc') || textToCheck.includes('orbe')) {
       applyView('plasma', true);
     }
 
-    if (textToCheck.includes('localise') || textToCheck.includes('rabat') || textToCheck.includes('position')) {
-      applyView('globe', true);
-      const phi = (90 - userCoords.lat) * (Math.PI / 180);
-      const theta = (userCoords.lon + 180) * (Math.PI / 180);
-      rotationTargets.globe.x = 0.22;
-      rotationTargets.globe.y = -(theta - Math.PI / 2);
-    }
-
-    // Gestion de l'audio si présent
-    if (data.audio_url) {
-      playAudioUrl(data.audio_url);
-    } else if (reply) {
-      speakJarvisText(reply);
+    // Lecture audio uniquement pour les commandes texte (car voice.js lit déjà l'audio des commandes vocales)
+    if (playAudioManually) {
+      if (data.audio_url) {
+        playAudioUrl(data.audio_url);
+      } else if (reply) {
+        speakJarvisText(reply);
+      }
     }
   }
 
-  // Bascule Marche / Arrêt explicite du micro
-  async function toggleMicrophone() {
-    if (!jarvisVoice) {
-      initVoiceEngine();
+  function lockOnMoctarPosition() {
+    applyView('globe', true);
+    const theta = (userCoords.lon + 180) * (Math.PI / 180);
+    rotationTargets.globe.x = 0.22;
+    rotationTargets.globe.y = -(theta - Math.PI / 2);
+
+    if (gpsCoordsEl) {
+      gpsCoordsEl.textContent = `GPS : ${userCoords.lat.toFixed(4)}°N, ${userCoords.lon.toFixed(4)}°E (Position Moctar Verrouillée)`;
     }
-    if (!jarvisVoice) return;
+    if (assistantTextEl) {
+      assistantTextEl.textContent = "Position géographique verrouillée sur le Dell Precision M4800 à Rabat, Moctar.";
+    }
+  }
+
+  async function toggleMicrophone() {
+    if (!jarvisVoice) initVoiceEngine();
+    if (!jarvisVoice) {
+      handleVoiceStateChange('unsupported');
+      return;
+    }
 
     if (window.isSecureContext === false) {
-      alert("L'accès micro nécessite une connexion sécurisée (HTTPS ou localhost).");
+      handleVoiceStateChange('error', { message: '⚠️ HTTPS requis pour autoriser le microphone' });
       return;
     }
 
     try {
-      if (jarvisVoice.enabled) {
-        // Couper le micro
+      const isCurrentlyActive = Boolean(jarvisVoice.enabled || jarvisVoice.state === 'listening');
+      if (isCurrentlyActive) {
         jarvisVoice.disable();
         stopAllSpeech();
         try { localStorage.setItem('jarvis_wakeword_active', 'false'); } catch (_) {}
       } else {
-        // Allumer le micro et démarrer l'écoute active
         try { window.speechSynthesis?.resume(); } catch (_) {}
+        if (userTextEl) userTextEl.textContent = '« Micro activé — Parlez maintenant ou dites Yo Moctar... »';
         await jarvisVoice.enable();
         await jarvisVoice.startManual();
         try { localStorage.setItem('jarvis_wakeword_active', 'true'); } catch (_) {}
@@ -750,12 +945,16 @@
     }
   }
 
-  // Interruption totale 0 ms
   function stopAllSpeech() {
-    isRecordingManual = false;
     if (jarvisVoice) {
       try { jarvisVoice.stopManual(); } catch (_) {}
       try { jarvisVoice.disable(); } catch (_) {}
+    }
+    if (window.MoctarSpeaker) {
+      try {
+        window.MoctarSpeaker.pause?.();
+        window.MoctarSpeaker.currentTime = 0;
+      } catch (_) {}
     }
     if (window.speechSynthesis) {
       try { window.speechSynthesis.cancel(); } catch (_) {}
@@ -767,18 +966,18 @@
       } catch (_) {}
       activeAudioElement = null;
     }
-    const audios = document.querySelectorAll('audio');
-    audios.forEach((a) => {
+    document.querySelectorAll('audio').forEach((a) => {
       try { a.pause(); a.currentTime = 0; } catch (_) {}
     });
 
+    liveVoiceRms = 0;
+    liveVoiceSpeaking = false;
     handleVoiceStateChange('off');
     if (assistantTextEl) {
-      assistantTextEl.textContent = "Interrompu et micro désactivé, Moctar.";
+      assistantTextEl.textContent = "Système vocal interrompu et micro coupé, Moctar.";
     }
   }
 
-  // Synthèse vocale de secours (Web Speech)
   function speakJarvisText(text) {
     const clean = String(text || '')
       .replace(/```[\s\S]*?```/g, '')
@@ -807,7 +1006,6 @@
     });
   }
 
-  // Lecture d'URL audio MP3/WAV
   function playAudioUrl(url) {
     if (!url) return;
     try {
@@ -831,13 +1029,12 @@
     }
   }
 
-  // Envoi d'ordre texte hybride
   async function submitTextCommand(text) {
     const query = (text || '').trim();
     if (!query) return;
 
     if (userTextEl) userTextEl.textContent = `« ${query} »`;
-    if (assistantTextEl) assistantTextEl.textContent = "Calcul en cours...";
+    if (assistantTextEl) assistantTextEl.textContent = "Exécution en cours...";
     handleVoiceStateChange('processing');
 
     try {
@@ -852,72 +1049,72 @@
 
       if (res.ok) {
         const data = await res.json();
-        handleVoiceInteractResult(data);
-      } else {
-        if (assistantTextEl) assistantTextEl.textContent = "Erreur de communication avec le serveur, Moctar.";
-        handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
+        handleVoiceInteractResult(data, true);
+        return;
       }
-    } catch (e) {
+
+      // Fallback sur /api/jarvis/query (endpoint NOC)
+      const fallbackRes = await fetch('/api/jarvis/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: query, source: 'hud_web' }),
+      });
+      if (fallbackRes.ok) {
+        const fbData = await fallbackRes.json();
+        handleVoiceInteractResult({ user_text: query, reply_text: fbData.reply || '' }, true);
+        return;
+      }
+      if (assistantTextEl) assistantTextEl.textContent = "Erreur de communication avec le serveur, Moctar.";
+      handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
+    } catch (_) {
       if (assistantTextEl) assistantTextEl.textContent = "Réseau indisponible, Moctar.";
       handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
     }
   }
 
-  // --- ÉCOUTEURS D'ÉVÉNEMENTS INTERFACE ---
+  // =========================================================================
+  // 4. ÉCOUTEURS D'ÉVÉNEMENTS, HORLOGE & TÉLÉMÉTRIE TEMPS RÉEL (NOC UNIFIÉ)
+  // =========================================================================
   function setupUIEventListeners() {
     if (btnPlasmaView) {
       btnPlasmaView.addEventListener('click', (e) => {
         e.preventDefault();
         applyView('plasma', true);
+        if (assistantTextEl) assistantTextEl.textContent = "Mode Réacteur à Arc Plasma activé, Moctar.";
       });
     }
     if (btnQuantumView) {
       btnQuantumView.addEventListener('click', (e) => {
         e.preventDefault();
         applyView('quantum', true);
+        if (assistantTextEl) assistantTextEl.textContent = "Mode Cœur Quantique Neuronal activé, Moctar.";
       });
     }
     if (btnGlobeView) {
       btnGlobeView.addEventListener('click', (e) => {
         e.preventDefault();
         applyView('globe', true);
+        if (assistantTextEl) assistantTextEl.textContent = "Initialisation du globe terrestre 3D NASA, Moctar.";
       });
     }
-
     if (btnLocate) {
       btnLocate.addEventListener('click', (e) => {
         e.preventDefault();
-        applyView('globe', true);
-
-        // Rotation fluide pour orienter Rabat vers l'utilisateur
-        const phi = (90 - userCoords.lat) * (Math.PI / 180);
-        const theta = (userCoords.lon + 180) * (Math.PI / 180);
-        rotationTargets.globe.x = 0.22;
-        rotationTargets.globe.y = -(theta - Math.PI / 2);
-
-        if (gpsCoordsEl) {
-          gpsCoordsEl.textContent = `GPS : ${userCoords.lat.toFixed(4)}°N, ${userCoords.lon.toFixed(4)}°E (Position Moctar Verrouillée)`;
-        }
-        if (assistantTextEl) {
-          assistantTextEl.textContent = "Position géographique verrouillée sur le Dell Precision M4800, Moctar.";
-        }
+        lockOnMoctarPosition();
       });
     }
-
     if (btnMic) {
       btnMic.addEventListener('click', (e) => {
         e.preventDefault();
         toggleMicrophone();
       });
     }
-
     if (btnStop) {
       btnStop.addEventListener('click', (e) => {
         e.preventDefault();
         stopAllSpeech();
       });
     }
-
     if (cmdForm && cmdInput) {
       cmdForm.addEventListener('submit', (e) => {
         e.preventDefault();
@@ -929,14 +1126,15 @@
 
     window.addEventListener('resize', onResize);
 
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        if (jarvisVoice && jarvisVoice.enabled) jarvisVoice.suspend();
-        stopAllSpeech();
-      } else {
-        if (jarvisVoice && jarvisVoice.listeningDesired) jarvisVoice.resume();
-      }
-    });
+    if (typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          if (jarvisVoice && jarvisVoice.enabled) jarvisVoice.suspend();
+        } else {
+          if (jarvisVoice && jarvisVoice.listeningDesired) jarvisVoice.resume();
+        }
+      });
+    }
   }
 
   function onResize() {
@@ -949,7 +1147,6 @@
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   }
 
-  // --- HORLOGE NUMÉRIQUE HAUTE PRÉCISION ---
   function startClock() {
     function tick() {
       const now = new Date();
@@ -963,67 +1160,68 @@
         clockDateEl.textContent = now.toLocaleDateString('fr-FR', opts).toUpperCase();
       }
     }
-    setInterval(tick, 1000);
     tick();
+    setInterval(tick, 1000);
   }
 
-  // --- TÉLÉMÉTRIE MATÉRIELLE EN DIRECT SANS RÉVERSION DE VUE ---
   function startTelemetrySync() {
+    function applyMetrics(cpu, ram, host) {
+      if (cpuValEl && cpu !== undefined && cpu !== null) {
+        cpuValEl.textContent = `${Number(cpu).toFixed(1)}%`;
+      }
+      if (ramValEl && ram !== undefined && ram !== null) {
+        ramValEl.textContent = `${Number(ram).toFixed(1)}%`;
+      }
+      if (hostValEl && host) {
+        hostValEl.textContent = host;
+      }
+    }
+
     async function sync() {
+      // 1. Endpoint NOC /api/snapshot (prioritaire et identique au Dashboard NOC)
       try {
-        const res = await fetch('/api/hud/state', { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          if (cpuValEl && data.cpu_percent !== undefined) {
-            cpuValEl.textContent = `${data.cpu_percent}%`;
+        const snapRes = await fetch('/api/snapshot', { cache: 'no-store', credentials: 'same-origin' });
+        if (snapRes.ok) {
+          const snap = await snapRes.json();
+          const cpu = snap.cpu?.total ?? snap.cpu_percent;
+          const ram = snap.memory?.percent ?? snap.ram_percent;
+          const host = snap.host?.hostname ?? snap.hostname;
+          if (cpu !== undefined || ram !== undefined) {
+            applyMetrics(cpu, ram, host);
+            return;
           }
-          if (ramValEl && data.ram_percent !== undefined) {
-            ramValEl.textContent = `${data.ram_percent}%`;
-          }
-          if (hostValEl && data.hostname) {
-            hostValEl.textContent = data.hostname;
-          }
-          return;
         }
       } catch (_) {}
 
-      // Fallback sur /api/snapshot utilisé par le Dashboard NOC
+      // 2. Endpoint /api/hud/state
       try {
-        const snapRes = await fetch('/api/snapshot', { cache: 'no-store' });
-        if (snapRes.ok) {
-          const snap = await snapRes.json();
-          if (cpuValEl && snap.cpu && snap.cpu.total !== undefined) {
-            cpuValEl.textContent = `${snap.cpu.total}%`;
-          }
-          if (ramValEl && snap.memory && snap.memory.percent !== undefined) {
-            ramValEl.textContent = `${snap.memory.percent}%`;
-          }
-          if (hostValEl && snap.host && snap.host.hostname) {
-            hostValEl.textContent = snap.host.hostname;
-          }
+        const res = await fetch('/api/hud/state', { cache: 'no-store', credentials: 'same-origin' });
+        if (res.ok) {
+          const data = await res.json();
+          applyMetrics(data.cpu_percent, data.ram_percent, data.hostname);
         }
       } catch (_) {}
     }
 
-    setInterval(sync, 2000);
     sync();
+    setInterval(sync, 2000);
   }
 
-  // --- BOUCLE D'ANIMATION 60 FPS ---
+  // =========================================================================
+  // 5. BOUCLE D'ANIMATION 60 FPS RÉACTIVE À LA VOIX
+  // =========================================================================
   function animate() {
     requestAnimationFrame(animate);
-
     if (!renderer || !scene || !camera) return;
 
     const delta = clock ? clock.getDelta() : 0.016;
     const elapsed = clock ? clock.getElapsedTime() : Date.now() * 0.001;
+    const voiceBoost = 1.0 + liveVoiceRms * 3.2;
 
-    // 1. Zoom caméra doux
     currentCameraZ += (targetCameraZ - currentCameraZ) * 0.08;
     camera.position.z = currentCameraZ;
-    camera.lookAt(0, 26, 0);
+    camera.lookAt(0, 0, 0);
 
-    // 2. Rotation douce des groupes
     const activeGrp = currentView === 'globe' ? globeGroup : currentView === 'quantum' ? quantumGroup : plasmaGroup;
     const tgt = rotationTargets[currentView];
 
@@ -1031,9 +1229,12 @@
       activeGrp.rotation.y += (tgt.y - activeGrp.rotation.y) * 0.08;
       activeGrp.rotation.x += (tgt.x - activeGrp.rotation.x) * 0.08;
 
+      const breathScale = 1.0 + liveVoiceRms * 0.45;
+      activeGrp.scale.set(breathScale, breathScale, breathScale);
+
       if (!isDragging) {
         if (currentView === 'globe') {
-          tgt.y += delta * 0.09;
+          tgt.y += delta * 0.11;
         } else {
           tgt.y = Math.sin(elapsed * 0.35) * 0.06;
         }
@@ -1044,41 +1245,37 @@
       starField.rotation.y += delta * 0.012;
     }
 
-    // --- ANIMATION MODE 1 : PLASMA ARC REACTOR ---
     if (currentView === 'plasma' && plasmaParticles) {
       const positions = plasmaParticles.geometry.attributes.position.array;
-      const speedMult = isRecordingManual ? 2.2 : 1.0;
-
       for (let i = 0; i < PLASMA_PARTICLE_COUNT; i++) {
-        plasmaAngles[i] += delta * plasmaSpeeds[i] * speedMult;
+        plasmaAngles[i] += delta * plasmaSpeeds[i] * voiceBoost;
         const u = plasmaAngles[i];
-        const r = plasmaRadii[i] + Math.sin(elapsed * 5 + i) * 1.6;
+        const r = plasmaRadii[i] + Math.sin(elapsed * 5 + i) * (1.5 + liveVoiceRms * 8);
 
         const idx = i * 3;
         positions[idx] = r * Math.cos(u);
         positions[idx + 1] = r * Math.sin(u);
-        positions[idx + 2] = plasmaZOffsets[i] + Math.sin(u * 3 + elapsed) * 2.5;
+        positions[idx + 2] = plasmaZOffsets[i] + Math.sin(u * 3 + elapsed) * 2.2;
       }
       plasmaParticles.geometry.attributes.position.needsUpdate = true;
 
       if (plasmaInnerRing) {
-        const pulse = 1.0 + Math.sin(elapsed * 4) * 0.02;
+        const pulse = 1.0 + Math.sin(elapsed * 4) * 0.025 + liveVoiceRms * 0.25;
         plasmaInnerRing.scale.set(pulse, pulse, pulse);
       }
       if (plasmaOuterRing) {
-        plasmaOuterRing.rotation.z -= delta * 0.45;
+        plasmaOuterRing.rotation.z -= delta * 0.45 * voiceBoost;
       }
     }
 
-    // --- ANIMATION MODE 2 : QUANTUM CORE ---
     if (currentView === 'quantum' && quantumParticles) {
       const positions = quantumParticles.geometry.attributes.position.array;
-      const corePulse = 1.0 + Math.sin(elapsed * 5) * 0.06;
+      const corePulse = 1.0 + Math.sin(elapsed * 5) * 0.06 + liveVoiceRms * 0.4;
 
       if (quantumCoreMesh) quantumCoreMesh.scale.set(corePulse, corePulse, corePulse);
 
       quantumFilamentRings.forEach((ring, idx) => {
-        ring.rotation.z += delta * (0.35 + idx * 0.18);
+        ring.rotation.z += delta * (0.35 + idx * 0.18) * voiceBoost;
       });
 
       for (let i = 0; i < QUANTUM_PARTICLE_COUNT; i++) {
@@ -1087,7 +1284,7 @@
         const oy = quantumOriginals[idx + 1];
         const oz = quantumOriginals[idx + 2];
 
-        const breath = 1.0 + Math.sin(elapsed * 3 + i) * 0.1;
+        const breath = 1.0 + Math.sin(elapsed * 3 + i) * 0.08 + liveVoiceRms * 0.35;
         positions[idx] = ox * breath;
         positions[idx + 1] = oy * breath;
         positions[idx + 2] = oz * breath;
@@ -1095,40 +1292,28 @@
       quantumParticles.geometry.attributes.position.needsUpdate = true;
     }
 
-    // --- ANIMATION MODE 3 : GLOBE 3D ---
     if (currentView === 'globe') {
       if (cloudsMesh) cloudsMesh.rotation.y += delta * 0.035;
-      if (orbitalRingMesh) orbitalRingMesh.rotation.z += delta * 0.16;
+      if (orbitalRingMesh) orbitalRingMesh.rotation.z += delta * 0.18 * voiceBoost;
       if (radarPulseRing) {
-        const pScale = 1.0 + ((elapsed * 2.6) % 2.5);
+        const pScale = 1.0 + ((elapsed * 2.6) % 2.4);
         radarPulseRing.scale.set(pScale, pScale, pScale);
-        radarPulseRing.material.opacity = Math.max(0, 1.0 - (pScale - 1.0) / 2.5);
+        radarPulseRing.material.opacity = Math.max(0, 1.0 - (pScale - 1.0) / 2.4);
       }
     }
 
     renderer.render(scene, camera);
   }
 
-  // --- INITIALISATION SÉCURISÉE AU CHARGEMENT ---
+  // =========================================================================
+  // 6. DÉMARRAGE IMMÉDIAT & INFAILLIBLE
+  // =========================================================================
   function boot() {
-    // 1. Fonctions vitales de l'interface : Toujours actives quoi qu'il arrive
-    startClock();
-    startTelemetrySync();
-    setupUIEventListeners();
-
-    // 2. Moteur vocal unifié
-    try {
-      initVoiceEngine();
-    } catch (err) {
-      console.warn("Erreur démarrage initVoiceEngine:", err);
-    }
-
-    // 3. Moteur 3D WebGL isolé dans un try-catch
-    try {
-      initThree();
-    } catch (err) {
-      console.error("Erreur démarrage Three.js WebGL:", err);
-    }
+    try { startClock(); } catch (e) { console.error(e); }
+    try { setupUIEventListeners(); } catch (e) { console.error(e); }
+    try { startTelemetrySync(); } catch (e) { console.error(e); }
+    try { initVoiceEngine(); } catch (e) { console.error(e); }
+    try { initThree(); } catch (e) { console.error(e); initFallback2DCanvas(); }
   }
 
   if (document.readyState === 'loading') {
@@ -1137,11 +1322,11 @@
     boot();
   }
 
-  // Interface externe
   window.MocHUD = {
     applyView,
     toggleMicrophone,
     stopAllSpeech,
     submitTextCommand,
+    lockOnMoctarPosition,
   };
 })();

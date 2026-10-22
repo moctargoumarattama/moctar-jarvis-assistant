@@ -1012,6 +1012,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
+        response.headers["CDN-Cache-Control"] = "no-store"
+        response.headers["Cloudflare-CDN-Cache-Control"] = "no-store"
         response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; media-src 'self' blob: data:; connect-src 'self' https:; font-src 'self' data: https://fonts.gstatic.com; manifest-src 'self'; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         return response
 
@@ -1446,25 +1448,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             )
 
-        audio_bytes = bytes(body)
-        detected_mime = content_type or "audio/webm"
-        if content_type == "multipart/form-data":
+        if content_type == "application/json":
             try:
-                audio_bytes, detected_mime = _extract_multipart_audio(audio_bytes, raw_content_type)
-            except ValueError as exc:
-                raise HTTPException(422, str(exc)) from None
-        elif content_type and content_type not in DIRECT_AUDIO_MIME_TYPES:
-            raise HTTPException(415, "Format audio non supporté (attendu: WAV, WebM, OGG, MP3 ou multipart/form-data)")
+                json_payload = json.loads(body.decode("utf-8"))
+                transcript = str(
+                    (json_payload.get("text") if isinstance(json_payload, dict) else "")
+                    or (json_payload.get("prompt") if isinstance(json_payload, dict) else "")
+                    or ""
+                ).strip()
+            except Exception as exc:
+                raise HTTPException(400, f"JSON invalide : {exc}") from None
+        else:
+            audio_bytes = bytes(body)
+            detected_mime = content_type or "audio/webm"
+            if content_type == "multipart/form-data":
+                try:
+                    audio_bytes, detected_mime = _extract_multipart_audio(audio_bytes, raw_content_type)
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from None
+            elif content_type and content_type not in DIRECT_AUDIO_MIME_TYPES:
+                raise HTTPException(415, "Format audio non supporté (attendu: WAV, WebM, OGG, MP3 ou multipart/form-data)")
 
-        try:
-            transcript = await transcribe_direct_audio(audio_bytes, detected_mime)
-        except ValueError:
-            transcript = ""
-        except RuntimeError as exc:
-            raise HTTPException(503, str(exc)) from None
-        except Exception as exc:
-            LOGGER.warning("Erreur de transcription faster-whisper sur /api/voice/interact : %s", exc)
-            raise HTTPException(500, f"Échec de transcription : {exc}") from None
+            try:
+                transcript = await transcribe_direct_audio(audio_bytes, detected_mime)
+            except ValueError:
+                transcript = ""
+            except RuntimeError as exc:
+                raise HTTPException(503, str(exc)) from None
+            except Exception as exc:
+                LOGGER.warning("Erreur de transcription faster-whisper sur /api/voice/interact : %s", exc)
+                raise HTTPException(500, f"Échec de transcription : {exc}") from None
 
         LOGGER.info(f"🎙️ [WHISPER BRUT]: '{transcript}'")
 
