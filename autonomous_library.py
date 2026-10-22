@@ -271,10 +271,27 @@ def execute_autonomous_task(
             "task_category": "system_tools",
         }
 
-    # 2.3c. INTERFACE HUD 3D (ORBE, GLOBE TERRESTRE, PLASMA & QUANTUM)
+    # 2.3c. INTERFACE HUD 3D (ORBE, GLOBE TERRESTRE, PLASMA, QUANTUM & RETOUR NOC)
+    if any(k in norm for k in [
+        "retourne en mode noc", "retour en mode noc", "retour au noc", "retourne au noc",
+        "mode noc", "ouvre le noc", "affiche le noc", "retourne au dashboard", "retour au dashboard",
+        "quitte le hud", "ferme le hud", "retour noc", "dashboard noc",
+    ]):
+        actions.execute_tool("switch_hud_view", {"view": "orb", "locate": False})
+        tools_used.append({"tool": "switch_hud_view", "arguments": {"view": "orb", "locate": False}, "success": True})
+        return {
+            "handled": True,
+            "reply": "Retour au Centre de Commandement NOC, Moctar.",
+            "action": "open_app",
+            "url": "/",
+            "title": "Centre de Commandement NOC",
+            "tools_used": tools_used,
+            "task_category": "hud_3d",
+        }
+
     if any(k in norm for k in [
         "mode hud 3d", "hud 3d", "ouvre le hud 3d", "active le hud 3d", "lance le hud 3d",
-        "mode hud", "ouvre le hud", "active le hud", "mode hope 3d",
+        "mode hud", "ouvre le hud", "active le hud", "mode hope 3d", "mode hot trading", "mode hot-trading",
     ]):
         actions.execute_tool("switch_hud_view", {"view": "plasma", "locate": False})
         tools_used.append({"tool": "switch_hud_view", "arguments": {"view": "plasma", "locate": False}, "success": True})
@@ -318,6 +335,25 @@ def execute_autonomous_task(
             "task_category": "hud_3d",
         }
 
+    # IMPORTANT : Tester la géolocalisation (locate=True) AVANT le globe générique (locate=False)
+    if any(k in norm for k in [
+        "affiche ma position", "localise moi", "localise-moi", "montre ma position",
+        "ou suis je", "où suis-je", "ou suis-je", "je suis ou", "je suis où",
+        "ou je suis", "où je suis", "dans le monde", "ma position sur le globe",
+        "position en temps reel", "position en temps réel", "ma position",
+    ]):
+        actions.execute_tool("switch_hud_view", {"view": "globe", "locate": True})
+        tools_used.append({"tool": "switch_hud_view", "arguments": {"view": "globe", "locate": True}, "success": True})
+        return {
+            "handled": True,
+            "reply": "Localisation en cours. Le globe affiche votre position en temps réel, Moctar.",
+            "action": "open_app",
+            "url": "/hud",
+            "title": "Globe Terrestre 3D",
+            "tools_used": tools_used,
+            "task_category": "hud_3d",
+        }
+
     if any(k in norm for k in [
         "affiche la terre", "montre la terre", "montre le globe", "affiche le globe",
         "globe terrestre", "vue depuis l espace", "vue de l espace", "mode globe", "ouvre le globe",
@@ -327,22 +363,6 @@ def execute_autonomous_task(
         return {
             "handled": True,
             "reply": "Initialisation du globe terrestre. Vue depuis l'espace activée, Moctar.",
-            "action": "open_app",
-            "url": "/hud",
-            "title": "Globe Terrestre 3D",
-            "tools_used": tools_used,
-            "task_category": "hud_3d",
-        }
-
-    if any(k in norm for k in [
-        "affiche ma position", "localise moi", "localise-moi", "montre ma position",
-        "ou suis je", "où suis-je", "ma position sur le globe", "position en temps reel", "position en temps réel",
-    ]):
-        actions.execute_tool("switch_hud_view", {"view": "globe", "locate": True})
-        tools_used.append({"tool": "switch_hud_view", "arguments": {"view": "globe", "locate": True}, "success": True})
-        return {
-            "handled": True,
-            "reply": "Localisation en cours. Le globe affiche votre position en temps réel, Moctar.",
             "action": "open_app",
             "url": "/hud",
             "title": "Globe Terrestre 3D",
@@ -914,17 +934,63 @@ def execute_autonomous_task(
         }
 
     # 11. GIT & PROJETS
+    target_git_project = ""
+    git_project_label = "Jarvis"
+    if any(p in norm for p in ("papa market", "baba market", "babamarket", "papamarket", "baba")):
+        target_git_project = "baba_market"
+        git_project_label = "Baba Market"
+    elif "noor" in norm:
+        target_git_project = "noor_express"
+        git_project_label = "Noor Express"
+    elif "edumanage" in norm or "edu manage" in norm:
+        target_git_project = "edumanage"
+        git_project_label = "EDUMANAGE"
+
     if "git status" in norm or "statut git" in norm:
-        res = actions.execute_tool("git_status", {})
-        tools_used.append({"tool": "git_status", "arguments": {}, "success": bool(res.get("success"))})
+        res = actions.execute_tool("git_status", {"project_key": target_git_project})
+        tools_used.append({"tool": "git_status", "arguments": {"project_key": target_git_project}, "success": bool(res.get("success"))})
         msg = res.get("message") if isinstance(res, dict) else str(res)
-        return {"handled": True, "reply": f"🐙 **Statut Git du projet :**\n{msg}", "tools_used": tools_used, "task_category": "git_dev"}
+        return {"handled": True, "reply": f"🐙 **Statut Git ({git_project_label}) :**\n{msg}", "tools_used": tools_used, "task_category": "git_dev"}
+
+    if "git pull" in norm:
+        res = actions.execute_tool("git_pull", {"project_key": target_git_project})
+        tools_used.append({"tool": "git_pull", "arguments": {"project_key": target_git_project}, "success": bool(res.get("success"))})
+        msg = res.get("message") if isinstance(res, dict) else str(res)
+        return {"handled": True, "reply": f"🔄 **Git Pull ({git_project_label}) :** {msg}", "tools_used": tools_used, "task_category": "git_dev"}
+
+    if "git commit" in norm or "git push" in norm:
+        has_commit = "git commit" in norm or "commit" in words
+        has_push = "git push" in norm or "push" in words
+        status_res = actions.execute_tool("git_status", {"project_key": target_git_project})
+        status_msg = (status_res.get("message") if isinstance(status_res, dict) else str(status_res)).strip()
+        if has_commit:
+            c_res = actions.execute_tool("prepare_commit", {"project_key": target_git_project})
+            tools_used.append({"tool": "prepare_commit", "arguments": {"project_key": target_git_project}, "success": bool(c_res.get("success"))})
+        if has_push:
+            p_res = actions.execute_tool("prepare_push", {"project_key": target_git_project})
+            tools_used.append({"tool": "prepare_push", "arguments": {"project_key": target_git_project}, "success": bool(p_res.get("success"))})
+        if has_commit and has_push:
+            reply_git = (
+                f"Vérification Git effectuée sur {git_project_label} ({status_msg}). "
+                f"Le commit et le push sont prêts — voulez-vous que je les exécute avec un message de commit spécifique ?"
+            )
+        elif has_commit:
+            reply_git = (
+                f"Statut Git vérifié sur {git_project_label} ({status_msg}). "
+                f"Le commit est prêt — quel message de commit souhaitez-vous appliquer ?"
+            )
+        else:
+            reply_git = (
+                f"Statut Git vérifié sur {git_project_label} ({status_msg}). "
+                f"Le push vers le dépôt distant est préparé — confirmez-vous l'envoi sur la branche principale ?"
+            )
+        return {"handled": True, "reply": reply_git, "tools_used": tools_used, "task_category": "git_dev"}
 
     if "git log" in norm or "commits" in norm or "historique git" in norm:
-        res = actions.execute_tool("git_log", {"limit": 5})
-        tools_used.append({"tool": "git_log", "arguments": {"limit": 5}, "success": bool(res.get("success"))})
+        res = actions.execute_tool("git_log", {"project_key": target_git_project})
+        tools_used.append({"tool": "git_log", "arguments": {"project_key": target_git_project}, "success": bool(res.get("success"))})
         msg = res.get("message") if isinstance(res, dict) else str(res)
-        return {"handled": True, "reply": f"📜 **Derniers commits :**\n{msg}", "tools_used": tools_used, "task_category": "git_dev"}
+        return {"handled": True, "reply": f"📜 **Derniers commits ({git_project_label}) :**\n{msg}", "tools_used": tools_used, "task_category": "git_dev"}
 
     if "maintenance" in norm and "checklist" in norm:
         res = actions.execute_tool("maintenance_checklist", {})

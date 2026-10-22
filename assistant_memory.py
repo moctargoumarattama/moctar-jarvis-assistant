@@ -350,6 +350,31 @@ class AssistantMemory:
                             for k, v in default_profile.items():
                                 if k not in data:
                                     data[k] = v
+                            # Purge automatique des topics pollués par d'anciennes transcriptions brutes Whisper
+                            raw_topics = data.get("recent_topics")
+                            if isinstance(raw_topics, list):
+                                polluted_markers = (
+                                    "ventraler", "return arm", "hot-trading", "hot trading",
+                                    "guide push", "gens de la", "gens de", "ça va", "ca va",
+                                    "git commun", "yo ", "pardon moctar",
+                                )
+                                cleaned_topics = [
+                                    t for t in raw_topics
+                                    if isinstance(t, str)
+                                    and not any(pm in t.lower() for pm in polluted_markers)
+                                    and len(t) <= 35
+                                ]
+                                if len(cleaned_topics) != len(raw_topics):
+                                    data["recent_topics"] = cleaned_topics
+                                    try:
+                                        self.save_fact(
+                                            category="user_profile",
+                                            key="moctar",
+                                            value=json.dumps(data, ensure_ascii=False),
+                                            importance=5,
+                                        )
+                                    except Exception:
+                                        pass
                             return data
                     except Exception:
                         pass
@@ -387,22 +412,24 @@ class AssistantMemory:
         clean_user = user_text.strip()
         low_user = clean_user.lower()
 
-        # 1. Détection du sujet principal pour l'historique récent des thèmes
+        # 1. Détection du sujet principal canonique pour l'historique récent des thèmes (jamais de texte brut arbitraire)
         topic = None
         if any(w in low_user for w in ("foot", "match", "ligue 1", "champions league", "liga", "score", "real madrid", "classement")):
             topic = "Résultats sportifs"
-        elif any(w in low_user for w in ("code", "vscode", "dev", "python", "script", "terminal", "bureau", "git", "docker")):
+        elif any(w in low_user for w in ("papa market", "baba market", "babamarket", "papamarket")):
+            topic = "Projet Baba Market"
+        elif any(w in low_user for w in ("code", "vscode", "dev", "python", "script", "terminal", "bureau", "git", "commit", "push", "pull", "docker")):
             topic = "Développement & VS Code"
         elif any(w in low_user for w in ("meteo", "météo", "temperature", "température", "niamey", "casablanca")):
             topic = "Météo"
-        elif any(w in low_user for w in ("hud", "globe", "orbe", "terre", "3d")):
+        elif any(w in low_user for w in ("hud", "globe", "orbe", "terre", "3d", "plasma", "quantum", "localise", "position")):
             topic = "Interface HUD 3D"
-        elif any(w in low_user for w in ("cpu", "ram", "service", "systemctl", "vps", "processus", "disque")):
+        elif any(w in low_user for w in ("cpu", "ram", "service", "systemctl", "vps", "processus", "disque", "noc", "dashboard")):
             topic = "Surveillance système NOC"
         elif any(w in low_user for w in ("musique", "chanson", "volume", "pause", "zik", "audio")):
             topic = "Multimédia & Audio"
-        elif len(clean_user) >= 4:
-            topic = clean_user[:40]
+        elif any(w in low_user for w in ("solaire", "batterie", "onduleur", "energie", "énergie", "audit")):
+            topic = "Génie énergétique & Solaire"
 
         if topic:
             recent = profile.get("recent_topics", [])

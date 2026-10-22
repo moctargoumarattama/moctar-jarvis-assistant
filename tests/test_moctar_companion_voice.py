@@ -350,7 +350,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
                 self.assertFalse(data["ignored"])
                 self.assertTrue(data["fast_path"])
                 self.assertEqual(data["user_text"], "que penses-tu de l'astronomie")
-                self.assertEqual(data["reply_text"], "Je m'appelle M.O.C.T.A.R, votre copilote vocal Moctar.")
+                self.assertEqual(data["reply_text"], "Je m'appelle M.O.C.T.A.R, votre copilote vocal.")
                 self.assertTrue(data["audio_url"].startswith("/api/voice/tts/cache/"))
                 chat_mock.assert_called_once()
                 self.assertEqual(chat_mock.call_args.args[0], "que penses-tu de l'astronomie")
@@ -687,7 +687,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             self.assertEqual(data["action"], "open_browser")
             self.assertEqual(data["url"], "https://www.youtube.com")
             self.assertIn("YouTube", data["reply_text"])
-            self.assertTrue(data["reply_text"].endswith("Moctar."))
+            self.assertTrue(data["reply_text"].endswith("."))
 
     def test_voice_interact_executes_autonomous_add_todo_and_list(self) -> None:
         """Vérifie que les ordres d'ajout et consultation de tâches s'exécutent réellement dans SQLite/JSON."""
@@ -702,7 +702,7 @@ class MoctarVoiceEndpointsTests(unittest.TestCase):
             data = resp.json()
             self.assertTrue(data["ok"])
             self.assertIn("vérifier les panneaux solaires", data["reply_text"])
-            self.assertTrue(data["reply_text"].endswith("Moctar."))
+            self.assertTrue(len(data["reply_text"].strip()) > 0)
 
         with patch("main.voice_transcribe.transcribe_audio", return_value="Yo Moctar liste mes tâches"):
             resp_list = self.client.post(

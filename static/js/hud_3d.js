@@ -807,7 +807,14 @@
     } catch (_) {}
 
     if (savedWakeword && !document.hidden) {
-      jarvisVoice.enable().catch(() => {});
+      jarvisVoice.enable().then(() => {
+        try {
+          const followupUntil = Number(sessionStorage.getItem('jarvis_voice_followup_until') || 0);
+          if (followupUntil > Date.now() && jarvisVoice) {
+            jarvisVoice.startManual();
+          }
+        } catch (_) {}
+      }).catch(() => {});
     }
   }
 
@@ -876,18 +883,59 @@
     }
     if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
       try { window.open(targetUrl, '_blank', 'noopener,noreferrer'); } catch (_) {}
+    } else if (targetUrl === '/' && window.location.pathname !== '/') {
+      try { sessionStorage.setItem('jarvis_voice_followup_until', String(Date.now() + 45000)); } catch (_) {}
+      setTimeout(() => { window.location.href = '/'; }, playAudioManually ? 400 : 1200);
+      return;
     }
 
-    // Basculement 3D automatique si demandé vocalement ou par texte
-    const textToCheck = (rawUser + ' ' + reply + ' ' + (data.title || '')).toLowerCase();
-    if (textToCheck.includes('localise') || textToCheck.includes('rabat') || textToCheck.includes('ma position')) {
-      lockOnMoctarPosition();
-    } else if (textToCheck.includes('globe') || textToCheck.includes('terre') || textToCheck.includes('earth') || textToCheck.includes('satellite')) {
-      applyView('globe', true);
-    } else if (textToCheck.includes('quantique') || textToCheck.includes('quantum') || textToCheck.includes('core') || textToCheck.includes('noyau')) {
-      applyView('quantum', true);
-    } else if (textToCheck.includes('plasma') || textToCheck.includes('réacteur') || textToCheck.includes('arc') || textToCheck.includes('orbe')) {
-      applyView('plasma', true);
+    // 1. Basculement 3D explicite depuis tools_used (switch_hud_view)
+    let viewSwitchedByTool = false;
+    if (Array.isArray(data.tools_used)) {
+      for (const tu of data.tools_used) {
+        if (tu.tool === 'switch_hud_view' && tu.arguments) {
+          const reqView = String(tu.arguments.view || '').toLowerCase();
+          const reqLocate = Boolean(tu.arguments.locate);
+          if (reqView === 'noc') {
+            try { sessionStorage.setItem('jarvis_voice_followup_until', String(Date.now() + 45000)); } catch (_) {}
+            setTimeout(() => { window.location.href = '/'; }, playAudioManually ? 400 : 1200);
+            return;
+          } else if (reqLocate) {
+            lockOnMoctarPosition(true);
+            viewSwitchedByTool = true;
+            break;
+          } else if (reqView) {
+            applyView(reqView === 'orb' ? 'plasma' : reqView, false);
+            try { localStorage.setItem('moctar_hud_view', currentView); } catch (_) {}
+            viewSwitchedByTool = true;
+            break;
+          }
+        }
+      }
+    }
+
+    // 2. Basculement 3D automatique si demandé vocalement ou par texte
+    if (!viewSwitchedByTool) {
+      const textToCheck = (rawUser + ' ' + reply + ' ' + (data.title || '')).toLowerCase();
+      if (
+        textToCheck.includes('localise') ||
+        textToCheck.includes('rabat') ||
+        textToCheck.includes('ma position') ||
+        textToCheck.includes('où suis-je') ||
+        textToCheck.includes('ou suis-je') ||
+        textToCheck.includes('je suis où') ||
+        textToCheck.includes('je suis ou') ||
+        textToCheck.includes('dans le monde') ||
+        textToCheck.includes('temps réel')
+      ) {
+        lockOnMoctarPosition(Boolean(reply));
+      } else if (textToCheck.includes('globe') || textToCheck.includes('terre') || textToCheck.includes('earth') || textToCheck.includes('satellite')) {
+        applyView('globe', true);
+      } else if (textToCheck.includes('quantique') || textToCheck.includes('quantum') || textToCheck.includes('core') || textToCheck.includes('noyau')) {
+        applyView('quantum', true);
+      } else if (textToCheck.includes('plasma') || textToCheck.includes('réacteur') || textToCheck.includes('arc') || textToCheck.includes('orbe')) {
+        applyView('plasma', true);
+      }
     }
 
     // Lecture audio uniquement pour les commandes texte (car voice.js lit déjà l'audio des commandes vocales)
@@ -900,7 +948,7 @@
     }
   }
 
-  function lockOnMoctarPosition() {
+  function lockOnMoctarPosition(preserveReply = false) {
     applyView('globe', true);
     const theta = (userCoords.lon + 180) * (Math.PI / 180);
     rotationTargets.globe.x = 0.22;
@@ -909,7 +957,7 @@
     if (gpsCoordsEl) {
       gpsCoordsEl.textContent = `GPS : ${userCoords.lat.toFixed(4)}°N, ${userCoords.lon.toFixed(4)}°E (Position Moctar Verrouillée)`;
     }
-    if (assistantTextEl) {
+    if (assistantTextEl && !preserveReply) {
       assistantTextEl.textContent = "Position géographique verrouillée sur le Dell Precision M4800 à Rabat, Moctar.";
     }
   }
@@ -1177,7 +1225,10 @@
       }
     }
 
+    let lastRemoteHudUpdated = 0;
+
     async function sync() {
+      let metricsApplied = false;
       // 1. Endpoint NOC /api/snapshot (prioritaire et identique au Dashboard NOC)
       try {
         const snapRes = await fetch('/api/snapshot', { cache: 'no-store', credentials: 'same-origin' });
@@ -1188,17 +1239,38 @@
           const host = snap.host?.hostname ?? snap.hostname;
           if (cpu !== undefined || ram !== undefined) {
             applyMetrics(cpu, ram, host);
-            return;
+            metricsApplied = true;
           }
         }
       } catch (_) {}
 
-      // 2. Endpoint /api/hud/state
+      // 2. Endpoint /api/hud/state (synchronise aussi la vue 3D, le verrouillage GPS et les sous-titres commandés à distance)
       try {
         const res = await fetch('/api/hud/state', { cache: 'no-store', credentials: 'same-origin' });
         if (res.ok) {
           const data = await res.json();
-          applyMetrics(data.cpu_percent, data.ram_percent, data.hostname);
+          if (!metricsApplied) {
+            applyMetrics(data.cpu_percent, data.ram_percent, data.hostname);
+          }
+          const remoteTs = Number(data.last_updated || 0);
+          if (remoteTs > lastRemoteHudUpdated) {
+            lastRemoteHudUpdated = remoteTs;
+            if (data.user_transcript && userTextEl) {
+              userTextEl.textContent = `« ${data.user_transcript} »`;
+            }
+            if (data.assistant_reply && assistantTextEl) {
+              assistantTextEl.textContent = data.assistant_reply;
+            }
+            if (data.locate === true) {
+              lockOnMoctarPosition(Boolean(data.assistant_reply));
+            } else if (data.view) {
+              const targetV = data.view === 'orb' ? 'plasma' : data.view;
+              if (['globe', 'quantum', 'plasma'].includes(targetV) && targetV !== currentView) {
+                applyView(targetV, false);
+                try { localStorage.setItem('moctar_hud_view', currentView); } catch (_) {}
+              }
+            }
+          }
         }
       } catch (_) {}
     }

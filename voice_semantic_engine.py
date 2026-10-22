@@ -326,6 +326,100 @@ VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "switch_hud_view",
+            "description": (
+                "Bascule la vue de l'interface HUD 3D ('globe', 'plasma', 'quantum', 'orb') "
+                "ou retourne au tableau de bord NOC ('noc'). Si locate=true, centre et verrouille "
+                "le globe 3D sur la position géographique de Moctar."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "view": {
+                        "type": "string",
+                        "enum": ["globe", "plasma", "quantum", "orb", "noc"],
+                        "description": "Vue cible ('globe' pour la Terre, 'plasma' pour le réacteur, 'quantum' pour le cœur quantique, 'orb' pour l'orbe, 'noc' pour retourner au dashboard NOC).",
+                    },
+                    "locate": {
+                        "type": "boolean",
+                        "description": "Mettre à true si Moctar demande où il est dans le monde, sa position ou à être localisé sur le globe.",
+                    },
+                },
+                "required": ["view"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_status",
+            "description": "Vérifie le statut Git ('git status') d'un projet (ex: 'jarvis', 'baba_market' / 'Papa Market', 'noor_express', 'edumanage').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_key": {
+                        "type": "string",
+                        "description": "Clé ou nom du projet (ex: 'jarvis', 'baba_market', 'noor_express', 'edumanage').",
+                    }
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_pull",
+            "description": "Exécute 'git pull' sur un projet (ex: 'jarvis', 'baba_market' / 'Papa Market', 'noor_express').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_key": {
+                        "type": "string",
+                        "description": "Clé ou nom du projet cible.",
+                    }
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "prepare_commit",
+            "description": "Prépare un commit Git sur un projet (ex: 'jarvis', 'baba_market' / 'Papa Market', 'noor_express').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "Message du commit.",
+                    },
+                    "project_key": {
+                        "type": "string",
+                        "description": "Clé ou nom du projet cible.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "prepare_push",
+            "description": "Prépare un push Git ('git push') sur un projet (ex: 'jarvis', 'baba_market' / 'Papa Market', 'noor_express').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_key": {
+                        "type": "string",
+                        "description": "Clé ou nom du projet cible.",
+                    }
+                },
+            },
+        },
+    },
 ]
 
 VOICE_FAST_TEMPERATURE: float = 0.6
@@ -374,6 +468,8 @@ VOICE_SEMANTIC_SYSTEM_PROMPT = (
     "- Si Moctar demande de retenir ou mémoriser une information ou préférence (ex: 'retiens que...', 'souviens-toi que...') -> appelle 'store_memory_fact'.\n"
     "- Si Moctar demande de rappeler un souvenir ou un fait (ex: 'rappelle-moi...', 'quel est mon...') -> appelle 'search_memory_facts'.\n"
     "- Si Moctar demande de lancer une tâche ou des tests en arrière-plan (ex: 'lance les tests en tâche de fond') -> appelle 'run_background_task'.\n"
+    "- Si Moctar demande de basculer la vue 3D, d'afficher le globe terrestre, sa position dans le monde, le réacteur plasma, le cœur quantique ou de retourner au NOC -> appelle 'switch_hud_view'.\n"
+    "- Si Moctar demande un statut Git, un git pull, un git commit ou un git push sur un projet (ex: Jarvis, Baba Market / Papa Market, Noor Express) -> appelle 'git_status', 'git_pull', 'prepare_commit' ou 'prepare_push'.\n"
     "- Si Moctar pose une question factuelle, d'actualité, de culture, de sciences ou discute amicalement sans action requise -> "
     "réponds directement avec rigueur, profondeur et perspicacité d'ingénieur, sans appeler d'outil inutilement."
 )
@@ -680,6 +776,22 @@ def execute_voice_semantic_turn(
 
             elif func_name == "run_background_task":
                 tool_replies.append(tool_res.get("message", "Tâche lancée en arrière-plan."))
+
+            elif func_name == "switch_hud_view":
+                action_name = "open_app"
+                req_view = str(args.get("view") or "orb").lower()
+                if req_view == "noc":
+                    action_url = "/"
+                    action_title = "Centre de Commandement NOC"
+                    tool_replies.append("Retour au Centre de Commandement NOC activé.")
+                else:
+                    action_url = "/hud"
+                    action_title = "HUD 3D Cybernétique"
+                    tool_replies.append(tool_res.get("message", "Vue HUD 3D mise à jour."))
+
+            elif func_name in ("git_status", "git_pull", "prepare_commit", "prepare_push"):
+                msg = tool_res.get("message")
+                tool_replies.append(msg if msg else f"Opération {func_name} exécutée.")
 
             else:
                 msg = tool_res.get("message")

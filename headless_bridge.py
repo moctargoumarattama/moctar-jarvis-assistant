@@ -128,15 +128,21 @@ def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
         ])
 
     # Mots-clés Maintenance / Git / Projets / Code
-    if has_keyword(("git", "commit", "push", "pull", "branche", "projet", "vscode", "serveur", "code", "repo", "maintenance")):
+    if has_keyword(("git", "commit", "push", "pull", "branche", "projet", "vscode", "serveur", "code", "repo", "maintenance", "papa", "baba")):
         tools.update([
             "git_status",
             "git_pull",
             "git_log",
             "prepare_commit",
+            "prepare_push",
             "open_project",
             "maintenance_checklist",
+            "get_project_context",
         ])
+
+    # Mots-clés Interface HUD 3D / Globe / Géolocalisation
+    if has_keyword(("hud", "globe", "terre", "orbe", "plasma", "quantum", "quantique", "position", "localise", "monde", "noc")):
+        tools.add("switch_hud_view")
 
     # Mots-clés Tâches / Notes / Rappels / Mémoire
     if has_keyword(("tache", "tâche", "todo", "note", "rappel", "rappelle", "agenda", "memoire", "mémoire", "souviens", "recherche")):
@@ -352,11 +358,11 @@ class JarvisHeadlessBridge:
                         status = "success"
                         if auto_res.get("tools_used"):
                             tools_used.extend(auto_res["tools_used"])
-                        if auto_res.get("action") == "open_browser":
+                        if auto_res.get("action") in ("open_browser", "open_app") and auto_res.get("url"):
                             tools_used.append({
-                                "tool": "open_site",
+                                "tool": "open_site" if auto_res.get("action") == "open_browser" else "switch_hud_view",
                                 "data": {
-                                    "action": "open_browser",
+                                    "action": auto_res.get("action"),
                                     "url": auto_res.get("url"),
                                     "title": auto_res.get("title"),
                                 }
@@ -467,10 +473,16 @@ class JarvisHeadlessBridge:
 
             for tu in tools_used:
                 t_data = tu.get("data")
-                if isinstance(t_data, dict) and t_data.get("action") == "open_browser":
-                    resp_dict["action"] = "open_browser"
+                if isinstance(t_data, dict) and t_data.get("action") in ("open_browser", "open_app") and t_data.get("url"):
+                    resp_dict["action"] = t_data.get("action")
                     resp_dict["url"] = t_data.get("url")
                     resp_dict["title"] = t_data.get("title")
+                    break
+                if tu.get("tool") == "switch_hud_view":
+                    req_v = str((tu.get("arguments") or {}).get("view") or "").lower()
+                    resp_dict["action"] = "open_app"
+                    resp_dict["url"] = "/" if req_v == "noc" else "/hud"
+                    resp_dict["title"] = "Centre de Commandement NOC" if req_v == "noc" else "HUD 3D Cybernétique"
                     break
 
             return resp_dict

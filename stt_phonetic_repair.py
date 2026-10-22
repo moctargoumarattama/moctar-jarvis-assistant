@@ -60,9 +60,10 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
 
     # 4. Git & DevOps
     (re.compile(r"\bdocker\s+com\s*pose\b", re.I), "docker compose", "docker_compose"),
-    (re.compile(r"\b(?:git|guite)\s+poul[es]?\b", re.I), "git pull", "git_pull"),
-    (re.compile(r"\b(?:git|guite)\s+comit[es]?\b", re.I), "git commit", "git_commit"),
-    (re.compile(r"\b(?:git|guite)\s+st[ae]s\b", re.I), "git status", "git_status"),
+    (re.compile(r"\b(?:git|guite|guide|guilde)\s+poul[es]?\b", re.I), "git pull", "git_pull"),
+    (re.compile(r"\b(?:git|guite|guide|guilde)\s+(?:comit[es]?|commun[es]?|commit)\b", re.I), "git commit", "git_commit"),
+    (re.compile(r"\b(?:git|guite|guide|guilde)\s+(?:push|pouche|bouche)\b", re.I), "git push", "git_push"),
+    (re.compile(r"\b(?:git|guite|guide|guilde)\s+st[ae]s\b", re.I), "git status", "git_status"),
     (re.compile(r"\b(?:syst[èe]me|systeme)\s+ctl\b", re.I), "systemctl", "systemctl_repair"),
     (re.compile(r"\bjournal\s+(?:ces?\s*tl|ctl)\b", re.I), "journalctl", "journalctl_repair"),
 
@@ -74,7 +75,9 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     (re.compile(r"\b(?:morceau|zik)\s+suivant[es]?\b", re.I), "morceau suivant", "music_next"),
     (re.compile(r"\b(?:morceau|zik)\s+pr[ée]c[ée]dant[es]?\b", re.I), "morceau précédent", "music_prev"),
 
-    # 5b. Interface HUD 3D & Globe (Whisper réparations phonétiques)
+    # 5b. Interface HUD 3D, NOC & Globe (Whisper réparations phonétiques)
+    (re.compile(r"\b(?:return|retourne?|retour)\s+(?:arm\s+|in\s+|on\s+|en\s+|au\s+)?mode\s+(?:noc|nock|noque)\b", re.I), "retourne en mode NOC", "noc_mode_return"),
+    (re.compile(r"\b(?:c['’]?est\s+(?:tout\s+|un\s+)?(?:en\s+)?)?(?:mode\s+)(?:hot[- ]?trading|hard[- ]?3\s*d|odd[- ]?3\s*d|old[- ]?3\s*d)\b", re.I), "mode HUD 3D", "hud_3d_hot_trading"),
     (re.compile(r"\b(?:c['’]?est\s+tout\s+en\s+)?(?:mode\s+)?(?:hope|hop|up|hot|hub|eude|ude)\s*3\s*d\b", re.I), "mode HUD 3D", "hud_3d_repair"),
     (re.compile(r"\b(?:mode\s+)?(?:hope|hop|up|hot|hub)\s*3\s*d\b", re.I), "mode HUD 3D", "hud_3d_short"),
     (re.compile(r"\b(?:ouvre|lance|affiche|active)\s+(?:le\s+)?(?:hope|hop|up|hot|hub)\s*3\s*d\b", re.I), "ouvre le HUD 3D", "hud_3d_open"),
@@ -86,7 +89,7 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     # 7. Nom de Moctar & Phonétique & Surnoms familiers
     (re.compile(r"\b(?:c['’]est\s+(?:le\s+)?)?m(?:\.|\s)*o(?:\.|\s)*c(?:\.|\s)*t(?:\.|\s)*a(?:\.|\s)*r(?:\.|\b)", re.I), "Moctar", "wake_moctar_acronym"),
     (re.compile(r"\b(?:m['’\s]?occupe\s+tard|moccupe\s+tard|m['’\s]?occaque|moccaque)\b", re.I), "Moctar", "wake_moctar_repair"),
-    (re.compile(r"\b(?:mokta|moktar|mokhtar|mouctar|mouktar|motard|mocktab|moctab|moktab)\b", re.I), "Moctar", "wake_moctar_variants"),
+    (re.compile(r"\b(?:mokta|moktar|mokhtar|mouctar|mouktar|motard|mothar|mothard|mocthar|mocktab|moctab|moktab)\b", re.I), "Moctar", "wake_moctar_variants"),
     (re.compile(r"\b(?:yo\s+)?(?:moc|mok|moque)\b", re.I), "Moc", "wake_moc"),
     (re.compile(r"\b(?:t['’]es\s+l[aà]|tu\s+es\s+l[aà])\b", re.I), "tu es là", "wake_are_you_there"),
 

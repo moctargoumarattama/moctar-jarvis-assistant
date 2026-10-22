@@ -140,14 +140,15 @@ FOLDER_ALIASES = {
 }
 
 PROJECT_ALIASES = {
-    "noor_express": ["noor express", "noor"],
-    "baba_market": ["baba market", "baba marketplace", "baba"],
+    "noor_express": ["noor express", "noor", "noorexpress"],
+    "baba_market": ["baba market", "baba marketplace", "baba", "papa market", "babamarket", "papamarket"],
     "edumanage": ["edumanage", "edu manage"],
     "audit_energetique": [
         "audit energetique",
         "audit energie",
         "monitoring energy",
     ],
+    "jarvis": ["jarvis", "moctar", "moctar jarvis"],
 }
 
 
@@ -170,10 +171,31 @@ def _project_path(*candidates):
     return Path(candidates[0])
 
 
-NOOR_PATH = _project_path(DESKTOP_DIR / "NOOR EXPRESS")
-BABA_PATH = _project_path(DESKTOP_DIR / "baba_marketplace")
-EDUMANAGE_PATH = _project_path(DESKTOP_DIR / "EDUMANAGE")
-AUDIT_PATH = _project_path(DESKTOP_DIR / "monitoring energy")
+NOOR_PATH = _project_path(
+    DESKTOP_DIR / "NOOR EXPRESS",
+    HOME_DIR / "NOOR EXPRESS",
+    Path("/opt/noor-express"),
+    Path("/var/www/noor-express"),
+)
+BABA_PATH = _project_path(
+    DESKTOP_DIR / "baba_marketplace",
+    HOME_DIR / "baba_marketplace",
+    HOME_DIR / "babamarket",
+    Path("/opt/babamarket"),
+    Path("/opt/baba_marketplace"),
+    Path("/var/www/babamarket"),
+    Path("/home/moctar/baba_marketplace"),
+    Path("/home/moctar/babamarket"),
+)
+EDUMANAGE_PATH = _project_path(
+    DESKTOP_DIR / "EDUMANAGE",
+    HOME_DIR / "EDUMANAGE",
+    Path("/opt/edumanage"),
+)
+AUDIT_PATH = _project_path(
+    DESKTOP_DIR / "monitoring energy",
+    HOME_DIR / "monitoring energy",
+)
 
 
 def _optional_int_env(name, default=None):

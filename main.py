@@ -290,7 +290,7 @@ _WAKE_ONLY_SENTINEL = "__MOCTAR_WAKE_ONLY__"
 
 _VOICE_WAKE_PREFIX_RE = re.compile(
     r"^\s*(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|et\s+vous|you|c['’]est\s+(?:le\s+)?)\s*)?"
-    r"(?:yo\s+moctar|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|"
+    r"(?:yo\s+moctar|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|mothar|mothard|mocthar|"
     r"m['’]?occupe\s+tard|m['’]?occaque|moccupe\s+tard|moccaque|"
     r"m(?:\.|\s)*o(?:\.|\s)*c(?:\.|\s)*t(?:\.|\s)*a(?:\.|\s)*r(?:\.|\b)|"
     r"moc|mok|mokti|jarvis|elmo)\b[\s,.:;!?-]*",
@@ -298,7 +298,7 @@ _VOICE_WAKE_PREFIX_RE = re.compile(
 )
 _VOICE_WAKE_ANYWHERE_RE = re.compile(
     r"\b(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|et\s+vous|you|c['’]est\s+(?:le\s+)?)\s*)?"
-    r"(yo\s+moctar|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|"
+    r"(yo\s+moctar|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|mothar|mothard|mocthar|"
     r"m['’]?occupe\s+tard|m['’]?occaque|moccupe\s+tard|moccaque|"
     r"m(?:\.|\s)*o(?:\.|\s)*c(?:\.|\s)*t(?:\.|\s)*a(?:\.|\s)*r(?:\.|\b)|"
     r"moc|mok|mokti|jarvis|elmo|yo\s+elmo|allo\s+moctar|dis\s+moctar)\b[\s,.:;!?-]*",
@@ -307,7 +307,7 @@ _VOICE_WAKE_ANYWHERE_RE = re.compile(
 _VOICE_FILLER_WORDS = {
     "au", "yo", "hey", "ok", "bonjour", "salut", "dis", "allo", "allô", "ecoute", "écoute", "oui",
     "et", "vous", "you", "tout", "le", "monde", "ah", "eh", "oh", "ha",
-    "moctar", "moktar", "mokta", "mokhtar", "mouctar", "mouktar", "motard",
+    "moctar", "moktar", "mokta", "mokhtar", "mouctar", "mouktar", "motard", "mothar", "mothard", "mocthar",
     "moc", "mok", "mokti",
     "moccupe", "m'occupe", "tard", "moccaque", "m'occaque", "jarvis", "elmo",
 }
@@ -386,8 +386,16 @@ def is_direct_voice_command(text: str) -> bool:
     # 11. Vision et Analyse d'Écran ("qu'est-ce que tu vois sur mon écran", "regarde mon écran", "analyse mon écran", "regarde les erreurs")
     if re.search(r"\b(?:qu['’]est[- ]ce\s+que\s+tu\s+vois|que\s+vois[- ]tu|regarde|analyse|lis|d[ée]cris)\s+(?:sur\s+|[aà]\s+)?(?:mon\s+|l['’])?[ée]cran\b", norm) or re.search(r"\b(?:regarde\s+les\s+erreurs|analyse\s+les\s+erreurs|vois[- ]tu\s+des\s+erreurs|qu['’]y\s+a[- ]t[- ]il\s+[aà]\s+l['’][ée]cran)\b", norm):
         return True
-    # 12. Interface HUD 3D & Globe Terrestre ("mode hud 3d", "affiche la terre", "montre le globe", "affiche ma position", "mode orbe", "mode plasma", "mode quantum")
-    if re.search(r"\b(?:mode\s+)?hud(?:\s*3\s*d)?\b", norm) or re.search(r"\b(?:mode\s+)?(?:hope|hop|up|hot|hub)\s*3\s*d\b", norm) or re.search(r"\b(?:affiche\s+(?:la\s+terre|le\s+globe|ma\s+position|l['’]orbe|le\s+hud)|montre\s+(?:la\s+terre|le\s+globe|ma\s+position|le\s+hud)|globe\s+terrestre|localise[- ]moi|mode\s+orbe|mode\s+globe|mode\s+plasma|mode\s+quantum|ferme\s+le\s+globe|retourne\s+[aà]\s+l['’]orbe|ouvre\s+(?:le\s+)?hud)\b", norm):
+    # 12. Interface HUD 3D, NOC & Globe Terrestre ("mode hud 3d", "retourne en mode noc", "affiche la terre", "je suis où dans le monde", "mode plasma", "mode quantum")
+    if (
+        re.search(r"\b(?:mode\s+)?hud(?:\s*3\s*d)?\b", norm)
+        or re.search(r"\b(?:mode\s+)?(?:hope|hop|up|hot|hub)\s*3\s*d\b", norm)
+        or re.search(r"\b(?:retourne?\s+(?:en\s+|au\s+)?mode\s+noc|retour\s+(?:en\s+mode\s+|au\s+)?noc|mode\s+noc|ouvre\s+le\s+noc|quitte\s+le\s+hud|ferme\s+le\s+hud)\b", norm)
+        or re.search(r"\b(?:affiche\s+(?:la\s+terre|le\s+globe|ma\s+position|l['’]orbe|le\s+hud)|montre\s+(?:la\s+terre|le\s+globe|ma\s+position|le\s+hud)|globe\s+terrestre|localise[- ]moi|je\s+suis\s+o[uù]|o[uù]\s+suis[- ]je|o[uù]\s+je\s+suis|dans\s+le\s+monde|ma\s+position|mode\s+orbe|mode\s+globe|mode\s+plasma|mode\s+quantum|ferme\s+le\s+globe|retourne\s+[aà]\s+l['’]orbe|ouvre\s+(?:le\s+)?hud)\b", norm)
+    ):
+        return True
+    # 12b. Git & Projets ("git commit", "git push", "git pull", "git status", "papa market", "baba market")
+    if re.search(r"\b(?:git\s+(?:commit|push|pull|status|log)|statut\s+git|papa\s+market|baba\s+market)\b", norm):
         return True
     # 13. Sport en temps réel ("résultats ligue 1", "classement premier league", "score real madrid")
     if re.search(r"\b(?:r[ée]sultats?|classement|score|scores|matchs?)\s+(?:de\s+la\s+|du\s+|en\s+)?(?:ligue\s*1|champions\s*league|ligue\s*des\s*champions|liga|la\s+liga|premier\s*league|serie\s*a|bundesliga|foot)\b", norm):
@@ -453,12 +461,32 @@ except Exception:
         AGENT_SYSTEM_PROMPT = "Tu es M.O.C.T.A.R, le copilote d'ingénierie et assistant personnel de Moctar. Réponds avec concision, clarté et précision en français professionnel."
 
 VOICE_FAST_SYSTEM_PROMPT = (
-    "Tu es M.O.C.T.A.R, l'intelligence artificielle cybernétique et copilote d'ingénierie de Moctar. "
-    "Ton style allie la précision d'un centre de commandement futuriste (NOC) à la fluidité d'un associé technique d'élite. "
-    "Tes réponses orales sont ultra-réactives, posées, analytiques et concises (1 à 3 phrases maximum). "
-    "Pas de jargon théâtral de bande dessinée, mais une prestance technologique moderne, directe et chirurgicale. "
-    "Termine toujours tes interventions vocales en t'adressant à lui par 'Moctar.'"
+    "Tu es M.O.C.T.A.R, l'intelligence cybernétique et copilote d'ingénierie d'élite de Moctar. "
+    "Ton style allie l'acuité technique d'un centre de commandement futuriste (NOC) à la fluidité, chaleur et complicité d'un associé d'élite. "
+    "Tes réponses orales sont ultra-réactives, naturelles, posées et concises (1 à 2 phrases percutantes). "
+    "Ne termine PAS toutes tes phrases par 'Moctar.' de manière systématique : utilise son prénom avec parcimonie et naturel, comme le ferait un vrai coéquipier. "
+    "Pose spontanément de courtes questions de clarification dès qu'une intention est ouverte ou mérite d'être affinée."
 )
+
+
+def is_self_echo_transcript(transcript: str, runtime: Any = None) -> bool:
+    """Détecte si la transcription provient d'un auto-écho acoustique de la propre voix TTS de M.O.C.T.A.R."""
+    clean = (transcript or "").strip()
+    if not clean:
+        return False
+    norm = _strip_accents_1to1(clean).lower().strip(" ,.:;!?-'\u2019")
+    # 1. Déformation acoustique connue de l'annonce de l'heure ("vingt-trois heures zéro deux" -> "ventraler 0.2")
+    if re.match(r"^ventraler(?:\s+\d+(?:[.,]\d+)?)?$", norm):
+        return True
+    # 2. Comparaison avec la dernière phrase TTS prononcée il y a moins de 12 secondes
+    if runtime is not None:
+        last_reply = getattr(runtime, "last_tts_reply_text", "") or ""
+        last_ts = float(getattr(runtime, "last_tts_timestamp", 0.0) or 0.0)
+        if last_reply and (time.monotonic() - last_ts) <= 12.0:
+            norm_reply = _strip_accents_1to1(last_reply).lower().strip(" ,.:;!?-'\u2019")
+            if len(norm) >= 6 and norm in norm_reply and not is_direct_voice_command(clean):
+                return True
+    return False
 
 
 def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
@@ -1535,6 +1563,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 [r["rule"] for r in stt_repairs],
             )
 
+        # 1b. Filtre Anti-Auto-Écho (rejette la réverbération acoustique de la propre voix de M.O.C.T.A.R, ex: 'Ventraler 0.2')
+        if is_self_echo_transcript(repaired_transcript, runtime):
+            LOGGER.info("🔇 [SELF ECHO IGNORED]: Réverbération TTS détectée et ignorée ('%s')", transcript)
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "ignored": True,
+                    "reason": "self_echo_ignored",
+                    "user_text": transcript,
+                    "reply_text": "",
+                    "audio_url": None,
+                    "session_active": session_active,
+                }
+            )
+
         # 2. Dynamic Turn-Taking & Attention Engine (Gestion naturelle de la parole)
         attention = dynamic_attention_engine.classify_utterance_attention(
             repaired_transcript,
@@ -1802,6 +1845,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if init_msg and not reply_text.endswith("?"):
                     reply_text = f"{reply_text} Au fait, {init_msg}"
                     runtime.voice_session_until = time.monotonic() + 15.0
+        except Exception:
+            pass
+
+        runtime.last_tts_reply_text = reply_text
+        runtime.last_tts_timestamp = time.monotonic()
+
+        try:
+            hud_state_manager.set_hud_voice_status(
+                "speaking",
+                user_transcript=display_user_text,
+                assistant_reply=reply_text,
+            )
         except Exception:
             pass
 

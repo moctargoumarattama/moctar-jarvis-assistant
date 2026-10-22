@@ -13,13 +13,24 @@ class ProjectAssistant:
         self.current_project_key = None
 
     def _resolve_project(self, project_key=None):
+        from types import SimpleNamespace
         key = project_key or self.current_project_key
         if not key:
             cwd_path = Path.cwd()
             if (cwd_path / ".git").exists():
-                from types import SimpleNamespace
                 return SimpleNamespace(path=cwd_path, label="Jarvis", key="jarvis", framework="serveur")
             return None
+        if key in self.projects:
+            return self.projects[key]
+        norm_key = str(key).strip().lower().replace("_", " ").replace("-", " ")
+        if norm_key in ("jarvis", "moctar", "moctar jarvis"):
+            return SimpleNamespace(path=config.APP_ROOT, label="Jarvis", key="jarvis", framework="serveur")
+        for canonical_key, aliases in getattr(config, "PROJECT_ALIASES", {}).items():
+            if norm_key == canonical_key.replace("_", " ") or any(a in norm_key or norm_key in a for a in aliases):
+                if canonical_key == "jarvis":
+                    return SimpleNamespace(path=config.APP_ROOT, label="Jarvis", key="jarvis", framework="serveur")
+                if canonical_key in self.projects:
+                    return self.projects[canonical_key]
         return self.projects.get(key)
 
     def _set_current_project(self, project_key):

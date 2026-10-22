@@ -2049,6 +2049,10 @@
               set('jarvis-session-id', 'Session: ' + data.session_id.slice(-12));
             }
             await speakJarvisText(data.reply || '');
+            if (targetUrl && targetUrl.startsWith('/') && targetUrl !== window.location.pathname) {
+              try { sessionStorage.setItem('jarvis_voice_followup_until', String(Date.now() + 45000)); } catch {}
+              window.location.href = targetUrl;
+            }
 
           } else {
             const errReply = (typeof data.reply === 'string' && data.reply) ? data.reply : (typeof data.detail === 'string' ? data.detail : 'Erreur lors de l’exécution.');
@@ -2238,6 +2242,9 @@
           if (!replyText.includes('🌐')) {
             replyText = (replyText ? replyText + '\n\n' : '') + openNotice;
           }
+        } else if (targetUrl && targetUrl.startsWith('/') && targetUrl !== window.location.pathname) {
+          try { sessionStorage.setItem('jarvis_voice_followup_until', String(Date.now() + 45000)); } catch {}
+          setTimeout(() => { window.location.href = targetUrl; }, 1200);
         }
         if (replyText) {
           appendChatMessage('assistant', replyText, data.thought_chain, data.tools_used);
@@ -2351,7 +2358,16 @@
         renderBrowserVoice(window.jarvisVoice.state);
         let saved = false;
         try { saved = localStorage.getItem('jarvis_wakeword_active') === 'true'; } catch {}
-        if (saved && !document.hidden) setBrowserVoiceEnabled(true);
+        if (saved && !document.hidden) {
+          setBrowserVoiceEnabled(true).then(() => {
+            try {
+              const followupUntil = Number(sessionStorage.getItem('jarvis_voice_followup_until') || 0);
+              if (followupUntil > Date.now() && window.jarvisVoice) {
+                window.jarvisVoice.startManual();
+              }
+            } catch {}
+          });
+        }
         document.addEventListener('visibilitychange', () => {
           if (document.hidden) {
             window.jarvisVoice.suspend();
