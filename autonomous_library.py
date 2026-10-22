@@ -271,6 +271,55 @@ def execute_autonomous_task(
             "task_category": "system_tools",
         }
 
+    # 2.3c. INTERFACE HUD 3D (ORBE & GLOBE TERRESTRE)
+    if any(k in norm for k in [
+        "affiche la terre", "montre la terre", "montre le globe", "affiche le globe",
+        "globe terrestre", "vue depuis l espace", "vue de l espace", "mode globe", "ouvre le globe",
+    ]):
+        actions.execute_tool("switch_hud_view", {"view": "globe", "locate": False})
+        tools_used.append({"tool": "switch_hud_view", "arguments": {"view": "globe", "locate": False}, "success": True})
+        return {
+            "handled": True,
+            "reply": "Initialisation du globe terrestre. Vue depuis l'espace activée, Moctar.",
+            "action": "open_app",
+            "url": "/hud",
+            "title": "Globe Terrestre 3D",
+            "tools_used": tools_used,
+            "task_category": "hud_3d",
+        }
+
+    if any(k in norm for k in [
+        "affiche ma position", "localise moi", "localise-moi", "montre ma position",
+        "ou suis je", "où suis-je", "ma position sur le globe", "position en temps reel", "position en temps réel",
+    ]):
+        actions.execute_tool("switch_hud_view", {"view": "globe", "locate": True})
+        tools_used.append({"tool": "switch_hud_view", "arguments": {"view": "globe", "locate": True}, "success": True})
+        return {
+            "handled": True,
+            "reply": "Localisation en cours. Le globe affiche votre position en temps réel, Moctar.",
+            "action": "open_app",
+            "url": "/hud",
+            "title": "Globe Terrestre 3D",
+            "tools_used": tools_used,
+            "task_category": "hud_3d",
+        }
+
+    if any(k in norm for k in [
+        "retourne a l orbe", "retourne a l'orbe", "mode orbe", "ferme le globe",
+        "quitte le globe", "affiche l orbe", "affiche l'orbe", "retour a l orbe", "retour à l'orbe",
+    ]):
+        actions.execute_tool("switch_hud_view", {"view": "orb", "locate": False})
+        tools_used.append({"tool": "switch_hud_view", "arguments": {"view": "orb", "locate": False}, "success": True})
+        return {
+            "handled": True,
+            "reply": "Retour à l'interface orbitale principale, Moctar.",
+            "action": "open_app",
+            "url": "/hud",
+            "title": "Orbe 3D",
+            "tools_used": tools_used,
+            "task_category": "hud_3d",
+        }
+
     # 2.4. FIN DE JOURNÉE & CLÔTURE DE SESSION
     if any(k in norm for k in ["fin de journee", "fin de journée", "je m'arrete la", "je m'arrête là", "je coupe pour ce soir", "bonne soiree"]):
         actions.execute_tool("control_playback", {"action": "pause"})
@@ -342,6 +391,74 @@ def execute_autonomous_task(
             "reply": oral_reply,
             "tools_used": tools_used,
             "task_category": "weather",
+        }
+
+    # 2.7. CONNECTEUR SPORT EN TEMPS RÉEL (FOOTBALL, CHAMPIONNATS & SCORES)
+    is_sport_query = (
+        any(k in norm for k in [
+            "ligue 1", "ligue1", "champions league", "ligue des champions",
+            "la liga", "premier league", "serie a", "bundesliga",
+        ]) and any(w in norm for w in ("resultat", "resultats", "classement", "score", "match", "matchs", "table", "position"))
+    ) or bool(re.search(r"\b(?:r[ée]sultats?|classement|score|scores|matchs?)\s+(?:de\s+la\s+|du\s+|en\s+)?(?:ligue\s*1|champions\s*league|ligue\s*des\s*champions|liga|la\s+liga|premier\s*league|serie\s*a|bundesliga|foot)\b", norm)) or (
+        "score" in norm and any(team in norm for team in ("psg", "paris", "real", "real madrid", "barca", "barcelone", "marseille", "om", "city", "arsenal", "bayern", "liverpool"))
+    )
+    if is_sport_query:
+        import sport_service
+        sport_res = sport_service.get_sports_update(raw_query)
+        tools_used.append({"tool": "get_sports_update", "arguments": {"query": raw_query}, "success": sport_res.get("success", True)})
+        return {
+            "handled": True,
+            "reply": sport_res.get("reply", "Données sportives indisponibles, Moctar."),
+            "tools_used": tools_used,
+            "task_category": "sport",
+        }
+
+    # 2.8. GOOGLE WORKSPACE (GMAIL, CALENDAR, DRIVE)
+    is_gmail_query = any(k in norm for k in [
+        "mails non lus", "emails non lus", "courriels non lus", "boite mail", "boite de reception",
+        "nouveaux mails", "nouveaux e-mails", "mes mails", "mes emails", "check mes mails",
+        "verifie mes mails", "verifie mes emails", "lire mes mails", "releve mes mails", "relevé de mes mails",
+    ])
+    if is_gmail_query:
+        import google_workspace_service
+        mail_res = google_workspace_service.get_unread_emails_summary()
+        tools_used.append({"tool": "get_unread_emails", "arguments": {}, "success": mail_res.get("success", False)})
+        return {
+            "handled": True,
+            "reply": mail_res.get("reply"),
+            "tools_used": tools_used,
+            "task_category": "google_workspace",
+        }
+
+    is_calendar_query = any(k in norm for k in [
+        "agenda du jour", "agenda d aujourd hui", "agenda d'aujourd'hui", "agenda",
+        "rendez vous du jour", "rendez-vous du jour", "prochains rendez vous", "prochains rendez-vous",
+        "calendrier google", "mon agenda", "mes rendez vous", "mes rendez-vous", "planning du jour", "planning",
+    ])
+    if is_calendar_query:
+        import google_workspace_service
+        cal_res = google_workspace_service.get_today_agenda_summary()
+        tools_used.append({"tool": "get_today_agenda", "arguments": {}, "success": cal_res.get("success", False)})
+        return {
+            "handled": True,
+            "reply": cal_res.get("reply"),
+            "tools_used": tools_used,
+            "task_category": "google_workspace",
+        }
+
+    drive_match = re.search(r"^(?:cherche|recherche|trouve)\s+(?:sur\s+google\s+drive|sur\s+drive|dans\s+drive)\s+(.+)$", norm) or (
+        any(k in norm for k in ["google drive", "documents drive", "fichiers drive"]) and "cherche" in norm
+    )
+    if drive_match:
+        import google_workspace_service
+        target_doc = drive_match.group(1).strip() if hasattr(drive_match, "group") and drive_match.group(1) else "document"
+        drive_res = google_workspace_service.search_drive_documents(target_doc)
+        tools_used.append({"tool": "search_drive_documents", "arguments": {"query": target_doc}, "success": drive_res.get("success", False)})
+        return {
+            "handled": True,
+            "reply": drive_res.get("reply"),
+            "tools_used": tools_used,
+            "task_category": "google_workspace",
         }
 
     # 3. RECHERCHE GOOGLE & NAVIGATION WEB

@@ -88,6 +88,11 @@ from .workspace_layout import (
     get_screen_resolution,
 )
 
+# 5d. HUD 3D Actions
+from .hud_actions import (
+    switch_hud_view,
+)
+
 # 6. Personal Actions
 from .personal_actions import (
     add_todo,
@@ -177,6 +182,9 @@ TOOL_DISPATCHER: Dict[str, Callable[..., Any]] = {
 
     # Workspace Layout (Mode Bureau Géométrique)
     "apply_workspace_layout": apply_workspace_layout,
+
+    # HUD 3D Actions
+    "switch_hud_view": switch_hud_view,
 
     # Energy Actions
     "calculate_consumption": calculate_consumption,

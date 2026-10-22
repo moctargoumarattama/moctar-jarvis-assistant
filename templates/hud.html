@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>M.O.C.T.A.R · HUD 3D Cybernétique</title>
+  <link rel="icon" type="image/png" href="/static/icons/moctar-192.png">
+  <style>
+    :root {
+      --bg-deep: #02060d;
+      --bg-panel: rgba(8, 20, 36, 0.75);
+      --cyan: #00f3ff;
+      --cyan-glow: rgba(0, 243, 255, 0.45);
+      --blue: #0066ff;
+      --green: #00ff88;
+      --gold: #ffb700;
+      --magenta: #d900ff;
+      --text: #e0f4ff;
+      --muted: #64829f;
+      --line: rgba(0, 243, 255, 0.22);
+      --font-mono: "SF Mono", "Fira Code", "Courier New", monospace;
+      --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-deep);
+      color: var(--text);
+      font-family: var(--font-ui);
+    }
+
+    /* --- Canvas 3D Viewport --- */
+    #hud-viewport {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    #hud-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* --- UI Overlay Layer --- */
+    .hud-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 18px 24px;
+    }
+
+    .hud-interactive {
+      pointer-events: auto;
+    }
+
+    /* --- Bandeau Supérieur Cybernétique (HUD Header) --- */
+    .hud-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 20px;
+      background: var(--bg-panel);
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 0 25px rgba(0, 243, 255, 0.12);
+    }
+
+    .header-left, .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .btn-noc-return {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      background: rgba(0, 243, 255, 0.08);
+      border: 1px solid var(--cyan);
+      border-radius: 8px;
+      color: var(--cyan);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-decoration: none;
+      transition: all 0.25s ease;
+      cursor: pointer;
+    }
+
+    .btn-noc-return:hover {
+      background: var(--cyan);
+      color: var(--bg-deep);
+      box-shadow: 0 0 16px var(--cyan-glow);
+    }
+
+    .telemetry-chip {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .telemetry-chip strong {
+      color: var(--cyan);
+      font-weight: 700;
+    }
+
+    /* Horloge Numérique Centrale Géante */
+    .header-center {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .giant-clock {
+      font-family: var(--font-mono);
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      color: var(--cyan);
+      text-shadow: 0 0 12px var(--cyan-glow);
+      line-height: 1;
+    }
+
+    .giant-date {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .online-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--green);
+      letter-spacing: 0.1em;
+    }
+
+    .online-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse-dot 1.8s infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    /* --- Sélecteur de Vues Flottant (Haut Droite) --- */
+    .hud-controls-bar {
+      position: absolute;
+      top: 96px;
+      right: 24px;
+      display: flex;
+      gap: 8px;
+      background: var(--bg-panel);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 6px;
+    }
+
+    .hud-btn {
+      padding: 8px 14px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .hud-btn:hover {
+      color: var(--text);
+      background: rgba(0, 243, 255, 0.06);
+    }
+
+    .hud-btn.active {
+      color: var(--cyan);
+      background: rgba(0, 243, 255, 0.14);
+      border-color: var(--cyan);
+      box-shadow: 0 0 12px rgba(0, 243, 255, 0.2);
+    }
+
+    /* Badge d'État Vocal (Haut Gauche) */
+    .voice-badge-container {
+      position: absolute;
+      top: 96px;
+      left: 24px;
+    }
+
+    .voice-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      background: var(--bg-panel);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--cyan);
+    }
+
+    .voice-badge[data-state="listening"] {
+      color: var(--gold);
+      border-color: var(--gold);
+      box-shadow: 0 0 15px rgba(255, 183, 0, 0.3);
+    }
+
+    .voice-badge[data-state="thinking"] {
+      color: var(--magenta);
+      border-color: var(--magenta);
+      box-shadow: 0 0 15px rgba(217, 0, 255, 0.3);
+    }
+
+    .voice-badge[data-state="speaking"] {
+      color: var(--cyan);
+      border-color: var(--cyan);
+      box-shadow: 0 0 15px var(--cyan-glow);
+    }
+
+    /* --- Bandeau Inférieur Cybernétique (Transcription & Contrôles) --- */
+    .hud-bottom-panel {
+      background: var(--bg-panel);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px 22px;
+      box-shadow: 0 0 25px rgba(0, 243, 255, 0.1);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .dialogue-box {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-height: 48px;
+    }
+
+    .user-line {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--gold);
+      letter-spacing: 0.04em;
+    }
+
+    .assistant-line {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--cyan);
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      line-height: 1.5;
+    }
+
+    .bottom-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid rgba(0, 243, 255, 0.12);
+      padding-top: 10px;
+    }
+
+    .gps-readout {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--green);
+      letter-spacing: 0.08em;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn-action {
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-action.mic {
+      background: rgba(0, 243, 255, 0.12);
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+    }
+    .btn-action.mic:hover {
+      background: var(--cyan);
+      color: var(--bg-deep);
+      box-shadow: 0 0 15px var(--cyan-glow);
+    }
+
+    .btn-action.stop {
+      background: rgba(255, 59, 48, 0.12);
+      border: 1px solid #ff3b30;
+      color: #ff3b30;
+    }
+    .btn-action.stop:hover {
+      background: #ff3b30;
+      color: #fff;
+      box-shadow: 0 0 15px rgba(255, 59, 48, 0.4);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .hud-header {
+        flex-direction: column;
+        gap: 10px;
+        padding: 10px 14px;
+      }
+      .giant-clock { font-size: 22px; }
+      .hud-controls-bar { top: auto; bottom: 175px; right: 14px; }
+      .voice-badge-container { top: auto; bottom: 175px; left: 14px; }
+      .hud-overlay { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Conteneur WebGL Three.js -->
+  <div id="hud-viewport">
+    <canvas id="hud-canvas"></canvas>
+  </div>
+
+  <!-- Couche d'Interface Cybernétique -->
+  <div class="hud-overlay">
+    
+    <!-- Header Supérieur -->
+    <header class="hud-header hud-interactive">
+      <div class="header-left">
+        <a href="/" class="btn-noc-return" id="hud-return-noc" title="Retourner au Dashboard NOC Mission Control">
+          <span>⬅ RETOUR NOC</span>
+        </a>
+        <div class="telemetry-chip">
+          <span>CPU :</span> <strong id="hud-cpu-val">—%</strong>
+        </div>
+        <div class="telemetry-chip">
+          <span>SYS_CLOCK :</span> <strong id="hud-sys-clock">SYNC</strong>
+        </div>
+      </div>
+
+      <div class="header-center">
+        <div class="giant-clock" id="hud-clock-time">--:--:--</div>
+        <div class="giant-date" id="hud-clock-date">--/--/----</div>
+      </div>
+
+      <div class="header-right">
+        <div class="telemetry-chip">
+          <span>RAM :</span> <strong id="hud-ram-val">—%</strong>
+        </div>
+        <div class="online-indicator">
+          <span class="online-dot"></span>
+          <span>ONLINE</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Badge d'État Vocal (Flottant Haut Gauche) -->
+    <div class="voice-badge-container hud-interactive">
+      <div class="voice-badge" id="voice-state-badge" data-state="idle">
+        <span>SYSTÈME NOMINAL</span>
+      </div>
+    </div>
+
+    <!-- Contrôles de Vue 3D (Flottant Haut Droite) -->
+    <div class="hud-controls-bar hud-interactive">
+      <button type="button" class="hud-btn active" id="btn-view-orb" title="Afficher l'Orbe de Particules">
+        <span>🔮 ORBE 3D</span>
+      </button>
+      <button type="button" class="hud-btn" id="btn-view-globe" title="Afficher le Globe Terrestre 3D">
+        <span>🌍 GLOBE TERRESTRE</span>
+      </button>
+      <button type="button" class="hud-btn" id="btn-action-locate" title="Centrer le globe sur votre position GPS">
+        <span>📍 MA POSITION</span>
+      </button>
+    </div>
+
+    <!-- Bandeau Inférieur de Transcription & Télémétrie -->
+    <footer class="hud-bottom-panel hud-interactive">
+      <div class="dialogue-box">
+        <div class="user-line" id="hud-user-transcript">VOUS > En attente d'instruction vocale...</div>
+        <div class="assistant-line" id="hud-assistant-reply">M.O.C.T.A.R > Systèmes cybernétiques armés. À votre écoute, Moctar.</div>
+      </div>
+
+      <div class="bottom-bar">
+        <div class="gps-readout" id="hud-gps-coords">
+          LAT: 34.0208° N | LON: 6.8416° W | GPS_LOCK
+        </div>
+        <div class="action-buttons">
+          <button type="button" class="btn-action mic" id="hud-mic-btn" title="Activer l'écoute micro">
+            <span>🎙️ MICRO</span>
+          </button>
+          <button type="button" class="btn-action stop" id="hud-stop-btn" title="Interrompre M.O.C.T.A.R">
+            <span>🛑 STOP</span>
+          </button>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Three.js (Local prioritaire, CDN de secours) -->
+  <script src="/static/js/three.min.js"></script>
+  <script>
+    if (typeof THREE === "undefined") {
+      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>');
+    }
+  </script>
+
+  <!-- Moteur Graphique HUD 3D -->
+  <script src="/static/js/hud_3d.js?v=1.0"></script>
+</body>
+</html>

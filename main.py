@@ -376,6 +376,15 @@ def is_direct_voice_command(text: str) -> bool:
     # 11. Vision et Analyse d'Écran ("qu'est-ce que tu vois sur mon écran", "regarde mon écran", "analyse mon écran", "regarde les erreurs")
     if re.search(r"\b(?:qu['’]est[- ]ce\s+que\s+tu\s+vois|que\s+vois[- ]tu|regarde|analyse|lis|d[ée]cris)\s+(?:sur\s+|[aà]\s+)?(?:mon\s+|l['’])?[ée]cran\b", norm) or re.search(r"\b(?:regarde\s+les\s+erreurs|analyse\s+les\s+erreurs|vois[- ]tu\s+des\s+erreurs|qu['’]y\s+a[- ]t[- ]il\s+[aà]\s+l['’][ée]cran)\b", norm):
         return True
+    # 12. Interface HUD 3D & Globe Terrestre ("affiche la terre", "montre le globe", "affiche ma position", "mode orbe")
+    if re.search(r"\b(?:affiche\s+(?:la\s+terre|le\s+globe|ma\s+position|l['’]orbe)|montre\s+(?:la\s+terre|le\s+globe|ma\s+position)|globe\s+terrestre|localise[- ]moi|mode\s+orbe|ferme\s+le\s+globe|retourne\s+[aà]\s+l['’]orbe)\b", norm):
+        return True
+    # 13. Sport en temps réel ("résultats ligue 1", "classement premier league", "score real madrid")
+    if re.search(r"\b(?:r[ée]sultats?|classement|score|scores|matchs?)\s+(?:de\s+la\s+|du\s+|en\s+)?(?:ligue\s*1|champions\s*league|ligue\s*des\s*champions|liga|la\s+liga|premier\s*league|serie\s*a|bundesliga|foot)\b", norm):
+        return True
+    # 14. Google Workspace ("mails non lus", "agenda du jour", "prochains rendez-vous", "google drive")
+    if re.search(r"\b(?:mails?\s+non\s+lus|emails?\s+non\s+lus|bo[îi]te\s+mail|mes\s+mails?|mes\s+emails?|agenda\s+du\s+jour|prochains?\s+rendez[- ]vous|calendrier\s+google|google\s+drive|cherche\s+sur\s+drive)\b", norm):
+        return True
     return False
 
 
@@ -1003,12 +1012,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob: data:; connect-src 'self'; font-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; media-src 'self' blob: data:; connect-src 'self' https:; font-src 'self' data: https://fonts.gstatic.com; manifest-src 'self'; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         return response
 
     @application.get("/")
     async def dashboard():
         return FileResponse(BASE_DIR / "static" / "index.html", media_type="text/html")
+
+    @application.get("/hud")
+    async def hud_dashboard():
+        hud_path = BASE_DIR / "templates" / "hud.html"
+        if not hud_path.is_file():
+            hud_path = BASE_DIR / "static" / "hud.html"
+        return FileResponse(hud_path, media_type="text/html")
+
+    @application.get("/static/js/hud_3d.js")
+    async def hud_3d_script():
+        return FileResponse(BASE_DIR / "static" / "js" / "hud_3d.js", media_type="application/javascript")
+
+    @application.get("/static/js/three.min.js")
+    async def three_js_script():
+        return FileResponse(BASE_DIR / "static" / "js" / "three.min.js", media_type="application/javascript")
+
+    @application.get("/api/hud/state")
+    async def get_hud_state_endpoint():
+        import hud_state_manager
+        return JSONResponse(hud_state_manager.get_hud_state())
+
+    @application.post("/api/hud/view")
+    async def set_hud_view_endpoint(request: Request):
+        import hud_state_manager
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        view = body.get("view", "orb")
+        locate = bool(body.get("locate", False))
+        updated = hud_state_manager.set_hud_view(view=view, locate=locate)
+        return JSONResponse(updated)
 
     @application.get("/static/live_metrics.js")
     async def live_metrics_script():
