@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 
 import actions
+from actions import project_actions
 import assistant_memory
 import autonomous_library
 import headless_bridge
@@ -23,6 +24,7 @@ import hud_state_manager
 import main
 import stt_phonetic_repair
 import voice_semantic_engine
+import voice_transcribe
 
 
 class TestAuditFixesNocHudUnification(unittest.TestCase):
@@ -160,6 +162,38 @@ class TestAuditFixesNocHudUnification(unittest.TestCase):
             )
             after = mem.get_moctar_profile()
             self.assertEqual(after["recent_topics"], ["Météo"])
+
+    def test_7_git_confirmation_oui_and_no_false_positive_pause(self) -> None:
+        # 1. Réparations STT supplémentaires observées en production (23:11 -> 23:56)
+        rep_bureau, _ = stt_phonetic_repair.repair_stt_transcript("Météo, mode bureau.")
+        self.assertIn("mets-toi en mode bureau", rep_bureau.lower())
+
+        rep_babam, _ = stt_phonetic_repair.repair_stt_transcript("Le paru du Babam Market.")
+        self.assertIn("je parle de baba market", rep_babam.lower())
+
+        # 2. "Réalisation, dégénération, pause." ne doit JAMAIS déclencher pause hors session
+        self.assertFalse(main.is_direct_voice_command("Réalisation, dégénération, pause."))
+        self.assertEqual(voice_transcribe.filter_whisper_hallucinations("Réalisation, dégénération, pause."), "")
+
+        # 3. "Oui." est filtré hors session sans action Git en attente, mais ACCEPTÉ en session ou après prepare_push
+        project_actions._get_project_assistant().pending_git_action = None
+        self.assertEqual(voice_transcribe.filter_whisper_hallucinations("Oui.", allow_short_confirmations=False), "")
+        self.assertEqual(voice_transcribe.filter_whisper_hallucinations("Oui.", allow_short_confirmations=True), "Oui.")
+
+        acc_no_sess, _, _ = main.extract_voice_interact_command("Oui.", session_active=False)
+        self.assertFalse(acc_no_sess)
+
+        acc_sess, cmd_sess, _ = main.extract_voice_interact_command("Oui.", session_active=True)
+        self.assertTrue(acc_sess)
+        self.assertEqual(cmd_sess.lower(), "oui")
+
+        # 4. Flux complet : prepare_push('baba_market') -> "Oui." exécute confirm_pending_git_action
+        project_actions.prepare_push("baba_market")
+        self.assertTrue(project_actions.has_pending_git_action())
+        res_conf = autonomous_library.execute_autonomous_task("Oui.")
+        self.assertTrue(res_conf.get("handled"))
+        self.assertEqual(res_conf.get("task_category"), "git_dev")
+        self.assertFalse(project_actions.has_pending_git_action())
 
 
 if __name__ == "__main__":

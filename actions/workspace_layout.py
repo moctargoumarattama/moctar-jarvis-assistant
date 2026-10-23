@@ -216,18 +216,33 @@ def apply_workspace_layout() -> Dict[str, Any]:
         classes_str = " ".join(w["class"] for w in open_wins)
 
         # VS Code
-        if "code" not in classes_str and shutil.which("code"):
+        if "code" not in classes_str:
             try:
-                subprocess.Popen(["code", "/opt/jarvis"], env=env)
+                from actions.system_actions import open_app
+                open_app(target="vscode")
             except Exception:
-                pass
+                if shutil.which("code"):
+                    try:
+                        subprocess.Popen(["code", "/opt/jarvis"], env=env)
+                    except Exception:
+                        pass
 
         # Chrome Dashboard NOC
         if not any(c in classes_str for c in ("chrome", "chromium", "brave")):
             browser_bin = shutil.which("google-chrome") or shutil.which("chromium-browser") or shutil.which("brave-browser")
             if browser_bin:
                 try:
-                    subprocess.Popen([browser_bin, "--app=http://localhost:5050"], env=env)
+                    if hasattr(os, "getuid") and os.getuid() == 0 and os.path.exists("/home/moctar"):
+                        display = env.get("DISPLAY", ":0")
+                        xauth = env.get("XAUTHORITY", "/home/moctar/.Xauthority")
+                        bus = env.get("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+                        subprocess.Popen(
+                            f"sudo -u moctar env DISPLAY={display} XAUTHORITY={xauth} XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS={bus} {browser_bin} --app=http://localhost:5050 >/dev/null 2>&1 &",
+                            shell=True,
+                            env=env,
+                        )
+                    else:
+                        subprocess.Popen([browser_bin, "--app=http://localhost:5050"], env=env)
                 except Exception:
                     pass
 

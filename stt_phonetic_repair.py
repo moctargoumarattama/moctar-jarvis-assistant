@@ -64,6 +64,11 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     (re.compile(r"\b(?:git|guite|guide|guilde)\s+(?:comit[es]?|commun[es]?|commit)\b", re.I), "git commit", "git_commit"),
     (re.compile(r"\b(?:git|guite|guide|guilde)\s+(?:push|pouche|bouche)\b", re.I), "git push", "git_push"),
     (re.compile(r"\b(?:git|guite|guide|guilde)\s+st[ae]s\b", re.I), "git status", "git_status"),
+    (re.compile(r"\ble\s+paru\s+(?:du|de)\b", re.I), "je parle de", "je_parle_de_repair"),
+    (re.compile(r"\b(?:babam|papa)\s*market\b", re.I), "Baba Market", "baba_market_repair"),
+    (re.compile(r"\bpour\s+vos\s+marqu[ée]s\b", re.I), "pour Baba Market", "baba_market_vos_marques"),
+    (re.compile(r"\b(?:baba|papa)\s+marqu[ée]s?\b", re.I), "Baba Market", "baba_marque_repair"),
+    (re.compile(r"\bdelle\s+pr[ée]cision\b", re.I), "Dell Precision", "dell_precision_repair"),
     (re.compile(r"\b(?:syst[èe]me|systeme)\s+ctl\b", re.I), "systemctl", "systemctl_repair"),
     (re.compile(r"\bjournal\s+(?:ces?\s*tl|ctl)\b", re.I), "journalctl", "journalctl_repair"),
 
@@ -97,6 +102,7 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     (re.compile(r"\b(?:j['’]?ai\s+qui,?\s+toi|rikitoa|t['’]es\s+qui,?\s+toi|t\s+es\s+qui,?\s+toi)\b", re.I), "tu es qui toi", "identity_who_are_you"),
     (re.compile(r"\b(?:qu['’]en|quand|c['’]est|l[aà],?\s+le\s+nom\s+de\s+ce)(?:\s+quoi)?(?:\s+ton)?\s+job\b", re.I), "c'est quoi ton job", "identity_job_repair"),
     (re.compile(r"\bc['’]est\s+quoi\s+ton\s+djob\b", re.I), "c'est quoi ton job", "identity_job_spelling"),
+    (re.compile(r"\bm[ée]t[ée]o\s*,?\s*mode\s+bureau\b", re.I), "mets-toi en mode bureau", "meteo_mode_bureau_repair"),
     (re.compile(r"\b(?:active|mets)[-\s]le\s+mode\s+bureau\b", re.I), "active le mode bureau", "activate_desktop_mode"),
     (re.compile(r"\bet\s+on\s+va\s+passer\s+[aà]\s+ceci\b", re.I), "on va passer à ceci", "transition_next_step"),
 

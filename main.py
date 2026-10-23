@@ -353,7 +353,7 @@ def is_direct_voice_command(text: str) -> bool:
     if re.search(r"\b(?:m[ée]t[ée]o|quel\s+temps|quel\s+degr[ée]|combien\s+de\s+degr[ée]s?|pleut[- ]il|est[- ]ce\s+qu['’]il\s+pleut|il\s+fait\s+quel\s+degr[ée]|fait\s+quel\s+degr[ée])\b", norm):
         return True
     # 4. Multimédia & Audio (Lecture, Pause, Volume, Spotify, YouTube)
-    if re.search(r"\b(?:arr[êe]te\s+la\s+musique|stop\s+la\s+musique|pause\s+la\s+musique|pause\s+youtube|mets\s+youtube\s+en\s+pause|youtube\s+en\s+pause|j['’]?ai\s+youtube\s+en\s+pause|pause\s+la\s+vid[ée]o|mets\s+en\s+pause|mets\s+sur\s+pause|en\s+pause|on\s+pause|pause)\b", norm):
+    if re.search(r"\b(?:arr[êe]te\s+la\s+musique|stop\s+la\s+musique|pause\s+la\s+musique|pause\s+youtube|mets\s+youtube\s+en\s+pause|youtube\s+en\s+pause|j['’]?ai\s+youtube\s+en\s+pause|pause\s+la\s+vid[ée]o|mets\s+en\s+pause|mets\s+sur\s+pause)\b", norm) or norm.strip(" .,:;!?'\"") in ("pause", "stop", "en pause", "on pause", "mets pause", "pause musique", "stop musique"):
         return True
     if re.search(r"\b(?:mets\s+la\s+musique|mets\s+de\s+la\s+musique|lance\s+la\s+musique|lance\s+de\s+la\s+musique|joue\s+de\s+la\s+musique|joue\s+la\s+musique|lance\s+ma\s+playlist|lance\s+spotify|ouvre\s+spotify|reprends?\s+la\s+lecture|remets\s+la\s+musique|relance\s+la\s+musique)\b", norm):
         return True
@@ -378,7 +378,7 @@ def is_direct_voice_command(text: str) -> bool:
     if re.search(r"\b(?:on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|passons\s+[aà]\s+la\s+suite)\b", norm):
         return True
     # 9. Interruption vocale prioritaire (Barge-In)
-    if re.search(r"\b(?:tais[- ]toi|ferme[- ]la|chut|silence|stop|pause|attends?\s*(?:voir)?)\b", norm):
+    if re.search(r"\b(?:tais[- ]toi|ferme[- ]la|chut|silence|attends?\s*(?:voir)?)\b", norm) or norm.strip(" .,:;!?'\"") in ("stop", "pause"):
         return True
     # 10. Présence et surnoms complices ("tu es là", "t'es là", "moc", "mokti")
     if re.search(r"\b(?:tu\s+es\s+l[aà]|t['’]es\s+l[aà]|es[- ]tu\s+l[aà]|moc|mokti)\b", norm):
@@ -397,6 +397,14 @@ def is_direct_voice_command(text: str) -> bool:
     # 12b. Git & Projets ("git commit", "git push", "git pull", "git status", "papa market", "baba market")
     if re.search(r"\b(?:git\s+(?:commit|push|pull|status|log)|statut\s+git|papa\s+market|baba\s+market)\b", norm):
         return True
+    try:
+        from actions import project_actions
+        if project_actions.has_pending_git_action() and norm.strip(" .,:;!?'\"") in (
+            "oui", "non", "ok", "valide", "confirme", "je confirme", "vas-y", "vas y", "d'accord", "d accord", "envoie", "annule",
+        ):
+            return True
+    except Exception:
+        pass
     # 13. Sport en temps réel ("résultats ligue 1", "classement premier league", "score real madrid")
     if re.search(r"\b(?:r[ée]sultats?|classement|score|scores|matchs?)\s+(?:de\s+la\s+|du\s+|en\s+)?(?:ligue\s*1|champions\s*league|ligue\s*des\s*champions|liga|la\s+liga|premier\s*league|serie\s*a|bundesliga|foot)\b", norm):
         return True
@@ -415,8 +423,15 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
     Exécute également les ordres opérationnels directs sans mot-clé préalable.
     Ignore toute transcription résiduelle de moins de 4 caractères hors commande reconnue.
     """
+    has_pending_git = False
+    try:
+        from actions import project_actions
+        has_pending_git = project_actions.has_pending_git_action()
+    except Exception:
+        pass
+    allow_short = bool(session_active or has_pending_git)
     repaired, _ = stt_phonetic_repair.repair_stt_transcript(transcript)
-    filtered = voice_transcribe.filter_whisper_hallucinations(repaired)
+    filtered = voice_transcribe.filter_whisper_hallucinations(repaired, allow_short_confirmations=allow_short)
     if not filtered:
         return False, "", False
 
@@ -439,11 +454,18 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
         # 3. Commande prononcée avant le mot-clé ("Quel est le statut réseau Mokhtar ?")
         return True, before, True
 
-    if session_active:
+    if session_active or has_pending_git:
         clean_text = filtered.strip(" ,.:;!?-")
-        if len(clean_text) < 4 or _is_pure_filler_or_wake(clean_text):
-            return False, "", False
-        return True, clean_text, False
+        norm_clean = _strip_accents_1to1(clean_text).lower()
+        if norm_clean in (
+            "oui", "non", "ok", "go", "si", "d'accord", "d accord",
+            "valide", "confirme", "vas-y", "vas y", "envoie", "annule",
+        ):
+            return True, clean_text, False
+        if session_active:
+            if len(clean_text) < 4 or _is_pure_filler_or_wake(clean_text):
+                return False, "", False
+            return True, clean_text, False
 
     clean_text = filtered.strip(" ,.:;!?-")
     if clean_text and is_direct_voice_command(clean_text):
@@ -729,7 +751,11 @@ def _convert_audio_for_whisper(source_path: Path, content_type: str) -> Path | N
     return None
 
 
-async def transcribe_direct_audio(audio_bytes: bytes, content_type: str = "audio/wav") -> str:
+async def transcribe_direct_audio(
+    audio_bytes: bytes,
+    content_type: str = "audio/wav",
+    allow_short_confirmations: bool = False,
+) -> str:
     """Transcrit directement un blob audio (WAV/WebM/OGG) via faster-whisper local."""
     if not audio_bytes:
         raise ValueError("Fichier audio vide.")
@@ -752,12 +778,25 @@ async def transcribe_direct_audio(audio_bytes: bytes, content_type: str = "audio
         converted_path = await asyncio.to_thread(_convert_audio_for_whisper, tmp_path, content_type)
         target_path = converted_path if converted_path is not None else tmp_path
         try:
-            raw_text = await asyncio.to_thread(voice_transcribe.transcribe_audio, target_path)
+            if allow_short_confirmations:
+                try:
+                    raw_text = await asyncio.to_thread(
+                        voice_transcribe.transcribe_audio,
+                        target_path,
+                        allow_short_confirmations=True,
+                    )
+                except TypeError:
+                    raw_text = await asyncio.to_thread(voice_transcribe.transcribe_audio, target_path)
+            else:
+                raw_text = await asyncio.to_thread(voice_transcribe.transcribe_audio, target_path)
         except ValueError as exc:
             if "aucune parole" in str(exc).lower():
                 return ""
             raise
-        return voice_transcribe.filter_whisper_hallucinations(raw_text)
+        return voice_transcribe.filter_whisper_hallucinations(
+            raw_text,
+            allow_short_confirmations=allow_short_confirmations,
+        )
     finally:
         tmp_path.unlink(missing_ok=True)
         if converted_path is not None:
@@ -1500,6 +1539,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             )
 
+        runtime: Runtime = application.state.runtime
+        header_session = request.headers.get("x-voice-session-active", "").strip().lower() in {"1", "true", "yes"}
+        header_barge_in = request.headers.get("x-voice-barge-in", "").strip().lower() in {"1", "true", "yes"}
+        query_session = request.query_params.get("session_active", "").strip().lower() in {"1", "true", "yes"}
+        runtime_session = getattr(runtime, "voice_session_until", 0.0) > time.monotonic()
+        has_pending_git = False
+        try:
+            from actions import project_actions
+            has_pending_git = project_actions.has_pending_git_action()
+        except Exception:
+            pass
+        session_active = header_session or header_barge_in or query_session or runtime_session or has_pending_git
+
         if content_type == "application/json":
             try:
                 json_payload = json.loads(body.decode("utf-8"))
@@ -1522,7 +1574,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(415, "Format audio non supporté (attendu: WAV, WebM, OGG, MP3 ou multipart/form-data)")
 
             try:
-                transcript = await transcribe_direct_audio(audio_bytes, detected_mime)
+                transcript = await transcribe_direct_audio(
+                    audio_bytes,
+                    detected_mime,
+                    allow_short_confirmations=session_active,
+                )
             except ValueError:
                 transcript = ""
             except RuntimeError as exc:
@@ -1545,13 +1601,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "session_active": False,
                 }
             )
-
-        runtime: Runtime = application.state.runtime
-        header_session = request.headers.get("x-voice-session-active", "").strip().lower() in {"1", "true", "yes"}
-        header_barge_in = request.headers.get("x-voice-barge-in", "").strip().lower() in {"1", "true", "yes"}
-        query_session = request.query_params.get("session_active", "").strip().lower() in {"1", "true", "yes"}
-        runtime_session = getattr(runtime, "voice_session_until", 0.0) > time.monotonic()
-        session_active = header_session or header_barge_in or query_session or runtime_session
 
         # 1. Couche de Réparation Phonétique & Correction d'Erreurs STT (< 0.1 ms)
         repaired_transcript, stt_repairs = stt_phonetic_repair.repair_stt_transcript(transcript)
@@ -1619,9 +1668,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # B) Réflexion à voix haute ou phrase inachevée (VAD Sémantique & Turn-Taking Prédictif)
         # Ne JAMAIS couper Moctar ; prolonger silencieusement la session d'écoute.
         if (session_active or attention.get("is_incomplete")) and attention.get("is_thinking_out_loud"):
-            if VOICE_SESSION_DURATION_SECONDS > 0:
-                runtime.voice_session_until = time.monotonic() + max(VOICE_SESSION_DURATION_SECONDS, 30.0)
+            runtime.voice_session_until = time.monotonic() + max(VOICE_SESSION_DURATION_SECONDS, 30.0)
             is_inc = bool(attention.get("is_incomplete"))
+            if is_inc:
+                runtime.pending_incomplete_text = repaired_transcript.rstrip(" .,…-")
+                runtime.pending_incomplete_until = time.monotonic() + 15.0
             reason_str = "incomplete_utterance" if is_inc else "thinking_out_loud"
             LOGGER.info(
                 "⚡ [VOICE ATTENTION]: Moctar %s ('%s'). Écoute maintenue en silence.",
@@ -1640,6 +1691,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "session_active": True,
                 }
             )
+
+        # Fusion d'une phrase précédemment interrompue par une hésitation (< 15s, ex: 'Fais-moi un Git...' + '...pour Baba Market')
+        pending_inc = getattr(runtime, "pending_incomplete_text", "")
+        pending_inc_until = getattr(runtime, "pending_incomplete_until", 0.0)
+        if pending_inc and time.monotonic() <= pending_inc_until:
+            runtime.pending_incomplete_text = ""
+            runtime.pending_incomplete_until = 0.0
+            if not repaired_transcript.lower().startswith(pending_inc.lower()[:10]):
+                repaired_transcript = f"{pending_inc} {repaired_transcript}".strip()
+                LOGGER.info("⚡ [VOICE UTTERANCE MERGE]: Phrase recomposée -> '%s'", repaired_transcript)
 
         # C) Phrase inintelligible ou non-sens (bruit de fond, hallucination Whisper, fragment déformé)
         # Demander poliment de répéter tout en maintenant la session collaborative active.
@@ -1850,6 +1911,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         runtime.last_tts_reply_text = reply_text
         runtime.last_tts_timestamp = time.monotonic()
+        if (header_session or header_barge_in or reply_text.strip().endswith("?")) and not attention.get("should_disengage"):
+            runtime.voice_session_until = max(getattr(runtime, "voice_session_until", 0.0), time.monotonic() + 30.0)
 
         try:
             hud_state_manager.set_hud_voice_status(

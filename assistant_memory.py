@@ -356,7 +356,9 @@ class AssistantMemory:
                                 polluted_markers = (
                                     "ventraler", "return arm", "hot-trading", "hot trading",
                                     "guide push", "gens de la", "gens de", "ça va", "ca va",
-                                    "git commun", "yo ", "pardon moctar",
+                                    "git commun", "yo ", "pardon moctar", "bien tout",
+                                    "et tu vois", "ma localisation", "il est quel heure",
+                                    "c'est quoi", "exclusivo", "réalisat",
                                 )
                                 cleaned_topics = [
                                     t for t in raw_topics

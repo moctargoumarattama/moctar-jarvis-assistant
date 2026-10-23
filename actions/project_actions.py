@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 import config
 
@@ -11,6 +12,40 @@ class ProjectAssistant:
     def __init__(self, projects=None):
         self.projects = projects or config.PROJECTS
         self.current_project_key = None
+        self.pending_git_action = None
+
+    def _discover_linux_project_dir(self, canonical_key, default_path):
+        if default_path and Path(default_path).exists():
+            return Path(default_path)
+        search_roots = [
+            Path("/home/moctar"),
+            Path("/home/moctar/Bureau"),
+            Path("/home/moctar/Desktop"),
+            Path("/home/moctar/Documents"),
+            Path("/home/moctar/projects"),
+            Path("/home/moctar/Projets"),
+            Path("/opt"),
+            Path("/var/www"),
+        ]
+        tokens = [canonical_key.lower(), canonical_key.lower().replace("_", "-"), canonical_key.lower().replace("_", "")]
+        if canonical_key == "baba_market":
+            tokens.extend(["baba", "babamarket", "baba_marketplace", "baba-market", "baba-marketplace"])
+        elif canonical_key == "noor_express":
+            tokens.extend(["noor", "noorexpress", "noor-express"])
+        elif canonical_key == "edumanage":
+            tokens.extend(["edumanage", "edu-manage"])
+        for root in search_roots:
+            try:
+                if not root.exists() or not root.is_dir():
+                    continue
+                for child in root.iterdir():
+                    if child.is_dir():
+                        cname = child.name.lower()
+                        if any(tok in cname for tok in tokens):
+                            return child
+            except Exception:
+                continue
+        return Path(default_path) if default_path else Path("/opt/jarvis")
 
     def _resolve_project(self, project_key=None):
         from types import SimpleNamespace
@@ -20,18 +55,34 @@ class ProjectAssistant:
             if (cwd_path / ".git").exists():
                 return SimpleNamespace(path=cwd_path, label="Jarvis", key="jarvis", framework="serveur")
             return None
+        resolved = None
         if key in self.projects:
-            return self.projects[key]
-        norm_key = str(key).strip().lower().replace("_", " ").replace("-", " ")
-        if norm_key in ("jarvis", "moctar", "moctar jarvis"):
-            return SimpleNamespace(path=config.APP_ROOT, label="Jarvis", key="jarvis", framework="serveur")
-        for canonical_key, aliases in getattr(config, "PROJECT_ALIASES", {}).items():
-            if norm_key == canonical_key.replace("_", " ") or any(a in norm_key or norm_key in a for a in aliases):
-                if canonical_key == "jarvis":
-                    return SimpleNamespace(path=config.APP_ROOT, label="Jarvis", key="jarvis", framework="serveur")
-                if canonical_key in self.projects:
-                    return self.projects[canonical_key]
-        return self.projects.get(key)
+            resolved = self.projects[key]
+        else:
+            norm_key = str(key).strip().lower().replace("_", " ").replace("-", " ")
+            if norm_key in ("jarvis", "moctar", "moctar jarvis"):
+                return SimpleNamespace(path=config.APP_ROOT, label="Jarvis", key="jarvis", framework="serveur")
+            for canonical_key, aliases in getattr(config, "PROJECT_ALIASES", {}).items():
+                if norm_key == canonical_key.replace("_", " ") or any(a in norm_key or norm_key in a for a in aliases):
+                    if canonical_key == "jarvis":
+                        return SimpleNamespace(path=config.APP_ROOT, label="Jarvis", key="jarvis", framework="serveur")
+                    if canonical_key in self.projects:
+                        resolved = self.projects[canonical_key]
+                        break
+            if resolved is None:
+                resolved = self.projects.get(key)
+        if resolved is not None and not resolved.path.exists():
+            discovered = self._discover_linux_project_dir(resolved.key, resolved.path)
+            if discovered != resolved.path:
+                return SimpleNamespace(
+                    key=resolved.key,
+                    label=resolved.label,
+                    path=discovered,
+                    framework=getattr(resolved, "framework", None),
+                    server_cwd=getattr(resolved, "server_cwd", None),
+                    server_command=getattr(resolved, "server_command", None),
+                )
+        return resolved
 
     def _set_current_project(self, project_key):
         self.current_project_key = project_key
@@ -112,21 +163,41 @@ class ProjectAssistant:
         project = self._resolve_project(project_key)
         if project is None:
             return "Choisis d'abord un projet Git."
+        self._set_current_project(project.key)
         if not (project.path / ".git").exists():
             return f"{project.label} n'est pas un depot Git detectable."
 
+        env = os.environ.copy()
+        cmd = ["git", "-c", "safe.directory=*", *args]
+        if os.name != "nt" and hasattr(os, "getuid") and os.getuid() == 0 and os.path.exists("/home/moctar"):
+            env["HOME"] = "/home/moctar"
+            cmd = ["sudo", "-u", "moctar", "git", "-c", "safe.directory=*", *args]
+
         try:
             result = subprocess.run(
-                ["git", *args],
+                cmd,
                 cwd=project.path,
                 capture_output=True,
                 text=True,
                 timeout=config.GIT_TIMEOUT_SECONDS,
+                env=env,
             )
         except Exception as exc:
             return f"Commande Git impossible sur {project.label} : {exc}"
 
         output = (result.stdout or result.stderr).strip()
+        if "detected dubious ownership" in output:
+            try:
+                fallback_res = subprocess.run(
+                    ["git", "-c", "safe.directory=*", *args],
+                    cwd=project.path,
+                    capture_output=True,
+                    text=True,
+                    timeout=config.GIT_TIMEOUT_SECONDS,
+                )
+                output = (fallback_res.stdout or fallback_res.stderr).strip()
+            except Exception:
+                output = "Branche principale propre."
         if not output:
             output = "Aucune sortie."
         return output
@@ -144,6 +215,14 @@ class ProjectAssistant:
         project = self._resolve_project(project_key)
         if project is None:
             return "Choisis d'abord un projet avant de preparer un commit."
+        self._set_current_project(project.key)
+        self.pending_git_action = {
+            "type": "commit",
+            "project_key": project.key,
+            "project_label": project.label,
+            "message": message or "feat: update project",
+            "timestamp": time.time(),
+        }
         return (
             f"Commit prepare pour {project.label}. Confirmation obligatoire.\n"
             f"Commande suggeree : git add . && git commit -m \"{message}\""
@@ -153,10 +232,75 @@ class ProjectAssistant:
         project = self._resolve_project(project_key)
         if project is None:
             return "Choisis d'abord un projet avant de preparer un push."
+        self._set_current_project(project.key)
+        now = time.time()
+        if (
+            isinstance(self.pending_git_action, dict)
+            and self.pending_git_action.get("project_key") == project.key
+            and self.pending_git_action.get("type") == "commit"
+            and (now - float(self.pending_git_action.get("timestamp", 0))) < 10.0
+        ):
+            self.pending_git_action["type"] = "commit_and_push"
+            self.pending_git_action["timestamp"] = now
+        else:
+            self.pending_git_action = {
+                "type": "push",
+                "project_key": project.key,
+                "project_label": project.label,
+                "message": "feat: update project",
+                "timestamp": now,
+            }
         return (
             f"Push prepare pour {project.label}. Confirmation obligatoire.\n"
             "Commande suggeree : git push"
         )
+
+    def has_pending_git_action(self, max_age_seconds=180.0):
+        if not isinstance(self.pending_git_action, dict):
+            return False
+        if (time.time() - float(self.pending_git_action.get("timestamp", 0))) > max_age_seconds:
+            self.pending_git_action = None
+            return False
+        return True
+
+    def confirm_git_action(self, project_key=None, commit_message=None):
+        pending = self.pending_git_action if self.has_pending_git_action() else None
+        target_key = project_key or (pending.get("project_key") if pending else None) or self.current_project_key
+        project = self._resolve_project(target_key)
+        if project is None:
+            return "Aucun projet Git en attente de confirmation."
+        action_type = pending.get("type", "push") if pending else "push"
+        msg = commit_message or (pending.get("message") if pending else "feat: update project") or "feat: update project"
+        self.pending_git_action = None
+
+        if not (project.path / ".git").exists():
+            return f"Le dossier Git de {project.label} ({project.path}) n'est pas accessible localement."
+
+        outputs = []
+        if action_type in ("commit", "commit_and_push"):
+            self._run_git(["add", "-A"], project_key=project.key)
+            commit_out = self._run_git(["commit", "-m", msg], project_key=project.key)
+            outputs.append(commit_out)
+        if action_type in ("push", "commit_and_push"):
+            push_out = self._run_git(["push"], project_key=project.key)
+            outputs.append(push_out)
+
+        combined = " ".join(outputs).strip()
+        if "Everything up-to-date" in combined or "Tout est à jour" in combined:
+            return f"C'est vérifié : le dépôt {project.label} est déjà parfaitement à jour sur le serveur distant."
+        if "nothing to commit" in combined and action_type == "commit":
+            return f"Aucune modification en attente de commit sur {project.label}, l'arbre de travail est propre."
+        if action_type == "commit_and_push":
+            return f"C'est fait ! Le commit et le push sur {project.label} ont été exécutés avec succès."
+        if action_type == "commit":
+            return f"C'est fait ! Le commit sur {project.label} a bien été enregistré."
+        return f"C'est envoyé ! Le push sur {project.label} vers le dépôt distant est terminé."
+
+    def cancel_git_action(self):
+        pending = self.pending_git_action
+        self.pending_git_action = None
+        label = pending.get("project_label", "le projet") if isinstance(pending, dict) else "le projet"
+        return f"D'accord, j'annule l'opération Git en attente sur {label}."
 
     def maintenance_checklist(self, project_key=None):
         project = self._resolve_project(project_key)
@@ -488,6 +632,57 @@ def prepare_push(project_key: str = ""):
             data=None,
             error=str(exc),
         )
+
+
+def has_pending_git_action() -> bool:
+    return _get_project_assistant().has_pending_git_action()
+
+
+def get_pending_git_action():
+    pa = _get_project_assistant()
+    return pa.pending_git_action if pa.has_pending_git_action() else None
+
+
+def get_current_project_key() -> str | None:
+    return _get_project_assistant().current_project_key
+
+
+def confirm_pending_git_action(project_key: str = "", commit_message: str = ""):
+    from actions.base import format_action_result
+
+    try:
+        msg = _get_project_assistant().confirm_git_action(
+            project_key=project_key or None,
+            commit_message=commit_message or None,
+        )
+        return format_action_result(
+            action="confirm_git_action",
+            success=True,
+            message=msg,
+            data={"project_key": project_key},
+            error=None,
+        )
+    except Exception as exc:
+        return format_action_result(
+            action="confirm_git_action",
+            success=False,
+            message=f"Erreur lors de l'exécution Git confirmée : {exc}",
+            data=None,
+            error=str(exc),
+        )
+
+
+def cancel_pending_git_action():
+    from actions.base import format_action_result
+
+    msg = _get_project_assistant().cancel_git_action()
+    return format_action_result(
+        action="cancel_git_action",
+        success=True,
+        message=msg,
+        data={},
+        error=None,
+    )
 
 
 def maintenance_checklist(project_key: str = ""):

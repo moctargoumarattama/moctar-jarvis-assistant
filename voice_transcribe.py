@@ -256,7 +256,27 @@ HALLUCINATION_SUBSTRINGS = (
     "[applaudissements]",
     "[rires]",
     "[silence]",
+    "réalisation, dégénération",
+    "realisation, degeneration",
+    "dégénération, pause",
+    "degeneration, pause",
 )
+
+SHORT_CONFIRMATION_PHRASES = {
+    "oui",
+    "oui.",
+    "oui !",
+    "non",
+    "non.",
+    "ok",
+    "ok.",
+    "d'accord",
+    "d accord",
+    "valide",
+    "confirme",
+    "vas-y",
+    "vas y",
+}
 
 HALLUCINATION_EXACT_PHRASES = {
     "youtube",
@@ -311,13 +331,17 @@ def has_repetitive_hallucination(text: str) -> bool:
     return False
 
 
-def filter_whisper_hallucinations(text: str) -> str:
+def filter_whisper_hallucinations(text: str, *, allow_short_confirmations: bool = False) -> str:
     """Élimine les hallucinations récurrentes de Whisper sur du silence ou du bruit de fond."""
     cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
     if not cleaned:
         return ""
     lowered = cleaned.lower().strip(" .,!?:;\"'()-[]{}")
-    if not lowered or lowered in HALLUCINATION_EXACT_PHRASES:
+    if not lowered:
+        return ""
+    if lowered in HALLUCINATION_EXACT_PHRASES:
+        if allow_short_confirmations and lowered in SHORT_CONFIRMATION_PHRASES:
+            return cleaned
         return ""
     for pattern in HALLUCINATION_SUBSTRINGS:
         if pattern in lowered:
@@ -368,6 +392,7 @@ def build_dynamic_stt_prompt(
     base_anchors = [
         "Bonjour Moctar, ici M.O.C.T.A.R sur Dell Precision M4800. JARVIS.",
         "Ouvre Visual Studio Code, VS Code, code, terminal, bash, Python, pytest, Git status, commit, push, pull,",
+        "Baba Market, Noor Express, EduManage, HUD 3D, mode NOC, globe terrestre, localise-moi,",
         "Docker, Uvicorn, FastAPI, systemctl, NOC, supervision, météo, degrés, Niamey, Maroc,",
         "mode bureau, mode travail, ferme ça, relance-le, mets-le à droite, mets-le à gauche, plein écran, snap,",
         "WhatsApp, volume, musique, Coran.",
@@ -488,6 +513,7 @@ def transcribe_audio(
     audio_path: str | os.PathLike[str],
     *,
     allow_empty: bool = False,
+    allow_short_confirmations: bool = False,
     groq_api_key: str | None = None,
     groq_prompt: str | None = None,
 ) -> str:
@@ -505,7 +531,7 @@ def transcribe_audio(
     else:
         groq_text = transcribe_groq_api(audio, api_key=groq_api_key)
     if groq_text is not None:
-        filtered = filter_whisper_hallucinations(groq_text)
+        filtered = filter_whisper_hallucinations(groq_text, allow_short_confirmations=allow_short_confirmations)
         if groq_text.strip() and not filtered:
             if allow_empty:
                 return ""
@@ -550,7 +576,7 @@ def transcribe_audio(
     raw_text = " ".join(pieces).strip()
     text = raw_text
     logger.info(f"🎙️ [WHISPER BRUT]: '{text}'")
-    text = filter_whisper_hallucinations(raw_text)
+    text = filter_whisper_hallucinations(raw_text, allow_short_confirmations=allow_short_confirmations)
     if raw_text and not text:
         filtered_noise_or_hallucination = True
     if not text:

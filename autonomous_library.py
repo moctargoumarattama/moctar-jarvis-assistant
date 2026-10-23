@@ -169,6 +169,50 @@ def execute_autonomous_task(
 
     tools_used: List[Dict[str, Any]] = []
 
+    # 0. CONFIRMATION OU PRÉCISION D'UNE ACTION GIT EN ATTENTE ("Oui", "Valide", "Je parle de Baba Market")
+    try:
+        from actions import project_actions
+        if project_actions.has_pending_git_action():
+            norm_conf = norm.strip(" .,:;!?'\"’«»")
+            if norm_conf in (
+                "oui", "oui vas-y", "oui vas y", "vas-y", "vas y", "valide", "on valide",
+                "confirme", "je confirme", "d'accord", "d accord", "ok", "envoie", "lance", "fais-le", "fais le",
+            ) or re.search(r"^(?:oui|valide|confirme|vas[- ]y|d['’]accord|envoie)\b", norm_conf):
+                res = project_actions.confirm_pending_git_action()
+                tools_used.append({"tool": "confirm_git_action", "arguments": {}, "success": bool(res.get("success", True))})
+                return {
+                    "handled": True,
+                    "reply": str(res.get("message") or "Opération Git validée et exécutée."),
+                    "tools_used": tools_used,
+                    "task_category": "git_dev",
+                }
+            if norm_conf in ("non", "annule", "on annule", "laisse tomber", "stop") or re.search(r"^(?:non|annule)\b", norm_conf):
+                res = project_actions.cancel_pending_git_action()
+                tools_used.append({"tool": "cancel_git_action", "arguments": {}, "success": True})
+                return {
+                    "handled": True,
+                    "reply": str(res.get("message") or "Opération Git annulée."),
+                    "tools_used": tools_used,
+                    "task_category": "git_dev",
+                }
+            if any(p in norm_conf for p in ("baba market", "papa market", "babamarket", "noor express", "edumanage")) and "git" not in norm_conf:
+                pending = project_actions.get_pending_git_action() or {}
+                clarified_key = "baba_market" if any(p in norm_conf for p in ("baba", "papa")) else ("noor_express" if "noor" in norm_conf else "edumanage")
+                clarified_label = "Baba Market" if clarified_key == "baba_market" else ("Noor Express" if clarified_key == "noor_express" else "EDUMANAGE")
+                if pending.get("type") in ("commit", "commit_and_push"):
+                    project_actions.prepare_commit(message=pending.get("message", "feat: update project"), project_key=clarified_key)
+                if pending.get("type") in ("push", "commit_and_push"):
+                    project_actions.prepare_push(project_key=clarified_key)
+                tools_used.append({"tool": "prepare_push", "arguments": {"project_key": clarified_key}, "success": True})
+                return {
+                    "handled": True,
+                    "reply": f"Le push pour {clarified_label} est prêt. On valide l'envoi vers le dépôt distant ?",
+                    "tools_used": tools_used,
+                    "task_category": "git_dev",
+                }
+    except Exception:
+        pass
+
     # 1. CATALOGUE & AIDE
     if any(k in norm for k in ["que peux tu faire", "que sais tu faire", "aide", "catalogue", "liste des taches", "taches autonomes", "menu des actions"]):
         return {
@@ -575,12 +619,12 @@ def execute_autonomous_task(
     # 4. CONTRÔLE MÉDIA UNIVERSEL EN 0 MS (PLAYERCTL, SPOTIFY, LECTEUR ACTIF)
     norm_stripped = norm.strip(" .,:;!?'\"’«»")
     is_media_pause = any(k in norm for k in [
-        "mets pause", "mets en pause", "mets sur pause", "en pause", "on pause",
+        "mets pause", "mets en pause", "mets sur pause",
         "stop la musique", "coupe la musique", "pause la musique", "arrete la musique", "arrête la musique",
         "pause musique", "pause youtube", "mets youtube en pause", "met youtube en pause", "youtube en pause",
         "j ai youtube en pause", "j'ai youtube en pause", "jai youtube en pause",
         "pause la video", "pause la vidéo", "pause le son",
-    ]) or norm_stripped in ("pause", "stop", "stop musique", "pause la musique") or bool(re.search(r"\b(?:pause|en\s+pause|on\s+pause|pause\s+youtube|youtube\s+en\s+pause)\b", norm))
+    ]) or norm_stripped in ("pause", "stop", "en pause", "on pause", "stop musique", "pause la musique", "pause video", "pause la video")
 
     is_media_play = any(k in norm for k in [
         "reprends la lecture", "remets la musique", "reprends la musique",
@@ -945,6 +989,24 @@ def execute_autonomous_task(
     elif "edumanage" in norm or "edu manage" in norm:
         target_git_project = "edumanage"
         git_project_label = "EDUMANAGE"
+    elif "jarvis" in norm:
+        target_git_project = "jarvis"
+        git_project_label = "Jarvis"
+    else:
+        try:
+            from actions import project_actions
+            curr_key = project_actions.get_current_project_key()
+            if curr_key == "baba_market":
+                target_git_project = "baba_market"
+                git_project_label = "Baba Market"
+            elif curr_key == "noor_express":
+                target_git_project = "noor_express"
+                git_project_label = "Noor Express"
+            elif curr_key == "edumanage":
+                target_git_project = "edumanage"
+                git_project_label = "EDUMANAGE"
+        except Exception:
+            pass
 
     if "git status" in norm or "statut git" in norm:
         res = actions.execute_tool("git_status", {"project_key": target_git_project})
