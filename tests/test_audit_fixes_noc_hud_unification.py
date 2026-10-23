@@ -269,11 +269,16 @@ class TestAuditFixesNocHudUnification(unittest.TestCase):
         self.assertTrue(main.is_direct_voice_command("Raconte une blague"))
         self.assertTrue(main.is_direct_voice_command("Tu m'entends ?"))
         self.assertTrue(main.is_direct_voice_command("Qui t'a créé ?"))
+        self.assertTrue(main.is_direct_voice_command("Moctar je te présente Karim"))
 
         # 2. Réponses locales instantanées (0ms) percutantes pour les démos
         rep_amis = main.handle_instant_local_command("Dis bonjour à mes amis")
         self.assertIsNotNone(rep_amis)
         self.assertIn("bienvenue", rep_amis.lower())
+
+        rep_pote = main.handle_instant_local_command("Je te présente Karim")
+        self.assertIsNotNone(rep_pote)
+        self.assertIn("enchanté karim", rep_pote.lower())
 
         rep_demo = main.handle_instant_local_command("Fais une démo")
         self.assertIsNotNone(rep_demo)

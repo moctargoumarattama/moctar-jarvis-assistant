@@ -29,6 +29,7 @@ import autonomous_library
 import collector
 import desktop_window_manager
 import dynamic_attention_engine
+import hud_state_manager
 import stt_phonetic_repair
 import voice_transcribe
 from ai_brain import build_live_system_context, get_cpu_temperature_celsius, voice_fast_llm_reply
@@ -281,6 +282,27 @@ async def generate_cached_tts_chunks(
     return full_url, chunk_urls
 
 
+async def _prewarm_common_voice_tts() -> None:
+    """Pré-synthétise et préchauffe en arrière-plan les réponses vocales courantes pour 0 ms de latence réseau."""
+    phrases = [
+        "À vos ordres Moctar, je vous écoute.",
+        "Bonjour à tous et bienvenue ! Je suis M.O.C.T.A.R, l'intelligence cybernétique et copilote d'ingénierie de Moctar. Ravi de faire votre connaissance !",
+        "Démonstration activée ! Je supervise le centre d'opérations NOC, pilote l'environnement de travail de Moctar, surveille les VPS, gère le code sur GitHub et automatise ses projets d'ingénierie en temps réel. Que souhaitez-vous voir en action ?",
+        "Il y a 10 types de personnes dans le monde : ceux qui comprennent le binaire, et ceux qui ne le comprennent pas !",
+        "Je vous entends 5 sur 5 avec une clarté optimale ! Je suis à votre écoute, Moctar.",
+        "J'ai été conçu, programmé et entraîné sur mesure par Moctar pour être son copilote d'ingénierie autonome et système d'intelligence opérationnelle.",
+        "Pardon, je t'écoute Moctar.",
+        "Je vous attends Moctar, prenez votre temps.",
+        "Oui Moctar, je suis là !",
+        "Pardon Moctar, je n'ai pas bien compris votre phrase. Pouvez-vous répéter ?",
+    ]
+    for p in phrases:
+        try:
+            await generate_cached_tts(p, DEFAULT_TTS_VOICE)
+        except Exception:
+            pass
+
+
 VOICE_SESSION_DURATION_SECONDS = float(os.getenv("VOICE_SESSION_DURATION_SECONDS", "0.0"))
 VOICE_BUTLER_GREETINGS = (
     "À vos ordres Moctar, je vous écoute.",
@@ -339,7 +361,7 @@ def is_direct_voice_command(text: str) -> bool:
     # 0. Salutations directes & Démos pour amis / invités (Ne JAMAIS ignorer une salutation ou démo)
     if re.search(r"^(?:bonjour|salut|bonsoir|coucou|yo|hello)(?:\s+|$)", norm) or norm in ("bonjour", "salut", "bonsoir", "coucou", "yo", "hello"):
         return True
-    if re.search(r"\b(?:dis\s+bonjour|salue|passe\s+le\s+bonjour|pr[ée]sente[- ]toi|fais\s+(?:une\s+)?d[ée]mo(?:nstration)?|montre\s+(?:ce\s+que\s+tu\s+sais\s+faire|nous)|qu['’]est[- ]ce\s+que\s+tu\s+sais\s+faire)\b", norm):
+    if re.search(r"\b(?:dis\s+bonjour|salue|passe\s+le\s+bonjour|pr[ée]sente[- ]toi|fais\s+(?:une\s+)?d[ée]mo(?:nstration)?|montre\s+(?:ce\s+que\s+tu\s+sais\s+faire|nous)|qu['’]est[- ]ce\s+que\s+tu\s+sais\s+faire|je\s+te\s+pr[ée]sente|voici\s+(?:mon\s+ami|mon\s+pote|mon\s+coll[èe]gue))\b", norm):
         return True
     if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague|qui\s+t['’]a\s+(?:cr[ée][ée]|con[çc]u)|tu\s+m['’]entends|tu\s+nous\s+entends|test\s+micro)\b", norm):
         return True
@@ -540,6 +562,18 @@ def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
     # 0a2. Salutations d'Amis & Invités en Démonstration ("dis bonjour à mes amis", "salue mes potes", "dis bonjour à tout le monde")
     if re.search(r"\b(?:dis\s+bonjour|salue|passe\s+le\s+bonjour)\s+(?:[aà]\s+)?(?:mes\s+(?:amis|potes|invit[ée]s|coll[èe]gues)|tout\s+le\s+monde|la\s+famille|l['’][ée]quipe)\b", normalized):
         return "Bonjour à tous et bienvenue ! Je suis M.O.C.T.A.R, l'intelligence cybernétique et copilote d'ingénierie de Moctar. Ravi de faire votre connaissance !"
+
+    # 0a2b. Présentation personnalisée d'un ami ("je te présente Karim", "voici mon ami Youssef")
+    match_intro = re.search(r"\b(?:je\s+te\s+pr[ée]sente|voici\s+(?:mon\s+ami|mon\s+pote|mon\s+coll[èe]gue)?)\s+([A-ZÀ-ÿa-z-]{2,20})\b", cleaned, re.IGNORECASE)
+    if match_intro:
+        friend_name = match_intro.group(1).capitalize()
+        if friend_name.lower() not in ("moctar", "moktar", "un", "une", "mon", "ce", "cette", "le", "la"):
+            if memory and hasattr(memory, "save_fact"):
+                try:
+                    memory.save_fact("known_friends", friend_name.lower(), f"Ami de Moctar : {friend_name}", importance=3)
+                except Exception:
+                    pass
+            return f"Enchanté {friend_name} ! Bienvenue sur le poste de travail et centre de commandement de Moctar. Ravi de faire ta connaissance !"
 
     # 0a3. Démonstration des capacités du système ("fais une démo", "fais une démonstration", "montre ce que tu sais faire")
     if re.search(r"\b(?:fais\s+(?:une\s+)?d[ée]mo(?:nstration)?|montre\s+(?:ce\s+que\s+tu\s+sais\s+faire|nous)|qu['’]est[- ]ce\s+que\s+tu\s+sais\s+faire)\b", normalized):
@@ -1225,6 +1259,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await runtime.whatsapp.start()
         task = asyncio.create_task(runtime.collect_loop(), name="noc-collector")
         runtime.collect_task = task
+        asyncio.create_task(_prewarm_common_voice_tts(), name="tts-cache-prewarm")
         try:
             from native_voice_daemon import NativeVoiceDaemon
             NativeVoiceDaemon.get_instance().start()
