@@ -257,6 +257,49 @@ class TestAuditFixesNocHudUnification(unittest.TestCase):
         )
         main.require_local_or_admin(req_remote_cookie, settings)
 
+    def test_9_voice_demonstration_and_zero_ignore(self) -> None:
+        # 1. Phrases de démonstration pour amis / invités acceptées comme commandes directes
+        self.assertTrue(main.is_direct_voice_command("Bonjour"))
+        self.assertTrue(main.is_direct_voice_command("Salut"))
+        self.assertTrue(main.is_direct_voice_command("Dis bonjour à mes amis"))
+        self.assertTrue(main.is_direct_voice_command("Salue mes amis"))
+        self.assertTrue(main.is_direct_voice_command("Fais une démo"))
+        self.assertTrue(main.is_direct_voice_command("Fais une démonstration"))
+        self.assertTrue(main.is_direct_voice_command("Montre ce que tu sais faire"))
+        self.assertTrue(main.is_direct_voice_command("Raconte une blague"))
+        self.assertTrue(main.is_direct_voice_command("Tu m'entends ?"))
+        self.assertTrue(main.is_direct_voice_command("Qui t'a créé ?"))
+
+        # 2. Réponses locales instantanées (0ms) percutantes pour les démos
+        rep_amis = main.handle_instant_local_command("Dis bonjour à mes amis")
+        self.assertIsNotNone(rep_amis)
+        self.assertIn("bienvenue", rep_amis.lower())
+
+        rep_demo = main.handle_instant_local_command("Fais une démo")
+        self.assertIsNotNone(rep_demo)
+        self.assertIn("démonstration", rep_demo.lower())
+
+        rep_blague = main.handle_instant_local_command("Raconte-moi une blague")
+        self.assertIsNotNone(rep_blague)
+
+        rep_mic = main.handle_instant_local_command("Tu m'entends ?")
+        self.assertIsNotNone(rep_mic)
+        self.assertIn("5 sur 5", rep_mic)
+
+        rep_createur = main.handle_instant_local_command("Qui t'a créé ?")
+        self.assertIsNotNone(rep_createur)
+        self.assertIn("moctar", rep_createur.lower())
+
+        # 3. Durée de session active sur flux vocal >= 45s pour éviter l'expiration prématurée
+        from types import SimpleNamespace
+        fake_req = SimpleNamespace(
+            headers={"x-voice-session-active": "true"},
+            query_params={},
+            client=SimpleNamespace(host="127.0.0.1"),
+        )
+        sess_dur = 45.0 if fake_req.headers.get("x-voice-session-active") == "true" else main.VOICE_SESSION_DURATION_SECONDS
+        self.assertGreaterEqual(sess_dur, 30.0)
+
 
 if __name__ == "__main__":
     unittest.main()

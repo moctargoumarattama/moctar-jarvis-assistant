@@ -12,9 +12,9 @@
     "m'occupe tard", 'moccupe tard', "m'occaque", 'moccaque', 'jarvis',
     'yo elmo', 'hey elmo', 'hey el mo', 'el mo', 'elmo',
   ];
-  const DEFAULT_FOLLOWUP_MS = 0;
+  const DEFAULT_FOLLOWUP_MS = 20000;
   const GREETING = 'À vos ordres Moctar, je vous écoute.';
-  const WAKE_READY_MESSAGE = "🟢 À l'écoute — Dites « Yo Moctar »";
+  const WAKE_READY_MESSAGE = "🟢 À l'écoute — Parlez librement";
   const VOICE_DETECTED_MESSAGE = '🎙️ Moctar vous écoute...';
   const THINKING_MESSAGE = '⚡ M.O.C.T.A.R calcule la réponse...';
 
@@ -68,9 +68,9 @@
     const fetchImpl = opts.fetch || (typeof win.fetch === 'function' ? win.fetch.bind(win) : (typeof fetch === 'function' ? fetch : null));
     const interactUrl = opts.interactUrl || '/api/voice/interact';
     const vadSilenceMs = typeof opts.vadSilenceMs === 'number' ? opts.vadSilenceMs : 900;
-    const vadThreshold = typeof opts.vadThreshold === 'number' ? opts.vadThreshold : 0.035;
-    const minRecordingMs = typeof opts.minRecordingMs === 'number' ? opts.minRecordingMs : 1200;
-    const maxSpeechMs = typeof opts.maxSpeechMs === 'number' ? opts.maxSpeechMs : 3500;
+    const vadThreshold = typeof opts.vadThreshold === 'number' ? opts.vadThreshold : 0.016;
+    const minRecordingMs = typeof opts.minRecordingMs === 'number' ? opts.minRecordingMs : 400;
+    const maxSpeechMs = typeof opts.maxSpeechMs === 'number' ? opts.maxSpeechMs : 15000;
     const frameIntervalMs = typeof opts.frameIntervalMs === 'number' ? opts.frameIntervalMs : (1000 / 60);
     const highpassFrequencyHz = typeof opts.highpassFrequencyHz === 'number' ? opts.highpassFrequencyHz : 120;
 
@@ -998,14 +998,14 @@
           (typeof document !== 'undefined' && document.querySelector('audio:not([paused]), video:not([paused])'))
         );
 
-        // Suivi adaptatif de l'empreinte sonore du PC et du bruit ambiant
+        // Suivi adaptatif de l'empreinte sonore du PC et du bruit ambiant (plafonné pour ne jamais bloquer la voix)
         if (!isSpeaking) {
-          ambientNoiseFloor = ambientNoiseFloor * 0.95 + rmsLevel * 0.05;
+          ambientNoiseFloor = Math.min(0.02, ambientNoiseFloor * 0.95 + rmsLevel * 0.05);
         }
 
-        // Seuil VAD dynamique : s'élève si de la musique ou un son joue sur le PC pour ignorer l'audio
-        const baseThreshold = isPcAudioPlaying ? Math.max(vadThreshold * 1.8, 0.065) : vadThreshold;
-        const dynamicVadThreshold = Math.max(baseThreshold, ambientNoiseFloor * 2.2);
+        // Seuil VAD dynamique : sensible et réactif, ne s'élève modérément que si du son PC joue
+        const baseThreshold = isPcAudioPlaying ? Math.max(vadThreshold * 1.5, 0.04) : vadThreshold;
+        const dynamicVadThreshold = Math.min(0.036, Math.max(baseThreshold, ambientNoiseFloor * 1.5));
 
         if (isPushToTalk) {
           recordingElapsedMs += frameIntervalMs;

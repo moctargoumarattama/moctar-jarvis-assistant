@@ -335,6 +335,18 @@ def is_direct_voice_command(text: str) -> bool:
     # Réparation phonétique amont préalable pour reconnaître les commandes vocales altérées
     repaired, _ = stt_phonetic_repair.repair_stt_transcript(text)
     norm = _strip_accents_1to1(repaired).lower().strip()
+
+    # 0. Salutations directes & Démos pour amis / invités (Ne JAMAIS ignorer une salutation ou démo)
+    if re.search(r"^(?:bonjour|salut|bonsoir|coucou|yo|hello)(?:\s+|$)", norm) or norm in ("bonjour", "salut", "bonsoir", "coucou", "yo", "hello"):
+        return True
+    if re.search(r"\b(?:dis\s+bonjour|salue|passe\s+le\s+bonjour|pr[ée]sente[- ]toi|fais\s+(?:une\s+)?d[ée]mo(?:nstration)?|montre\s+(?:ce\s+que\s+tu\s+sais\s+faire|nous)|qu['’]est[- ]ce\s+que\s+tu\s+sais\s+faire)\b", norm):
+        return True
+    if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague|qui\s+t['’]a\s+(?:cr[ée][ée]|con[çc]u)|tu\s+m['’]entends|tu\s+nous\s+entends|test\s+micro)\b", norm):
+        return True
+    # Questions ouvertes directes
+    if re.search(r"^(?:comment|pourquoi|qu['’]est[- ]ce\s+que|c['’]est\s+quoi|qui\s+est|qui\s+a|quel|quelle|combien|est[- ]ce\s+que|peux[- ]tu|dis[- ]moi|donne[- ]moi|raconte|explique|cherche)\b", norm):
+        return True
+
     # 1. Bureau, VS Code & Lancement d'Applications
     if any(k in norm for k in (
         "au bureau", "mode bureau", "mets-toi a mon bureau", "mets-toi au bureau",
@@ -524,6 +536,26 @@ def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
 
     if re.search(r"\b(?:attends?\s*(?:voir)?)\b", normalized) or normalized in ("attends", "attends voir"):
         return "Je vous attends Moctar, prenez votre temps."
+
+    # 0a2. Salutations d'Amis & Invités en Démonstration ("dis bonjour à mes amis", "salue mes potes", "dis bonjour à tout le monde")
+    if re.search(r"\b(?:dis\s+bonjour|salue|passe\s+le\s+bonjour)\s+(?:[aà]\s+)?(?:mes\s+(?:amis|potes|invit[ée]s|coll[èe]gues)|tout\s+le\s+monde|la\s+famille|l['’][ée]quipe)\b", normalized):
+        return "Bonjour à tous et bienvenue ! Je suis M.O.C.T.A.R, l'intelligence cybernétique et copilote d'ingénierie de Moctar. Ravi de faire votre connaissance !"
+
+    # 0a3. Démonstration des capacités du système ("fais une démo", "fais une démonstration", "montre ce que tu sais faire")
+    if re.search(r"\b(?:fais\s+(?:une\s+)?d[ée]mo(?:nstration)?|montre\s+(?:ce\s+que\s+tu\s+sais\s+faire|nous)|qu['’]est[- ]ce\s+que\s+tu\s+sais\s+faire)\b", normalized):
+        return "Démonstration activée ! Je supervise le centre d'opérations NOC, pilote l'environnement de travail de Moctar, surveille les VPS, gère le code sur GitHub et automatise ses projets d'ingénierie en temps réel. Que souhaitez-vous voir en action ?"
+
+    # 0a4. Humour & Blagues pour démonstration ("raconte une blague", "fais-nous rire")
+    if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague)\b", normalized):
+        return "Il y a 10 types de personnes dans le monde : ceux qui comprennent le binaire, et ceux qui ne le comprennent pas !"
+
+    # 0a5. Test Micro & Écoute ("tu m'entends", "tu nous entends", "test micro")
+    if re.search(r"\b(?:tu\s+m['’]entends|tu\s+nous\s+entends|m['’]entends[- ]tu|test\s+micro|tu\s+m['’][ée]coutes)\b", normalized):
+        return "Je vous entends 5 sur 5 avec une clarté optimale ! Je suis à votre écoute, Moctar."
+
+    # 0a6. Créateur & Origine du système ("qui t'a créé", "qui t'a conçu", "qui est ton créateur")
+    if re.search(r"\b(?:qui\s+t['’]a\s+(?:cr[ée][ée]|con[çc]u|d[ée]velopp[ée]|programm[ée])|qui\s+est\s+ton\s+cr[ée]ateur|c['’]est\s+qui\s+ton\s+cr[ée]ateur)\b", normalized):
+        return "J'ai été conçu, programmé et entraîné sur mesure par Moctar pour être son copilote d'ingénierie autonome et système d'intelligence opérationnelle."
 
     # 0b. Présence complice ("t'es là", "tu es là")
     if re.search(r"\b(?:t['’]es\s+l[aà]|tu\s+es\s+l[aà]|es[- ]tu\s+l[aà])\b", normalized):
@@ -1890,6 +1922,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             )
 
+        # Filtrage acoustique : si le PC joue du son (YouTube, musique), ignorer les bruits sans mot-clé explicite
+        pc_playing = False
+        try:
+            import native_voice_daemon
+            pc_playing = native_voice_daemon.is_pc_audio_playing()
+        except Exception:
+            pass
+
         accepted, command_text, wake_detected = extract_voice_interact_command(
             repaired_transcript,
             session_active=session_active,
@@ -1908,14 +1948,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             )
 
-        # Filtrage acoustique : si le PC joue du son (YouTube, musique), ignorer les bruits sans mot-clé explicite
-        pc_playing = False
-        try:
-            import native_voice_daemon
-            pc_playing = native_voice_daemon.is_pc_audio_playing()
-        except Exception:
-            pass
-
         if pc_playing and not wake_detected and not header_barge_in and not header_session:
             LOGGER.info("🔇 [PC AUDIO BLEED IGNORED]: Son PC en cours et mot-clé absent ('%s')", transcript)
             return JSONResponse(
@@ -1930,7 +1962,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             )
 
-        runtime.voice_session_until = time.monotonic() + VOICE_SESSION_DURATION_SECONDS
+        session_duration = VOICE_SESSION_DURATION_SECONDS if VOICE_SESSION_DURATION_SECONDS > 0 else (45.0 if (header_session or header_barge_in or query_session) else 0.0)
+        runtime.voice_session_until = time.monotonic() + session_duration
 
         agent_result: dict[str, Any] = {}
         memory_instance = getattr(getattr(runtime, "jarvis", None), "memory", None)
@@ -2094,7 +2127,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "audio_url": audio_url,
                 "audio_chunks": audio_chunks,
                 "first_chunk_audio_url": audio_chunks[0] if audio_chunks else audio_url,
-                "session_active": bool(runtime.voice_session_until > time.monotonic() or (header_session and not attention.get("should_disengage")) or (header_barge_in and not attention.get("should_disengage"))),
+                "session_active": bool(
+                    (runtime.voice_session_until > time.monotonic() and (session_duration > 0 or reply_text.strip().endswith("?")))
+                    or (header_session and not attention.get("should_disengage"))
+                    or (header_barge_in and not attention.get("should_disengage"))
+                ),
                 "wake_word_detected": wake_detected,
                 "action": agent_result.get("action"),
                 "url": agent_result.get("url"),

@@ -124,7 +124,7 @@ def play_local_audio(file_path: Path | str) -> bool:
         return False
 
 
-def record_system_audio_wav(duration_seconds: float = 4.0, sample_rate: int = 16000) -> Optional[bytes]:
+def record_system_audio_wav(duration_seconds: float = 5.0, sample_rate: int = 16000) -> Optional[bytes]:
     """Enregistre un échantillon audio mono 16-bit PCM depuis le microphone matériel."""
     recorder = find_audio_recorder()
     if not recorder:
@@ -254,7 +254,7 @@ class NativeVoiceDaemon:
             except Exception as exc:
                 time.sleep(1.0)
 
-    def trigger_interaction_flow(self, duration_seconds: float = 4.0) -> Optional[Dict[str, Any]]:
+    def trigger_interaction_flow(self, duration_seconds: float = 5.0) -> Optional[Dict[str, Any]]:
         """Déclenche la capture audio du micro, la transcription et la réponse vocale locale."""
         LOGGER.info("🎙️ [NATIVE DAEMON]: Déclenchement de la capture audio système (%ss)...", duration_seconds)
         wav_bytes = record_system_audio_wav(duration_seconds=duration_seconds)
