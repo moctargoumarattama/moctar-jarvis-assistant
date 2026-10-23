@@ -723,13 +723,38 @@ def execute_autonomous_task(
         msg = res.get("message") if isinstance(res, dict) else str(res)
         return {"handled": True, "reply": f"⏯️ {msg}", "tools_used": tools_used, "task_category": "iot_music"}
 
-    # 5. OUVERTURE DE SITES OU APPLICATIONS (FAST-PATH UNIVERSEL)
+    # 5. OUVERTURE DE SITES, PROJETS OU APPLICATIONS (FAST-PATH UNIVERSEL)
     open_verbs = ("ouvre", "lance", "va sur", "ouve", "demarre", "start")
     if any(norm.startswith(v + " ") for v in open_verbs):
         for v in open_verbs:
             if norm.startswith(v + " "):
                 target = raw_query[len(v):].strip()
                 target_norm = _normalize(target)
+
+                # Projet de développement ("ouvre le projet Baba Market", "ouvre Baba Market dans VS Code")
+                if "projet" in target_norm or any(p in target_norm for p in ("baba market", "papa market", "noor express", "edumanage", "audit energetique")):
+                    proj_key = "jarvis"
+                    if any(p in target_norm for p in ("baba", "papa")):
+                        proj_key = "baba_market"
+                    elif "noor" in target_norm:
+                        proj_key = "noor_express"
+                    elif "edumanage" in target_norm or "edu manage" in target_norm:
+                        proj_key = "edumanage"
+                    elif "audit" in target_norm or "monitoring" in target_norm:
+                        proj_key = "audit_energetique"
+                    in_vscode = any(c in target_norm for c in ("vscode", "vs code", "code", "visual studio", "visuel studio"))
+                    proj_res = actions.execute_tool("open_project", {"project_key": proj_key, "open_in_vscode": in_vscode})
+                    tools_used.append({"tool": "open_project", "arguments": {"project_key": proj_key, "open_in_vscode": in_vscode}, "success": bool(proj_res.get("success"))})
+                    msg = proj_res.get("message") if isinstance(proj_res, dict) else str(proj_res)
+                    return {
+                        "handled": True,
+                        "reply": f"🛠️ {msg}",
+                        "action": "open_app",
+                        "url": None,
+                        "title": proj_key,
+                        "tools_used": tools_used,
+                        "task_category": "git_dev",
+                    }
 
                 # Application locale
                 if any(app in target_norm for app in [
@@ -772,6 +797,28 @@ def execute_autonomous_task(
                     "tools_used": tools_used,
                     "task_category": "web_nav",
                 }
+
+    # CONTRÔLE CONTEXTUEL DES FENÊTRES ("ferme ça", "mets-le à droite", "mets-le à gauche", "plein écran")
+    if re.search(r"\b(?:ferme|quitte)\s+(?:[cç]a|le|la|cette\s+fen[êe]tre|l['’]appli?)\b", norm) or norm in (
+        "ferme ca", "ferme ça", "ferme le", "quitte ca", "quitte ça", "ferme la fenetre", "ferme la fenêtre",
+    ):
+        win_res = actions.execute_tool("close_active_window", {})
+        tools_used.append({"tool": "close_active_window", "arguments": {}, "success": bool(win_res.get("success", True))})
+        msg = win_res.get("message") if isinstance(win_res, dict) else str(win_res)
+        return {"handled": True, "reply": msg, "tools_used": tools_used, "task_category": "system_tools"}
+
+    if re.search(r"\b(?:mets?[-\s]le\s+[aà]\s+(?:droite|gauche)|place\s+[aà]\s+(?:droite|gauche)|snap\s+(?:right|left)|plein\s+[ée]cran|maximise|minimise|r[ée]duis)\b", norm):
+        pos = "maximize"
+        if "droite" in norm or "right" in norm:
+            pos = "right"
+        elif "gauche" in norm or "left" in norm:
+            pos = "left"
+        elif "minimise" in norm or "reduis" in norm or "réduis" in norm:
+            pos = "minimize"
+        snap_res = actions.execute_tool("snap_active_window", {"position": pos})
+        tools_used.append({"tool": "snap_active_window", "arguments": {"position": pos}, "success": bool(snap_res.get("success", True))})
+        msg = snap_res.get("message") if isinstance(snap_res, dict) else str(snap_res)
+        return {"handled": True, "reply": msg, "tools_used": tools_used, "task_category": "system_tools"}
 
     # FERMETURE D'APPLICATION
     if norm.startswith("ferme ") and not any(w in norm for w in ("musique", "son", "onglet", "session")):
@@ -940,6 +987,30 @@ def execute_autonomous_task(
         except Exception:
             pass
 
+    store_fact_match = re.search(r"^(?:m[ée]morise|retiens\s+que|souviens[- ]toi\s+que)\s+(.+)$", raw_query, flags=re.IGNORECASE)
+    if store_fact_match:
+        fact_val = store_fact_match.group(1).strip()
+        res = actions.execute_tool("store_memory_fact", {"category": "note_vocale", "key": fact_val[:30], "value": fact_val})
+        tools_used.append({"tool": "store_memory_fact", "arguments": {"value": fact_val}, "success": bool(res.get("success", True))})
+        msg = res.get("message") if isinstance(res, dict) else str(res)
+        return {"handled": True, "reply": f"🧠 {msg}", "tools_used": tools_used, "task_category": "productivity"}
+
+    search_mem_match = re.search(r"^(?:cherche\s+dans\s+mes\s+notes|cherche\s+dans\s+ma\s+m[ée]moire)\s+(.+)$", raw_query, flags=re.IGNORECASE)
+    if search_mem_match:
+        q_mem = search_mem_match.group(1).strip()
+        res = actions.execute_tool("search_memory_facts", {"query": q_mem})
+        tools_used.append({"tool": "search_memory_facts", "arguments": {"query": q_mem}, "success": bool(res.get("success", True))})
+        msg = res.get("message") if isinstance(res, dict) else str(res)
+        return {"handled": True, "reply": f"🔍 {msg}", "tools_used": tools_used, "task_category": "productivity"}
+
+    sum_file_match = re.search(r"^(?:r[ée]sume\s+le\s+fichier|lis\s+le\s+fichier)\s+(.+)$", raw_query, flags=re.IGNORECASE)
+    if sum_file_match:
+        f_path = sum_file_match.group(1).strip()
+        res = actions.execute_tool("summarize_text_file", {"file_path": f_path})
+        tools_used.append({"tool": "summarize_text_file", "arguments": {"file_path": f_path}, "success": bool(res.get("success", True))})
+        msg = res.get("message") if isinstance(res, dict) else str(res)
+        return {"handled": True, "reply": f"📄 {msg}", "tools_used": tools_used, "task_category": "productivity"}
+
     # 10. GÉNIE ÉNERGÉTIQUE & SOLAIRE
     if any(k in norm for k in ["solaire", "panneaux solaires", "dimensionnement solaire"]):
         match_kwh = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:kwh|kw|wh)?", norm)
@@ -959,7 +1030,7 @@ def execute_autonomous_task(
             "task_category": "energy",
         }
 
-    if any(k in norm for k in ["batterie solaire", "dimensionnement batterie"]):
+    if any(k in norm for k in ["batterie solaire", "dimensionnement batterie", "calcul batterie", "capacite ah"]):
         match_kwh = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:kwh|kw)?", norm)
         kwh = float(match_kwh.group(1).replace(",", ".")) if match_kwh else 5.0
         res = actions.execute_tool("calculate_battery_sizing", {"energy_kwh": kwh, "system_voltage": 24, "autonomy_days": 1})
@@ -976,6 +1047,38 @@ def execute_autonomous_task(
             "tools_used": tools_used,
             "task_category": "energy",
         }
+
+    if any(k in norm for k in ["calcul onduleur", "puissance onduleur", "dimensionnement onduleur", "marge securite onduleur"]):
+        match_w = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:w|kw)?", norm)
+        peak_w = float(match_w.group(1).replace(",", ".")) if match_w else 2000.0
+        res = actions.execute_tool("calculate_inverter_sizing", {"peak_power_w": peak_w})
+        tools_used.append({"tool": "calculate_inverter_sizing", "arguments": {"peak_power_w": peak_w}, "success": True})
+        msg = res.get("message") if isinstance(res, dict) else str(res)
+        return {"handled": True, "reply": f"⚡ {msg}", "tools_used": tools_used, "task_category": "energy"}
+
+    if any(k in norm for k in ["calcul consommation", "kwh consommes", "puissance totale"]):
+        res = actions.execute_tool("calculate_consumption", {"power_watts": 500.0, "hours_per_day": 8.0})
+        tools_used.append({"tool": "calculate_consumption", "arguments": {"power_watts": 500.0, "hours_per_day": 8.0}, "success": True})
+        msg = res.get("message") if isinstance(res, dict) else str(res)
+        return {"handled": True, "reply": f"⚡ {msg}", "tools_used": tools_used, "task_category": "energy"}
+
+    if any(k in norm for k in ["cout kwh", "facture electricite", "prix energie", "cout energetique"]):
+        res = actions.execute_tool("calculate_energy_cost", {"daily_kwh": 10.0, "price_per_kwh": 1.2})
+        tools_used.append({"tool": "calculate_energy_cost", "arguments": {"daily_kwh": 10.0, "price_per_kwh": 1.2}, "success": True})
+        msg = res.get("message") if isinstance(res, dict) else str(res)
+        return {"handled": True, "reply": f"💰 {msg}", "tools_used": tools_used, "task_category": "energy"}
+
+    if any(k in norm for k in ["canevas audit", "modele audit energetique", "audit energetique"]):
+        res = actions.execute_tool("generate_audit_template", {})
+        tools_used.append({"tool": "generate_audit_template", "arguments": {}, "success": True})
+        msg = res.get("message") if isinstance(res, dict) else str(res)
+        return {"handled": True, "reply": f"📋 {msg}", "tools_used": tools_used, "task_category": "energy"}
+
+    if any(k in norm for k in ["formules solaires", "equations photovoltaiques", "formules energie"]):
+        res = actions.execute_tool("describe_formulae", {})
+        tools_used.append({"tool": "describe_formulae", "arguments": {}, "success": True})
+        msg = res.get("message") if isinstance(res, dict) else str(res)
+        return {"handled": True, "reply": f"📐 {msg}", "tools_used": tools_used, "task_category": "energy"}
 
     # 11. GIT & PROJETS
     target_git_project = ""
@@ -1061,7 +1164,20 @@ def execute_autonomous_task(
         return {"handled": True, "reply": f"📋 **Checklist de Maintenance :**\n{msg}", "tools_used": tools_used, "task_category": "git_dev"}
 
     # 12. DOMOTIQUE IOT
-    if any(k in norm for k in ["iot", "domotique", "capteurs"]):
+    if any(k in norm for k in ["temperature salon", "sonde ambiance", "capteur dht", "temperature piece", "température salon"]):
+        res = actions.execute_tool("get_iot_temperature", {"room": "salon"})
+        tools_used.append({"tool": "get_iot_temperature", "arguments": {"room": "salon"}, "success": bool(res.get("success", True))})
+        msg = res.get("message") if isinstance(res, dict) else str(res)
+        return {"handled": True, "reply": f"🌡️ {msg}", "tools_used": tools_used, "task_category": "iot_music"}
+
+    if any(k in norm for k in ["allume la lampe", "eteins la lampe", "éteins la lampe", "allume le relais", "eteins le relais", "switch prise"]):
+        state = "on" if "allume" in norm else "off"
+        res = actions.execute_tool("set_relay_state", {"relay_name": "lampe_salon", "state": state})
+        tools_used.append({"tool": "set_relay_state", "arguments": {"relay_name": "lampe_salon", "state": state}, "success": bool(res.get("success", True))})
+        msg = res.get("message") if isinstance(res, dict) else str(res)
+        return {"handled": True, "reply": f"💡 {msg}", "tools_used": tools_used, "task_category": "iot_music"}
+
+    if any(k in norm for k in ["iot", "domotique", "capteurs", "statut relais"]):
         res = actions.execute_tool("get_iot_status", {})
         tools_used.append({"tool": "get_iot_status", "arguments": {}, "success": bool(res.get("success"))})
         msg = res.get("message") if isinstance(res, dict) else str(res)

@@ -109,6 +109,8 @@ from .personal_actions import (
 
 # 7. Project Actions
 from .project_actions import (
+    cancel_pending_git_action,
+    confirm_pending_git_action,
     get_project_context,
     git_log,
     git_pull,
@@ -216,6 +218,8 @@ TOOL_DISPATCHER: Dict[str, Callable[..., Any]] = {
     "git_log": git_log,
     "prepare_commit": prepare_commit,
     "prepare_push": prepare_push,
+    "confirm_git_action": confirm_pending_git_action,
+    "cancel_git_action": cancel_pending_git_action,
     "maintenance_checklist": maintenance_checklist,
     "summarize_tabular_file": summarize_tabular_file,
     "get_project_context": get_project_context,

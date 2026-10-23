@@ -195,6 +195,21 @@ class TestAuditFixesNocHudUnification(unittest.TestCase):
         self.assertEqual(res_conf.get("task_category"), "git_dev")
         self.assertFalse(project_actions.has_pending_git_action())
 
+        # 5. Durcissement des modules autonomes (ouverture projet Baba Market, fenêtres, onduleur, IoT)
+        res_proj = autonomous_library.execute_autonomous_task("Ouvre le projet Baba Market")
+        self.assertTrue(res_proj.get("handled"))
+        self.assertEqual(res_proj.get("task_category"), "git_dev")
+        self.assertEqual(res_proj["tools_used"][0]["tool"], "open_project")
+        self.assertEqual(res_proj["tools_used"][0]["arguments"]["project_key"], "baba_market")
+
+        res_inv = autonomous_library.execute_autonomous_task("calcul onduleur 3000W")
+        self.assertTrue(res_inv.get("handled"))
+        self.assertEqual(res_inv["tools_used"][0]["tool"], "calculate_inverter_sizing")
+
+        res_iot = autonomous_library.execute_autonomous_task("allume la lampe")
+        self.assertTrue(res_iot.get("handled"))
+        self.assertEqual(res_iot["tools_used"][0]["tool"], "set_relay_state")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -420,6 +420,22 @@ VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "confirm_git_action",
+            "description": "Confirme et exécute immédiatement le commit ou le push Git en attente lorsque Moctar dit 'oui', 'valide', 'confirme' ou 'vas-y'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_key": {
+                        "type": "string",
+                        "description": "Clé optionnelle du projet cible.",
+                    }
+                },
+            },
+        },
+    },
 ]
 
 VOICE_FAST_TEMPERATURE: float = 0.6
