@@ -210,6 +210,49 @@ class TestAuditFixesNocHudUnification(unittest.TestCase):
         self.assertTrue(res_iot.get("handled"))
         self.assertEqual(res_iot["tools_used"][0]["tool"], "set_relay_state")
 
+    def test_8_security_guard_local_vs_remote_and_csrf(self) -> None:
+        from types import SimpleNamespace
+        from fastapi import HTTPException
+        from config import Settings
+
+        settings = Settings(admin_token="secret-admin-moctar")
+
+        # 1. Poste local (127.0.0.1) sans Origin malveillant -> autorisé sans friction
+        req_local = SimpleNamespace(
+            client=SimpleNamespace(host="127.0.0.1"),
+            headers={},
+            url="http://localhost:5050/api/jarvis/query",
+        )
+        main.require_local_or_admin(req_local, settings)
+
+        # 2. Tentative CSRF depuis un site tiers (Sec-Fetch-Site: cross-site) -> bloqué 403
+        req_csrf = SimpleNamespace(
+            client=SimpleNamespace(host="127.0.0.1"),
+            headers={"sec-fetch-site": "cross-site", "origin": "https://evil.example.com"},
+            url="http://localhost:5050/api/jarvis/query",
+        )
+        with self.assertRaises(HTTPException) as ctx_csrf:
+            main.require_local_or_admin(req_csrf, settings)
+        self.assertEqual(ctx_csrf.exception.status_code, 403)
+
+        # 3. Accès distant (LAN / Internet) sans jeton -> bloqué 403
+        req_remote_unauth = SimpleNamespace(
+            client=SimpleNamespace(host="192.168.1.88"),
+            headers={},
+            url="http://192.168.1.10:5050/api/jarvis/query",
+        )
+        with self.assertRaises(HTTPException) as ctx_remote:
+            main.require_local_or_admin(req_remote_unauth, settings)
+        self.assertEqual(ctx_remote.exception.status_code, 403)
+
+        # 4. Accès distant avec X-Admin-Token valide -> autorisé
+        req_remote_auth = SimpleNamespace(
+            client=SimpleNamespace(host="192.168.1.88"),
+            headers={"x-admin-token": "secret-admin-moctar"},
+            url="http://192.168.1.10:5050/api/jarvis/query",
+        )
+        main.require_local_or_admin(req_remote_auth, settings)
+
 
 if __name__ == "__main__":
     unittest.main()

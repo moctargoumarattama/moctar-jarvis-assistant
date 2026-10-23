@@ -890,6 +890,9 @@ def token_matches(received: str | None, expected: str) -> bool:
     return bool(expected and received and hmac.compare_digest(received.encode(), expected.encode()))
 
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient", ""}
+
+
 def same_origin(request: Request) -> None:
     # Les actions web sont directes ; une page tierce ne peut pas les déclencher.
     site = request.headers.get("sec-fetch-site")
@@ -910,6 +913,24 @@ def same_origin(request: Request) -> None:
             raise HTTPException(403, "Origine non autorisée") from None
         if not valid:
             raise HTTPException(403, "Origine non autorisée")
+
+
+def require_local_or_admin(request: Request, settings: Settings) -> None:
+    """Autorise le poste local (loopback) sans friction et exige un jeton valide pour tout accès réseau externe."""
+    same_origin(request)
+    peer = (request.client.host if request.client else "").strip().lower()
+    if peer in _LOOPBACK_HOSTS:
+        return
+    auth_header = request.headers.get("authorization", "")
+    bearer = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+    admin_tok = request.headers.get("x-admin-token") or bearer
+    if settings.admin_token and token_matches(admin_tok, settings.admin_token):
+        return
+    if settings.gateway_secret and token_matches(request.headers.get("x-gateway-secret"), settings.gateway_secret):
+        return
+    if settings.vps_token and token_matches(request.headers.get("x-vps-token"), settings.vps_token):
+        return
+    raise HTTPException(403, "Accès distant refusé : réservé au poste local Moctar ou jeton administrateur requis")
 
 
 class Runtime:
@@ -1143,6 +1164,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.post("/api/hud/view")
     async def set_hud_view_endpoint(request: Request):
+        require_local_or_admin(request, settings)
         import hud_state_manager
         try:
             body = await request.json()
@@ -1327,7 +1349,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.post("/api/service/{name}/restart")
     async def restart(name: str, request: Request):
-        same_origin(request)
+        require_local_or_admin(request, settings)
         if name not in RESTART_ALLOWLIST:
             raise HTTPException(404, "Service non autorisé")
         runtime: Runtime = application.state.runtime
@@ -1406,6 +1428,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.post("/api/voice/tts")
     async def voice_tts(request: Request):
+        require_local_or_admin(request, settings)
         data = await limited_json(request, 16384)
         payload = validate_payload(VoiceTTSPayload, data)
         try:
@@ -1431,6 +1454,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.post("/api/voice/transcribe")
     async def voice_transcribe_endpoint(request: Request):
+        require_local_or_admin(request, settings)
         raw_content_type = request.headers.get("content-type", "")
         content_type = raw_content_type.split(";", 1)[0].strip().lower()
         max_bytes = 12 * 1024 * 1024  # 12 Mio max pour un enregistrement vocal direct
@@ -1508,6 +1532,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.post("/api/voice/interact")
     async def voice_interact_endpoint(request: Request):
+        require_local_or_admin(request, settings)
         raw_content_type = request.headers.get("content-type", "")
         content_type = raw_content_type.split(";", 1)[0].strip().lower()
         max_bytes = 12 * 1024 * 1024
@@ -1976,8 +2001,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @application.post("/api/voice/trigger")
-    async def native_voice_trigger():
+    async def native_voice_trigger(request: Request):
         """Point d'entrée pour déclencher l'écoute système native (raccourci clavier, script bash)."""
+        require_local_or_admin(request, settings)
         from native_voice_daemon import NativeVoiceDaemon
         daemon = NativeVoiceDaemon.get_instance()
         asyncio.create_task(asyncio.to_thread(daemon.trigger_interaction_flow))
@@ -1985,7 +2011,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.post("/api/voice/simulate", status_code=202)
     async def voice_simulate(request: Request):
-        same_origin(request)
+        require_local_or_admin(request, settings)
         payload = await limited_json(request, 4096)
         if not isinstance(payload, dict) or set(payload) != {"text"}:
             raise HTTPException(422, "Objet JSON attendu : {text: commande}")
@@ -2126,6 +2152,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.post("/api/jarvis/query")
     async def jarvis_query(request: Request) -> JSONResponse:
+        require_local_or_admin(request, settings)
         runtime: Runtime = application.state.runtime
         if not runtime.jarvis:
             raise HTTPException(503, "Agent Jarvis non initialisé ou indisponible")
@@ -2169,7 +2196,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse({"error": str(exc), "history": [], "messages": []}, status_code=500)
 
     @application.delete("/api/jarvis/history/clear")
-    async def jarvis_clear_history() -> JSONResponse:
+    async def jarvis_clear_history(request: Request) -> JSONResponse:
+        require_local_or_admin(request, settings)
         runtime: Runtime = application.state.runtime
         if not runtime.jarvis:
             raise HTTPException(503, "Agent Jarvis non initialisé")
@@ -2194,6 +2222,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.post("/api/scheduler/tasks")
     async def scheduler_create_task(request: Request) -> JSONResponse:
+        require_local_or_admin(request, settings)
         try:
             from scheduler import scheduler_store
             data = await limited_json(request, 65536)
@@ -2227,7 +2256,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse({"error": str(exc), "ok": False}, status_code=500)
 
     @application.post("/api/scheduler/tasks/{task_id}/toggle")
-    async def scheduler_toggle_task(task_id: int) -> JSONResponse:
+    async def scheduler_toggle_task(task_id: int, request: Request) -> JSONResponse:
+        require_local_or_admin(request, settings)
         try:
             from scheduler import scheduler_store
             task = scheduler_store.get_task(task_id)
@@ -2242,7 +2272,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse({"error": str(exc), "ok": False}, status_code=500)
 
     @application.post("/api/scheduler/tasks/{task_id}/confirm")
-    async def scheduler_confirm_task(task_id: int) -> JSONResponse:
+    async def scheduler_confirm_task(task_id: int, request: Request) -> JSONResponse:
+        require_local_or_admin(request, settings)
         try:
             from scheduler import scheduler_core, scheduler_store
             task = scheduler_store.get_task(task_id)
@@ -2256,7 +2287,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse({"error": str(exc), "ok": False}, status_code=500)
 
     @application.delete("/api/scheduler/tasks/{task_id}")
-    async def scheduler_delete_task(task_id: int) -> JSONResponse:
+    async def scheduler_delete_task(task_id: int, request: Request) -> JSONResponse:
+        require_local_or_admin(request, settings)
         try:
             from scheduler import scheduler_store
             deleted = scheduler_store.delete_task(task_id)

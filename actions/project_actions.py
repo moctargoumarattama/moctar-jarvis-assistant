@@ -327,7 +327,7 @@ class ProjectAssistant:
 
         if path.suffix.lower() == ".xlsx":
             try:
-                from openpyxl import load_workbook
+                from openpyxl import load_workbook  # type: ignore[import-not-found,import-untyped]
             except Exception as exc:
                 return f"Lecture Excel indisponible : {exc}"
 
