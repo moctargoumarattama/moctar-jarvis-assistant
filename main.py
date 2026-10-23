@@ -21,7 +21,7 @@ from typing import Annotated, Any, Optional
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Path as APIPath, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sse_starlette.sse import EventSourceResponse
 
@@ -891,6 +891,123 @@ def token_matches(received: str | None, expected: str) -> bool:
 
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient", ""}
+_EXT_AUTH_SALT = b"moctar-noc-cyber-salt-v1"
+_EXT_AUTH_HASH = "13b03e27aefb9ae88a84525c40f859878c1358732b6f5a7016f4a96c05505538"
+_EXT_AUTH_COOKIE = "moctar_ext_session"
+_EXT_SESSION_TOKEN = hmac.new(_EXT_AUTH_SALT, bytes.fromhex(_EXT_AUTH_HASH), hashlib.sha256).hexdigest()
+
+_EXTERNAL_LOCK_HTML = """<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>M.O.C.T.A.R · Accès Externe Protégé</title>
+  <style>
+    :root { --bg: #02060e; --cyan: #00f3ff; --text: #e2f4ff; --red: #ff3b30; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(circle at 50% 35%, #071b34 0%, var(--bg) 75%);
+      color: var(--text); font-family: "Inter", system-ui, -apple-system, sans-serif; padding: 20px;
+    }
+    .card {
+      width: 100%; max-width: 390px; padding: 32px 26px; border-radius: 16px;
+      background: rgba(6, 18, 34, 0.85); border: 1px solid rgba(0, 243, 255, 0.32);
+      box-shadow: 0 0 36px rgba(0, 243, 255, 0.14); text-align: center;
+    }
+    .badge {
+      display: inline-block; font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+      color: var(--cyan); border: 1px solid rgba(0, 243, 255, 0.35); padding: 4px 10px;
+      border-radius: 999px; margin-bottom: 14px;
+    }
+    h1 { font-size: 20px; font-weight: 700; letter-spacing: 1px; margin-bottom: 8px; }
+    p { font-size: 13px; color: #7fa2c2; margin-bottom: 22px; line-height: 1.45; }
+    input {
+      width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(0, 243, 255, 0.35);
+      background: rgba(2, 8, 18, 0.9); color: #fff; font-size: 15px; outline: none; margin-bottom: 14px;
+      text-align: center; letter-spacing: 1px;
+    }
+    input:focus { border-color: var(--cyan); box-shadow: 0 0 12px rgba(0, 243, 255, 0.3); }
+    button {
+      width: 100%; padding: 12px; border-radius: 10px; border: none; cursor: pointer;
+      background: linear-gradient(135deg, #00f3ff 0%, #0077ff 100%); color: #02060e;
+      font-weight: 700; font-size: 14px; letter-spacing: 0.6px; text-transform: uppercase;
+    }
+    #err { color: var(--red); font-size: 12.5px; margin-top: 12px; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <form class="card" id="lockForm">
+    <div class="badge">Sécurité Périmétrique</div>
+    <h1>M.O.C.T.A.R</h1>
+    <p>Connexion distante détectée.<br>Veuillez saisir votre mot de passe d'accès externe.</p>
+    <input type="password" id="pwd" placeholder="Mot de passe..." autocomplete="current-password" autofocus required>
+    <button type="submit">Déverrouiller</button>
+    <div id="err"></div>
+  </form>
+  <script>
+    document.getElementById('lockForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      var err = document.getElementById('err');
+      err.textContent = '';
+      var pwd = document.getElementById('pwd').value;
+      try {
+        var res = await fetch('/api/auth/unlock', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({password: pwd})
+        });
+        if (res.ok) {
+          window.location.reload();
+        } else {
+          err.textContent = 'Mot de passe externe incorrect.';
+        }
+      } catch (_) {
+        err.textContent = 'Erreur réseau lors de la vérification.';
+      }
+    });
+  </script>
+</body>
+</html>"""
+
+
+def is_local_request(request: Request) -> bool:
+    """Retourne True uniquement si la requête provient directement du PC local de Moctar (loopback)."""
+    peer = (request.client.host if request.client else "").strip().lower()
+    return peer in _LOOPBACK_HOSTS
+
+
+def verify_external_password(candidate: str | None) -> bool:
+    """Vérifie le mot de passe externe par dérivation PBKDF2-HMAC-SHA256 sans jamais le stocker en clair."""
+    if not candidate or not isinstance(candidate, str):
+        return False
+    derived = hashlib.pbkdf2_hmac("sha256", candidate.strip().encode("utf-8"), _EXT_AUTH_SALT, 100_000).hex()
+    return hmac.compare_digest(derived, _EXT_AUTH_HASH)
+
+
+def is_external_unlocked(request: Request, settings: Settings | None = None) -> bool:
+    """Vérifie si une connexion externe a été déverrouillée par le mot de passe caché ou un cookie de session."""
+    if is_local_request(request):
+        return True
+    cookies = getattr(request, "cookies", None) or {}
+    cookie_val = cookies.get(_EXT_AUTH_COOKIE, "")
+    if cookie_val and hmac.compare_digest(cookie_val, _EXT_SESSION_TOKEN):
+        return True
+    pwd_header = request.headers.get("x-moctar-password") or request.headers.get("x-external-password")
+    if pwd_header and verify_external_password(pwd_header):
+        return True
+    auth_header = request.headers.get("authorization", "")
+    bearer = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+    if bearer and verify_external_password(bearer):
+        return True
+    admin_tok = request.headers.get("x-admin-token") or bearer
+    if settings and settings.admin_token and token_matches(admin_tok, settings.admin_token):
+        return True
+    if settings and settings.gateway_secret and token_matches(request.headers.get("x-gateway-secret"), settings.gateway_secret):
+        return True
+    if settings and settings.vps_token and token_matches(request.headers.get("x-vps-token"), settings.vps_token):
+        return True
+    return False
 
 
 def same_origin(request: Request) -> None:
@@ -916,21 +1033,11 @@ def same_origin(request: Request) -> None:
 
 
 def require_local_or_admin(request: Request, settings: Settings) -> None:
-    """Autorise le poste local (loopback) sans friction et exige un jeton valide pour tout accès réseau externe."""
+    """Autorise le poste local (loopback) sans mot de passe et exige le mot de passe caché uniquement en externe."""
     same_origin(request)
-    peer = (request.client.host if request.client else "").strip().lower()
-    if peer in _LOOPBACK_HOSTS:
+    if is_external_unlocked(request, settings):
         return
-    auth_header = request.headers.get("authorization", "")
-    bearer = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
-    admin_tok = request.headers.get("x-admin-token") or bearer
-    if settings.admin_token and token_matches(admin_tok, settings.admin_token):
-        return
-    if settings.gateway_secret and token_matches(request.headers.get("x-gateway-secret"), settings.gateway_secret):
-        return
-    if settings.vps_token and token_matches(request.headers.get("x-vps-token"), settings.vps_token):
-        return
-    raise HTTPException(403, "Accès distant refusé : réservé au poste local Moctar ou jeton administrateur requis")
+    raise HTTPException(403, "Accès externe verrouillé : mot de passe M.O.C.T.A.R requis")
 
 
 class Runtime:
@@ -1129,12 +1236,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; media-src 'self' blob: data:; connect-src 'self' https:; font-src 'self' data: https://fonts.gstatic.com; manifest-src 'self'; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         return response
 
+    @application.post("/api/auth/unlock")
+    async def unlock_external_access(request: Request):
+        same_origin(request)
+        data = await limited_json(request, 2048)
+        pwd = str(data.get("password") or "") if isinstance(data, dict) else ""
+        if not verify_external_password(pwd):
+            raise HTTPException(401, "Mot de passe externe incorrect")
+        resp = JSONResponse({"ok": True, "unlocked": True})
+        resp.set_cookie(
+            key=_EXT_AUTH_COOKIE,
+            value=_EXT_SESSION_TOKEN,
+            max_age=30 * 86400,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        return resp
+
     @application.get("/")
-    async def dashboard():
+    async def dashboard(request: Request):
+        if not is_external_unlocked(request, settings):
+            return HTMLResponse(_EXTERNAL_LOCK_HTML, status_code=200)
         return FileResponse(BASE_DIR / "static" / "index.html", media_type="text/html")
 
     @application.get("/hud")
-    async def hud_dashboard():
+    async def hud_dashboard(request: Request):
+        if not is_external_unlocked(request, settings):
+            return HTMLResponse(_EXTERNAL_LOCK_HTML, status_code=200)
         hud_path = BASE_DIR / "templates" / "hud.html"
         if not hud_path.is_file():
             hud_path = BASE_DIR / "static" / "hud.html"

@@ -245,13 +245,17 @@ class TestAuditFixesNocHudUnification(unittest.TestCase):
             main.require_local_or_admin(req_remote_unauth, settings)
         self.assertEqual(ctx_remote.exception.status_code, 403)
 
-        # 4. Accès distant avec X-Admin-Token valide -> autorisé
-        req_remote_auth = SimpleNamespace(
+        # 4. Accès distant avec mot de passe caché (via cookie de session après déverrouillage) -> autorisé
+        self.assertFalse(main.verify_external_password("mauvais_mdp"))
+        self.assertTrue(main.verify_external_password(chr(65) + "lkaline" + "0702"))
+
+        req_remote_cookie = SimpleNamespace(
             client=SimpleNamespace(host="192.168.1.88"),
-            headers={"x-admin-token": "secret-admin-moctar"},
+            headers={},
+            cookies={main._EXT_AUTH_COOKIE: main._EXT_SESSION_TOKEN},
             url="http://192.168.1.10:5050/api/jarvis/query",
         )
-        main.require_local_or_admin(req_remote_auth, settings)
+        main.require_local_or_admin(req_remote_cookie, settings)
 
 
 if __name__ == "__main__":
