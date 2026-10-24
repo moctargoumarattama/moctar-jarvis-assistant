@@ -67,9 +67,9 @@
     const AudioPlayerClass = opts.Audio || (typeof win.Audio === 'function' ? win.Audio : (typeof Audio === 'function' ? Audio : null));
     const fetchImpl = opts.fetch || (typeof win.fetch === 'function' ? win.fetch.bind(win) : (typeof fetch === 'function' ? fetch : null));
     const interactUrl = opts.interactUrl || '/api/voice/interact';
-    const vadSilenceMs = typeof opts.vadSilenceMs === 'number' ? opts.vadSilenceMs : 900;
-    const vadThreshold = typeof opts.vadThreshold === 'number' ? opts.vadThreshold : 0.016;
-    const minRecordingMs = typeof opts.minRecordingMs === 'number' ? opts.minRecordingMs : 400;
+    const vadSilenceMs = typeof opts.vadSilenceMs === 'number' ? opts.vadSilenceMs : 500;
+    const vadThreshold = typeof opts.vadThreshold === 'number' ? opts.vadThreshold : 0.0075;
+    const minRecordingMs = typeof opts.minRecordingMs === 'number' ? opts.minRecordingMs : 300;
     const maxSpeechMs = typeof opts.maxSpeechMs === 'number' ? opts.maxSpeechMs : 15000;
     const frameIntervalMs = typeof opts.frameIntervalMs === 'number' ? opts.frameIntervalMs : (1000 / 60);
     const highpassFrequencyHz = typeof opts.highpassFrequencyHz === 'number' ? opts.highpassFrequencyHz : 120;
@@ -1000,12 +1000,12 @@
 
         // Suivi adaptatif de l'empreinte sonore du PC et du bruit ambiant (plafonné pour ne jamais bloquer la voix)
         if (!isSpeaking) {
-          ambientNoiseFloor = Math.min(0.02, ambientNoiseFloor * 0.95 + rmsLevel * 0.05);
+          ambientNoiseFloor = Math.min(0.012, ambientNoiseFloor * 0.96 + rmsLevel * 0.04);
         }
 
         // Seuil VAD dynamique : sensible et réactif, ne s'élève modérément que si du son PC joue
-        const baseThreshold = isPcAudioPlaying ? Math.max(vadThreshold * 1.5, 0.04) : vadThreshold;
-        const dynamicVadThreshold = Math.min(0.036, Math.max(baseThreshold, ambientNoiseFloor * 1.5));
+        const baseThreshold = isPcAudioPlaying ? Math.max(vadThreshold * 1.5, 0.02) : vadThreshold;
+        const dynamicVadThreshold = Math.min(0.022, Math.max(baseThreshold, ambientNoiseFloor * 1.25));
 
         if (isPushToTalk) {
           recordingElapsedMs += frameIntervalMs;
@@ -1036,7 +1036,7 @@
             recordingElapsedMs += frameIntervalMs;
             const currentNow = (typeof timestamp === 'number' && timestamp > 0) ? timestamp : getNow();
             const elapsed = Math.max(recordingElapsedMs, phraseStartTime > 0 ? (currentNow - phraseStartTime) : 0);
-            const silenceThreshold = Math.max(dynamicVadThreshold * 0.75, ambientNoiseFloor * 1.3);
+            const silenceThreshold = Math.min(dynamicVadThreshold * 0.85, Math.max(ambientNoiseFloor * 1.15, dynamicVadThreshold * 0.6));
             if (rmsLevel < silenceThreshold && silenceElapsedMs >= vadSilenceMs && elapsed >= minRecordingMs) {
               stopPhraseAndSend();
             }
@@ -1104,6 +1104,17 @@
               Promise.resolve(audioCtx.resume()).catch(() => {});
             }
             sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+            let inputGainNode = null;
+            if (typeof audioCtx.createGain === 'function') {
+              try {
+                inputGainNode = audioCtx.createGain();
+                inputGainNode.gain.value = typeof opts.micGain === 'number' ? opts.micGain : 1.65;
+                sourceNode.connect(inputGainNode);
+              } catch {
+                inputGainNode = null;
+              }
+            }
+            const audioChainHead = inputGainNode || sourceNode;
             analyser = audioCtx.createAnalyser();
             analyser.fftSize = 512;
             analyser.smoothingTimeConstant = 0.2;
@@ -1117,10 +1128,10 @@
               } else {
                 highpassFilter.frequency = { value: highpassFrequencyHz };
               }
-              sourceNode.connect(highpassFilter);
+              audioChainHead.connect(highpassFilter);
               highpassFilter.connect(analyser);
             } else {
-              sourceNode.connect(analyser);
+              audioChainHead.connect(analyser);
             }
 
             timeDomainData = new Uint8Array(analyser.fftSize || 512);
@@ -1130,7 +1141,7 @@
               try {
                 scriptNode = audioCtx.createScriptProcessor(2048, 1, 1);
                 scriptNode.onaudioprocess = handleAudioProcess;
-                const filterOrSource = highpassFilter || sourceNode;
+                const filterOrSource = highpassFilter || audioChainHead;
                 filterOrSource.connect(scriptNode);
                 if (typeof audioCtx.createGain === 'function') {
                   silentGainNode = audioCtx.createGain();

@@ -13,6 +13,7 @@ import asyncio
 import io
 import logging
 import os
+import select
 import shutil
 import struct
 import subprocess
@@ -183,9 +184,11 @@ class NativeVoiceDaemon:
         self,
         pipe_path: Path = _DEFAULT_PIPE_PATH,
         on_audio_captured: Optional[Callable[[bytes], Any]] = None,
+        runtime: Any = None,
     ) -> None:
         self.pipe_path = pipe_path
         self.on_audio_captured = on_audio_captured
+        self.runtime = runtime
         self.running = False
         self._thread: Optional[threading.Thread] = None
 
@@ -224,35 +227,49 @@ class NativeVoiceDaemon:
         self._setup_fifo()
         last_proactive_check: float = 0.0
 
+        fifo_fd = None
+        if is_linux_environment() and self.pipe_path.exists():
+            try:
+                fifo_fd = os.open(str(self.pipe_path), os.O_RDONLY | os.O_NONBLOCK)
+            except Exception as exc:
+                LOGGER.debug("Erreur ouverture non-bloquante du pipe FIFO: %s", exc)
+
         while self.running:
             try:
                 # 1. Évaluation périodique des initiatives proactives (toutes les 25s) si le PC ne joue pas de musique
                 now = time.monotonic()
                 if (now - last_proactive_check) >= 25.0:
                     last_proactive_check = now
-                    if not is_pc_audio_playing():
+                    if not is_pc_audio_playing() and self.runtime is not None:
                         try:
                             from proactive_companion import ProactiveCompanion
                             comp = ProactiveCompanion.get_instance()
                             event = comp.evaluate_proactive_event(self.runtime)
                             if event and event.get("message"):
                                 LOGGER.info("⚡ [NATIVE INITIATIVE TRIGGER]: %s", event["message"])
-                                # On déclenche le flux vocal pour informer Moctar
-                                if self.on_audio_captured:
-                                    pass
                         except Exception:
                             pass
 
-                if is_linux_environment() and self.pipe_path.exists():
-                    with open(str(self.pipe_path), "r", encoding="utf-8") as f:
-                        line = f.readline().strip()
-                        if line and self.running:
-                            LOGGER.info("⚡ [NATIVE TRIGGER]: Signal reçu via pipe ('%s')", line)
-                            self.trigger_interaction_flow()
+                # 2. Lecture non-bloquante du pipe Linux
+                if fifo_fd is not None:
+                    r, _, _ = select.select([fifo_fd], [], [], 1.0)
+                    if fifo_fd in r:
+                        raw = os.read(fifo_fd, 1024)
+                        if raw:
+                            line = raw.decode("utf-8", errors="replace").strip()
+                            if line and self.running:
+                                LOGGER.info("⚡ [NATIVE TRIGGER]: Signal reçu via pipe ('%s')", line)
+                                self.trigger_interaction_flow()
                 else:
                     time.sleep(1.0)
             except Exception as exc:
                 time.sleep(1.0)
+
+        if fifo_fd is not None:
+            try:
+                os.close(fifo_fd)
+            except Exception:
+                pass
 
     def trigger_interaction_flow(self, duration_seconds: float = 5.0) -> Optional[Dict[str, Any]]:
         """Déclenche la capture audio du micro, la transcription et la réponse vocale locale."""

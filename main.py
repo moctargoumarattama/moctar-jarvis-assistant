@@ -318,7 +318,7 @@ async def _prewarm_common_voice_tts() -> None:
             pass
 
 
-VOICE_SESSION_DURATION_SECONDS = float(os.getenv("VOICE_SESSION_DURATION_SECONDS", "0.0"))
+VOICE_SESSION_DURATION_SECONDS = float(os.getenv("VOICE_SESSION_DURATION_SECONDS", "45.0"))
 VOICE_BUTLER_GREETINGS = (
     "À vos ordres Moctar, je vous écoute.",
     "Oui Moctar, je suis là.",
@@ -376,7 +376,7 @@ def is_direct_voice_command(text: str) -> bool:
     # 0. Salutations directes & Démos pour amis / invités (Ne JAMAIS ignorer une salutation ou démo)
     if re.search(r"^(?:bonjour|salut|bonsoir|coucou|yo|hello)(?:\s+|$)", norm) or norm in ("bonjour", "salut", "bonsoir", "coucou", "yo", "hello"):
         return True
-    if re.search(r"\b(?:dis\s+bonjour|salue|passe\s+le\s+bonjour|pr[ée]sente[- ]toi|fais\s+(?:une\s+)?d[ée]mo(?:nstration)?|montre\s+(?:ce\s+que\s+tu\s+sais\s+faire|nous)|qu['’]est[- ]ce\s+que\s+tu\s+sais\s+faire|je\s+te\s+pr[ée]sente|voici\s+(?:mon\s+ami|mon\s+pote|mon\s+coll[èe]gue)?|qui\s+sont\s+mes\s+amis|tu\s+connais\s+qui)\b", norm):
+    if re.search(r"\b(?:dis\s+(?:bonjour|salut|coucou)|salue|passe\s+le\s+bonjour|accueille|pr[ée]sente[- ]toi|fais(?:[- ](?:nous|moi))?\s*(?:une\s+)?d[ée]mo(?:nstration)?|montre\s+(?:ce\s+que\s+tu\s+sais\s+faire|nous|tes\s+capacit[ée]s|de\s+quoi\s+tu\s+es\s+capable)|qu['’]est[- ]ce\s+que\s+tu\s+sais\s+faire|tu\s+sais\s+faire\s+quoi|je\s+(?:te|vous)\s+pr[ée]sente|voici|voil[aà]\s+(?:mon\s+ami|mes\s+amis|mon\s+pote|mes\s+potes|mon\s+coll[èe]gue)?|qui\s+sont\s+mes\s+amis|tu\s+connais\s+qui)\b", norm):
         return True
     if re.search(r"\b(?:bonne\s+nuit|je\s+vais\s+dormir|je\s+vais\s+me\s+coucher|je\s+suis\s+fatigu[ée]|pause\s+caf[ée]|je\s+fais\s+une\s+pause|comment\s+tu\s+vas|comment\s+vas[- ]tu|[cç]a\s+va|la\s+forme)\b", norm) or norm in ("merci", "merci beaucoup", "super merci", "merci mon ami", "merci frérot", "bien joué"):
         return True
@@ -384,10 +384,10 @@ def is_direct_voice_command(text: str) -> bool:
         return True
     if re.search(r"\b(?:mets?\s+l['’]orbe|couleur\s+de\s+l['’]orbe|mode\s+victoire|mode\s+alerte|ambiance\s+chaleureuse|ambiance\s+nuit|orbe\s+(?:vert|or|ambre|nuit|cyan|violet|rouge))\b", norm):
         return True
-    if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague|qui\s+t['’]a\s+(?:cr[ée][ée]|con[çc]u)|tu\s+m['’]entends|tu\s+nous\s+entends|test\s+micro)\b", norm):
+    if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague|fais\s+une\s+blague|qui\s+t['’]a\s+(?:cr[ée][ée]|con[çc]u)|tu\s+m['’]entends|tu\s+nous\s+entends|tu\s+es\s+l[aà]|t['’]es\s+l[aà]|tu\s+peux\s+parler|parle\s+un\s+peu|parle[- ]nous|test\s+micro)\b", norm):
         return True
     # Questions ouvertes directes
-    if re.search(r"^(?:comment|pourquoi|qu['’]est[- ]ce\s+que|c['’]est\s+quoi|qui\s+est|qui\s+a|quel|quelle|combien|est[- ]ce\s+que|peux[- ]tu|dis[- ]moi|donne[- ]moi|raconte|explique|cherche)\b", norm):
+    if re.search(r"^(?:comment|pourquoi|qu['’]est[- ]ce|c['’]est\s+quoi|qui\s+est|qui\s+a|quel|quelle|combien|est[- ]ce\s+que|peux[- ]tu|tu\s+peux|sais[- ]tu|tu\s+sais|dis[- ]moi|donne[- ]moi|raconte|explique|cherche|fais[- ]moi|montre[- ]moi)\b", norm):
         return True
 
     # 1. Bureau, VS Code & Lancement d'Applications
@@ -518,7 +518,7 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
         ):
             return True, clean_text, False
         if session_active:
-            if len(clean_text) < 4 or _is_pure_filler_or_wake(clean_text):
+            if not clean_text or _is_pure_filler_or_wake(clean_text):
                 return False, "", False
             return True, clean_text, False
 
@@ -1361,9 +1361,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         task = asyncio.create_task(runtime.collect_loop(), name="noc-collector")
         runtime.collect_task = task
         asyncio.create_task(_prewarm_common_voice_tts(), name="tts-cache-prewarm")
+        def _on_native_audio(wav_bytes: bytes) -> dict[str, Any] | None:
+            try:
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    f.write(wav_bytes)
+                    f_path = Path(f.name)
+                try:
+                    transcript = voice_transcribe.transcribe_audio(f_path, allow_empty=False)
+                finally:
+                    try:
+                        f_path.unlink()
+                    except Exception:
+                        pass
+                if not transcript:
+                    return None
+                LOGGER.info("🎙️ [NATIVE DAEMON STT]: '%s'", transcript)
+                repaired, _ = stt_phonetic_repair.repair_stt_transcript(transcript)
+                accepted, command_text, _ = extract_voice_interact_command(repaired, session_active=True)
+                if not accepted or not command_text:
+                    command_text = repaired
+                instant_reply = handle_instant_local_command(command_text)
+                if instant_reply:
+                    reply_text = instant_reply
+                else:
+                    reply_text = f"Reçu Moctar : {command_text}"
+                return {"reply_text": reply_text}
+            except Exception as exc:
+                LOGGER.warning("Erreur traitement audio natif: %s", exc)
+                return None
+
         try:
             from native_voice_daemon import NativeVoiceDaemon
-            NativeVoiceDaemon.get_instance().start()
+            daemon = NativeVoiceDaemon.get_instance()
+            daemon.runtime = runtime
+            daemon.on_audio_captured = _on_native_audio
+            daemon.start()
         except Exception:
             pass
         try:

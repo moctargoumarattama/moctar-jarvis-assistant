@@ -78,17 +78,20 @@ _DIRECTED_IMPERATIVES = (
     "mettre", "donne", "donner", "dis", "dire", "cherche", "chercher", "trouve",
     "ajoute", "ajouter", "liste", "lister", "nettoie", "optimise", "optimiser",
     "snap", "place", "maximise", "minimise", "aide", "analyse", "vérifie", "verifie",
+    "présente", "presente", "salue", "accueille", "montre", "fais", "raconte", "explique", "parle", "joue", "reprends",
 )
 
 _DIRECTED_INTERROGATIVES = (
     "c'est quoi", "qu'est-ce que", "qu est ce que", "comment", "pourquoi",
     "où en est", "ou en est", "combien", "quel est", "quelle est", "quel temps",
     "quelle heure", "quel jour", "qui est", "qui es-tu",
+    "tu peux", "peux-tu", "tu sais", "sais-tu", "est-ce que", "dis-moi", "raconte-moi",
 )
 
 _DISENGAGE_PHRASES = {
     "c'est bon", "c est bon", "c'est tout", "c est tout", "laisse tomber",
-    "rien laisse tomber", "merci", "merci moctar", "bonne nuit", "a plus tard",
+    "rien laisse tomber", "merci c'est tout", "merci c est tout", "merci tu peux te reposer",
+    "merci repose-toi", "bonne nuit", "a plus tard",
     "à plus tard", "je coupe", "au revoir", "stop", "pause", "repose-toi",
     "voilà tout ça aujourd'hui", "voila tout ca aujourd'hui", "voilà tout ça", "voila tout ca",
     "voilà c'est tout", "voila c est tout", "voilà c'est tout pour aujourd'hui",
@@ -105,7 +108,7 @@ _DISENGAGE_REGEX = re.compile(
     r"on\s+(?:a\s+fini|s['’]arr[êe]te\s+l[aà])(?:\s+pour\s+aujourd['’]hui)?|"
     r"fini\s+pour\s+aujourd['’]hui|"
     r"c['’]?est\s+bon(?:\s+pour\s+(?:moi|aujourd['’]hui))?|"
-    r"merci(?:\s+beaucoup)?(?:\s+moctar)?|"
+    r"merci\s+(?:c['’]?est\s+tout|repose[- ]toi|tu\s+peux\s+te\s+reposer|pour\s+aujourd['’]hui|fin\s+de\s+session)|"
     r"bonne\s+(?:nuit|soir[ée]e)|"
     r"[aà]\s+plus(?:\s+tard)?|"
     r"repose[- ]toi)\b",
@@ -231,8 +234,26 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
             "reason": "incomplete_utterance",
         }
 
-    # 4. Détection de la réflexion à voix haute (Thinking Out Loud) prioritaire en l'absence d'interpellation directe
-    if not (has_explicit_wake or has_second_person):
+    # 4. Analyse des impératifs, interrogations et intentions démo / sociales
+    has_imperative = False
+    tokens = [t.strip(" ,.:;!?-") for t in norm.split() if t.strip(" ,.:;!?-")]
+    if tokens:
+        if any(t in _DIRECTED_IMPERATIVES for t in tokens[:3]):
+            has_imperative = True
+        elif len(tokens) > 1 and tokens[1] in _DIRECTED_IMPERATIVES:
+            has_imperative = True
+
+    has_interrogative = any(norm.startswith(q) or f" {q}" in norm for q in _DIRECTED_INTERROGATIVES)
+    has_demo_intent = bool(re.search(r"\b(?:d[ée]mo|ami|amis|invit[ée]s?|potes?|blague|rire|capacit[ée]s?|montre|pr[ée]sente|salue|accueille)\b", norm))
+    is_direct_query = is_wake_call or bool(re.search(
+        r"\b(?:tu\s+es\s+qui|t['’]es\s+qui|qui\s+es[- ]tu|qui\s+tu\s+es|c['’]est\s+quoi\s+ton\s+job|quel\s+est\s+ton\s+job|"
+        r"ton\s+job|ton\s+r[ôo]le|tu\s+sers\s+[aà]\s+quoi|tu\s+fais\s+quoi|tu\s+sais\s+faire\s+quoi|"
+        r"on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|peux[- ]tu|pourrais[- ]tu)\b",
+        norm,
+    ))
+
+    # 5. Détection de la réflexion à voix haute (Thinking Out Loud) UNIQUEMENT en l'absence de tout ordre ou question
+    if not (has_explicit_wake or has_second_person or has_imperative or has_interrogative or has_demo_intent or is_direct_query):
         for p in _THINKING_PREFIX_PATTERNS:
             if p.search(norm):
                 return {
@@ -263,27 +284,8 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
                 "reason": "single_hesitation_token",
             }
 
-    # 5. Présence d'un verbe impératif opérationnel
-    has_imperative = False
-    tokens = [t.strip(" ,.:;!?-") for t in norm.split() if t.strip(" ,.:;!?-")]
-    if tokens:
-        first_word = tokens[0]
-        if first_word in _DIRECTED_IMPERATIVES:
-            has_imperative = True
-        elif len(tokens) > 1 and tokens[1] in _DIRECTED_IMPERATIVES and first_word in ("moctar", "jarvis", "yo", "dis", "s'il", "stp"):
-            has_imperative = True
-
-    # 6. Présence d'une question interrogative directe ou interpellation directe au copilote
-    has_interrogative = any(norm.startswith(q) or f" {q}" in norm for q in _DIRECTED_INTERROGATIVES)
-    is_direct_query = is_wake_call or bool(re.search(
-        r"\b(?:tu\s+es\s+qui|t['’]es\s+qui|qui\s+es[- ]tu|qui\s+tu\s+es|c['’]est\s+quoi\s+ton\s+job|quel\s+est\s+ton\s+job|"
-        r"ton\s+job|ton\s+r[ôo]le|tu\s+sers\s+[aà]\s+quoi|tu\s+fais\s+quoi|tu\s+sais\s+faire\s+quoi|"
-        r"on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|peux[- ]tu|pourrais[- ]tu)\b",
-        norm,
-    ))
-
-    # Si explicitement interpellé (avec 'Moctar', question directe d'identité/rôle ou verbe d'action clair)
-    if has_explicit_wake or is_direct_query or (is_session_active and (has_second_person or has_imperative or has_interrogative)):
+    # Si explicitement interpellé (avec 'Moctar', question directe d'identité/rôle, verbe d'action clair ou démo)
+    if has_explicit_wake or is_direct_query or has_demo_intent or has_imperative or has_interrogative or (is_session_active and has_second_person):
         return {
             "intent": "directed_speech",
             "is_directed": True,

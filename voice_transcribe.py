@@ -23,7 +23,8 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-APP_DIR = Path("/opt/noc-dashboard")
+APP_DIR = Path("/opt/jarvis")
+APP_DIRS = (Path("/opt/jarvis"), Path("/opt/noc-dashboard"))
 MODEL_NAMES = ("base", "tiny")
 
 
@@ -51,7 +52,9 @@ def _cache_roots() -> Iterator[Path]:
         yield Path(os.environ["HF_HOME"]).expanduser() / "hub"
     if os.environ.get("XDG_CACHE_HOME"):
         yield Path(os.environ["XDG_CACHE_HOME"]).expanduser() / "huggingface" / "hub"
-    yield APP_DIR / "models" / ".download-cache" / "hub"
+    for d in APP_DIRS:
+        yield d / "models" / ".download-cache" / "hub"
+        yield d / "models"
     yield Path.home() / ".cache" / "huggingface" / "hub"
     yield Path("/home/moctar/.cache/huggingface/hub")
 
@@ -80,10 +83,11 @@ def _candidates(requested: str) -> Iterator[tuple[Path, str]]:
     configured = os.environ.get("NOC_WHISPER_MODEL_PATH", "").strip()
     if configured:
         yield Path(configured).expanduser(), requested
-    yield APP_DIR / "models" / "whisper", requested
     names = (requested, *(name for name in MODEL_NAMES if name != requested))
-    for name in names:
-        yield APP_DIR / "models" / ("whisper-" + name), name
+    for d in APP_DIRS:
+        yield d / "models" / "whisper", requested
+        for name in names:
+            yield d / "models" / ("whisper-" + name), name
     yield Path.cwd() / "models" / "whisper", requested
     for name in names:
         yield Path.cwd() / "models" / ("whisper-" + name), name
@@ -507,6 +511,40 @@ def transcribe_groq_api(
         return None
 
 
+def transcribe_gemini_api(audio_path: str | os.PathLike[str]) -> str | None:
+    """Fallback neural de transcription via Gemini Multimodal si faster-whisper local est indisponible."""
+    start_time = time.perf_counter()
+    try:
+        import config
+        from google import genai
+        from google.genai import types as genai_types
+
+        key = getattr(config, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
+        if not key or not genai:
+            return None
+        p = Path(audio_path)
+        if not p.is_file() or p.stat().st_size == 0:
+            return None
+        client = genai.Client(api_key=key)
+        part = genai_types.Part.from_bytes(data=p.read_bytes(), mime_type="audio/wav")
+        model = getattr(config, "gemini_model", "gemini-2.0-flash") or "gemini-2.0-flash"
+        resp = client.models.generate_content(
+            model=model,
+            contents=[
+                part,
+                "Transcris fidèlement et mot pour mot en français ce qui est prononcé dans cet audio. "
+                "Ne réponds que par la transcription exacte, sans guillemets ni commentaire.",
+            ],
+        )
+        text = (resp.text or "").strip()
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        logger.info(f"⚡ [GEMINI AUDIO STT FALLBACK] ({duration_ms}ms): '{text}'")
+        return text
+    except Exception as exc:
+        logger.debug("Gemini audio fallback indisponible : %s", exc)
+        return None
+
+
 def transcribe_audio(
     audio_path: str | os.PathLike[str],
     *,
@@ -539,49 +577,62 @@ def transcribe_audio(
     # 2. Repli automatique sur faster-whisper local avec garde-fous stricts
     readiness = is_voice_ready()
     if not readiness["ready"]:
+        gemini_text = transcribe_gemini_api(audio)
+        if gemini_text:
+            filtered = filter_whisper_hallucinations(gemini_text, allow_short_confirmations=allow_short_confirmations)
+            if filtered:
+                return filtered
         raise RuntimeError(readiness["reason"])
 
-    factory, _ = _dependency()
-    model = factory(readiness["model_path"], device="cpu", compute_type="int8",
-                    cpu_threads=2, num_workers=1, local_files_only=True)
-    segments, _ = model.transcribe(
-        loaded_audio,
-        language="fr",
-        beam_size=1,
-        best_of=1,
-        temperature=0.0,
-        vad_filter=True,
-        condition_on_previous_text=False,
-        compression_ratio_threshold=2.2,
-        no_speech_threshold=0.6,
-        initial_prompt=None,
-    )
-    pieces: list[str] = []
-    size = 0
-    filtered_noise_or_hallucination = False
-    for segment in segments:
-        no_speech_prob = getattr(segment, "no_speech_prob", None)
-        if isinstance(no_speech_prob, (int, float)) and float(no_speech_prob) >= 0.6:
+    try:
+        factory, _ = _dependency()
+        model = factory(readiness["model_path"], device="cpu", compute_type="int8",
+                        cpu_threads=2, num_workers=1, local_files_only=True)
+        segments, _ = model.transcribe(
+            loaded_audio,
+            language="fr",
+            beam_size=1,
+            best_of=1,
+            temperature=0.0,
+            vad_filter=True,
+            condition_on_previous_text=False,
+            compression_ratio_threshold=2.2,
+            no_speech_threshold=0.6,
+            initial_prompt=None,
+        )
+        pieces: list[str] = []
+        size = 0
+        filtered_noise_or_hallucination = False
+        for segment in segments:
+            no_speech_prob = getattr(segment, "no_speech_prob", None)
+            if isinstance(no_speech_prob, (int, float)) and float(no_speech_prob) >= 0.6:
+                filtered_noise_or_hallucination = True
+                continue
+            piece = segment.text.strip()
+            if not piece:
+                continue
+            size += len(piece) + (1 if pieces else 0)
+            if size > 1000:
+                raise ValueError("Transcription trop longue.")
+            pieces.append(piece)
+        raw_text = " ".join(pieces).strip()
+        text = raw_text
+        logger.info(f"🎙️ [WHISPER BRUT]: '{text}'")
+        text = filter_whisper_hallucinations(raw_text, allow_short_confirmations=allow_short_confirmations)
+        if raw_text and not text:
             filtered_noise_or_hallucination = True
-            continue
-        piece = segment.text.strip()
-        if not piece:
-            continue
-        size += len(piece) + (1 if pieces else 0)
-        if size > 1000:
-            raise ValueError("Transcription trop longue.")
-        pieces.append(piece)
-    raw_text = " ".join(pieces).strip()
-    text = raw_text
-    logger.info(f"🎙️ [WHISPER BRUT]: '{text}'")
-    text = filter_whisper_hallucinations(raw_text, allow_short_confirmations=allow_short_confirmations)
-    if raw_text and not text:
-        filtered_noise_or_hallucination = True
-    if not text:
-        if allow_empty or filtered_noise_or_hallucination:
-            return ""
-        raise ValueError("Aucune parole reconnue.")
-    return text
+        if not text:
+            if allow_empty or filtered_noise_or_hallucination:
+                return ""
+            raise ValueError("Aucune parole reconnue.")
+        return text
+    except Exception as exc:
+        gemini_text = transcribe_gemini_api(audio)
+        if gemini_text:
+            filtered = filter_whisper_hallucinations(gemini_text, allow_short_confirmations=allow_short_confirmations)
+            if filtered:
+                return filtered
+        raise
 
 
 def main() -> int:
