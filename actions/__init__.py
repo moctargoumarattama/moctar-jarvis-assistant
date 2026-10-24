@@ -91,6 +91,7 @@ from .workspace_layout import (
 # 5d. HUD 3D Actions
 from .hud_actions import (
     switch_hud_view,
+    set_hud_mood,
 )
 
 # 6. Personal Actions
@@ -187,6 +188,7 @@ TOOL_DISPATCHER: Dict[str, Callable[..., Any]] = {
 
     # HUD 3D Actions
     "switch_hud_view": switch_hud_view,
+    "set_hud_mood": set_hud_mood,
 
     # Energy Actions
     "calculate_consumption": calculate_consumption,

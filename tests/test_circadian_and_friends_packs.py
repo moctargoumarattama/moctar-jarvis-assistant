@@ -164,6 +164,81 @@ class TestCircadianAndFriendsPacks(unittest.TestCase):
         self.assertTrue(main.is_direct_voice_command("Merci mon ami"))
         self.assertTrue(main.is_direct_voice_command("Merci frérot"))
 
+    # =========================================================================
+    # 6. PACK HUD 3D VIVANT & COULEURS ÉMOTIONNELLES
+    # =========================================================================
+
+    def test_hud_state_manager_moods_and_circadian(self) -> None:
+        """Vérifie la mise à jour des couleurs émotionnelles et de la pulsation."""
+        import hud_state_manager
+
+        # Mode Victoire / Succès
+        st_succ = hud_state_manager.set_hud_mood("success")
+        self.assertEqual(st_succ["mood"], "success")
+        self.assertEqual(st_succ["mood_color"], "#00ff88")
+        self.assertEqual(st_succ["pulse_speed"], 1.3)
+
+        # Mode Nuit
+        st_night = hud_state_manager.set_hud_mood("night")
+        self.assertEqual(st_night["mood"], "night")
+        self.assertEqual(st_night["mood_color"], "#3d64a8")
+        self.assertEqual(st_night["pulse_speed"], 0.65)
+
+        # Mode Alerte
+        st_alert = hud_state_manager.set_hud_mood("alert")
+        self.assertEqual(st_alert["mood"], "alert")
+        self.assertEqual(st_alert["mood_color"], "#ff3366")
+        self.assertEqual(st_alert["pulse_speed"], 1.8)
+
+        # Déduction émotionnelle automatique
+        self.assertEqual(hud_state_manager.deduce_mood_from_text("47 tests au vert, machine de guerre !"), "success")
+        self.assertEqual(hud_state_manager.deduce_mood_from_text("Ravi de faire ta connaissance Karim !"), "friendly")
+        self.assertEqual(hud_state_manager.deduce_mood_from_text("Bonne nuit Moctar, repose-toi bien."), "night")
+        self.assertEqual(hud_state_manager.deduce_mood_from_text("Alerte critique sur le VPS !"), "alert")
+
+    def test_instant_voice_command_for_hud_moods(self) -> None:
+        """Vérifie le contrôle vocal direct des ambiances de l'orbe 3D."""
+        import hud_state_manager
+
+        res_green = main.handle_instant_local_command("Mets l'orbe en vert")
+        self.assertIsNotNone(res_green)
+        self.assertIn("vert émeraude", res_green)
+        self.assertEqual(hud_state_manager.get_hud_state()["mood"], "success")
+
+        res_night = main.handle_instant_local_command("Mets l'orbe en mode nuit")
+        self.assertIsNotNone(res_night)
+        self.assertIn("mode nuit", res_night)
+        self.assertEqual(hud_state_manager.get_hud_state()["mood"], "night")
+
+        res_gold = main.handle_instant_local_command("Ambiance chaleureuse")
+        self.assertIsNotNone(res_gold)
+        self.assertIn("ambre solaire", res_gold)
+        self.assertEqual(hud_state_manager.get_hud_state()["mood"], "friendly")
+
+        self.assertTrue(main.is_direct_voice_command("Mets l'orbe en vert"))
+        self.assertTrue(main.is_direct_voice_command("Mode victoire"))
+        self.assertTrue(main.is_direct_voice_command("Ambiance nuit"))
+
+    def test_hud_mood_endpoint(self) -> None:
+        """Vérifie l'endpoint HTTP POST /api/hud/mood."""
+        from fastapi.testclient import TestClient
+        client = TestClient(main.app)
+
+        resp = client.post("/api/hud/mood", json={"mood": "friendly"})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data.get("mood"), "friendly")
+        self.assertEqual(data.get("mood_color"), "#ffb700")
+
+        # Custom mood & speed
+        resp2 = client.post("/api/hud/mood", json={"mood": "quantum", "color": "#d900ff", "pulse_speed": 1.5})
+        self.assertEqual(resp2.status_code, 200)
+        data2 = resp2.json()
+        self.assertEqual(data2.get("mood"), "quantum")
+        self.assertEqual(data2.get("mood_color"), "#d900ff")
+        self.assertEqual(data2.get("pulse_speed"), 1.5)
+
 
 if __name__ == "__main__":
     unittest.main()
+

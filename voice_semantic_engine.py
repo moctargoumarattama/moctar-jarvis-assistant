@@ -347,8 +347,35 @@ VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
                         "type": "boolean",
                         "description": "Mettre à true si Moctar demande où il est dans le monde, sa position ou à être localisé sur le globe.",
                     },
+                    "mood": {
+                        "type": "string",
+                        "enum": ["calm", "friendly", "success", "quantum", "night", "caring", "alert"],
+                        "description": "Ambiance ou couleur émotionnelle souhaitée pour l'orbe.",
+                    },
                 },
                 "required": ["view"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_hud_mood",
+            "description": (
+                "Change l'ambiance émotionnelle, le sentiment et la couleur de l'orbe 3D "
+                "('calm' cyan serein, 'friendly' or/ambre chaleureux, 'success' vert émeraude victoire, "
+                "'quantum' magenta réflexion, 'night' bleu nuit apaisant, 'alert' rouge alerte)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mood": {
+                        "type": "string",
+                        "enum": ["calm", "friendly", "success", "quantum", "night", "caring", "alert"],
+                        "description": "Humeur émotionnelle cible.",
+                    },
+                },
+                "required": ["mood"],
             },
         },
     },
@@ -487,6 +514,7 @@ VOICE_SEMANTIC_SYSTEM_PROMPT = (
     "- Si Moctar demande de rappeler un souvenir ou un fait (ex: 'rappelle-moi...', 'quel est mon...') -> appelle 'search_memory_facts'.\n"
     "- Si Moctar demande de lancer une tâche ou des tests en arrière-plan (ex: 'lance les tests en tâche de fond') -> appelle 'run_background_task'.\n"
     "- Si Moctar demande de basculer la vue 3D, d'afficher le globe terrestre, sa position dans le monde, le réacteur plasma, le cœur quantique ou de retourner au NOC -> appelle 'switch_hud_view'.\n"
+    "- Si Moctar demande de changer l'ambiance, la couleur ou le mode de l'orbe 3D (ex: 'mets l'orbe en vert', 'mode nuit', 'ambiance chaleureuse', 'orbe en or', 'mode victoire') -> appelle 'set_hud_mood'.\n"
     "- Si Moctar demande un statut Git, un git pull, un git commit ou un git push sur un projet (ex: Jarvis, Baba Market / Papa Market, Noor Express) -> appelle 'git_status', 'git_pull', 'prepare_commit' ou 'prepare_push'.\n"
     "- Si Moctar pose une question factuelle, d'actualité, de culture, de sciences ou discute amicalement sans action requise -> "
     "réponds directement avec rigueur, profondeur et perspicacité d'ingénieur, sans appeler d'outil inutilement."
@@ -806,6 +834,9 @@ def execute_voice_semantic_turn(
                     action_url = "/hud"
                     action_title = "HUD 3D Cybernétique"
                     tool_replies.append(tool_res.get("message", "Vue HUD 3D mise à jour."))
+
+            elif func_name == "set_hud_mood":
+                tool_replies.append(tool_res.get("message", "Ambiance de l'orbe 3D mise à jour."))
 
             elif func_name in ("git_status", "git_pull", "prepare_commit", "prepare_push"):
                 msg = tool_res.get("message")

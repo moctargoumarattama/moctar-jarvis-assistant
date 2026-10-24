@@ -304,6 +304,12 @@ async def _prewarm_common_voice_tts() -> None:
         "Très bonne idée Moctar, souffle un peu et prends ton temps. Je garde un œil sur la machine pendant ta pause !",
         "Tout tourne comme une horloge Moctar ! Les systèmes sont nominaux sur le Dell M4800. Et toi, la forme ? Prêt à avancer ?",
         "Avec grand plaisir Moctar ! On forme une sacrée équipe. Toujours là pour toi !",
+        "Orbe configuré en vert émeraude, mode victoire activé, Moctar !",
+        "Orbe configuré en ambre solaire chaleureux, Moctar !",
+        "Orbe configuré en mode nuit tamisé pour préserver tes yeux, Moctar !",
+        "Orbe réinitialisé en cyan technologique serein, Moctar !",
+        "Orbe configuré en magenta quantique, Moctar !",
+        "Orbe configuré en rouge corail, vigilance maximale activée, Moctar !",
     ]
     for p in phrases:
         try:
@@ -375,6 +381,8 @@ def is_direct_voice_command(text: str) -> bool:
     if re.search(r"\b(?:bonne\s+nuit|je\s+vais\s+dormir|je\s+vais\s+me\s+coucher|je\s+suis\s+fatigu[ée]|pause\s+caf[ée]|je\s+fais\s+une\s+pause|comment\s+tu\s+vas|comment\s+vas[- ]tu|[cç]a\s+va|la\s+forme)\b", norm) or norm in ("merci", "merci beaucoup", "super merci", "merci mon ami", "merci frérot", "bien joué"):
         return True
     if re.search(r"\b(?:merci\s+(?:mon\s+ami|fr[ée]rot|moctar|jarvis))\b", norm):
+        return True
+    if re.search(r"\b(?:mets?\s+l['’]orbe|couleur\s+de\s+l['’]orbe|mode\s+victoire|mode\s+alerte|ambiance\s+chaleureuse|ambiance\s+nuit|orbe\s+(?:vert|or|ambre|nuit|cyan|violet|rouge))\b", norm):
         return True
     if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague|qui\s+t['’]a\s+(?:cr[ée][ée]|con[çc]u)|tu\s+m['’]entends|tu\s+nous\s+entends|test\s+micro)\b", norm):
         return True
@@ -560,6 +568,17 @@ def is_self_echo_transcript(transcript: str, runtime: Any = None) -> bool:
 
 def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
     """Intercepteur de commandes locales instantanées (0 ms, sans LLM)."""
+    reply = _handle_instant_local_command_logic(text, memory=memory)
+    if reply is not None:
+        try:
+            mood = hud_state_manager.deduce_mood_from_text(reply, text)
+            hud_state_manager.set_hud_mood(mood)
+        except Exception:
+            pass
+    return reply
+
+
+def _handle_instant_local_command_logic(text: str, memory: Any = None) -> str | None:
     cleaned = (text or "").strip()
     if not cleaned:
         return None
@@ -680,6 +699,26 @@ def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
             return "Bonsoir Moctar ! Content de te retrouver. Dis-moi sur quoi on se concentre ce soir."
         else:
             return "Encore au travail Moctar ? Je reste avec toi, mais pense à préserver ton sommeil. Dis-moi ce qu'on boucle !"
+
+    # 0d. Ambiance & Couleurs Émotionnelles de l'Orbe 3D HUD
+    if re.search(r"\b(?:mets?\s+l['’]orbe\s+en\s+vert|mode\s+victoire|orbe\s+vert)\b", normalized):
+        hud_state_manager.set_hud_mood("success")
+        return "Orbe configuré en vert émeraude, mode victoire activé, Moctar !"
+    if re.search(r"\b(?:mets?\s+l['’]orbe\s+en\s+or|mets?\s+l['’]orbe\s+en\s+ambre|ambiance\s+chaleureuse|orbe\s+or|orbe\s+ambre)\b", normalized):
+        hud_state_manager.set_hud_mood("friendly")
+        return "Orbe configuré en ambre solaire chaleureux, Moctar !"
+    if re.search(r"\b(?:mets?\s+l['’]orbe\s+en\s+(?:mode\s+)?nuit|ambiance\s+nuit|orbe\s+bleu\s+nuit|mode\s+sommeil)\b", normalized):
+        hud_state_manager.set_hud_mood("night")
+        return "Orbe configuré en mode nuit tamisé pour préserver tes yeux, Moctar !"
+    if re.search(r"\b(?:mets?\s+l['’]orbe\s+en\s+cyan|orbe\s+par\s+d[ée]faut|mode\s+serein|orbe\s+cyan)\b", normalized):
+        hud_state_manager.set_hud_mood("calm")
+        return "Orbe réinitialisé en cyan technologique serein, Moctar !"
+    if re.search(r"\b(?:mets?\s+l['’]orbe\s+en\s+violet|mets?\s+l['’]orbe\s+en\s+magenta|orbe\s+quantique|orbe\s+violet)\b", normalized):
+        hud_state_manager.set_hud_mood("quantum")
+        return "Orbe configuré en magenta quantique, Moctar !"
+    if re.search(r"\b(?:mets?\s+l['’]orbe\s+en\s+rouge|mode\s+alerte|orbe\s+rouge)\b", normalized):
+        hud_state_manager.set_hud_mood("alert")
+        return "Orbe configuré en rouge corail, vigilance maximale activée, Moctar !"
 
     # 1. Identité ("comment t'appelles-tu", "qui es-tu", "c'est quoi ton nom", etc.)
     if re.search(r"\b(?:qui\s+es[- ]tu|comment\s+tu\s+t['’]appelles|comment\s+t['’]appelles[- ]tu|c['’]est\s+quoi\s+ton\s+nom|quel\s+est\s+ton\s+nom|qui\s+tu\s+es|pr[ée]sente[- ]toi)\b", normalized):
@@ -1431,6 +1470,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         view = body.get("view", "orb")
         locate = bool(body.get("locate", False))
         updated = hud_state_manager.set_hud_view(view=view, locate=locate)
+        return JSONResponse(updated)
+
+    @application.post("/api/hud/mood")
+    async def set_hud_mood_endpoint(request: Request):
+        require_local_or_admin(request, settings)
+        import hud_state_manager
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        mood = body.get("mood", "calm")
+        color = body.get("color")
+        pulse_speed = body.get("pulse_speed")
+        updated = hud_state_manager.set_hud_mood(mood=mood, color=color, pulse_speed=pulse_speed)
         return JSONResponse(updated)
 
     @application.get("/static/live_metrics.js")
@@ -2198,7 +2251,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if (header_session or header_barge_in or reply_text.strip().endswith("?")) and not attention.get("should_disengage"):
             runtime.voice_session_until = max(getattr(runtime, "voice_session_until", 0.0), time.monotonic() + 30.0)
 
+        hud_mood = "calm"
         try:
+            hud_mood = hud_state_manager.deduce_mood_from_text(reply_text, display_user_text)
+            hud_state_manager.set_hud_mood(hud_mood)
             hud_state_manager.set_hud_voice_status(
                 "speaking",
                 user_transcript=display_user_text,
@@ -2214,6 +2270,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception as exc:
             LOGGER.warning("Synthèse edge-tts indisponible sur /api/voice/interact : %s", exc)
 
+        current_hud = hud_state_manager.get_hud_state()
+
         return JSONResponse(
             {
                 "ok": True,
@@ -2224,6 +2282,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "audio_url": audio_url,
                 "audio_chunks": audio_chunks,
                 "first_chunk_audio_url": audio_chunks[0] if audio_chunks else audio_url,
+                "mood": current_hud.get("mood", hud_mood),
+                "mood_color": current_hud.get("mood_color", "#00f3ff"),
+                "pulse_speed": current_hud.get("pulse_speed", 1.0),
+                "circadian_phase": current_hud.get("circadian_phase", "afternoon"),
                 "session_active": bool(
                     (runtime.voice_session_until > time.monotonic() and (session_duration > 0 or reply_text.strip().endswith("?")))
                     or (header_session and not attention.get("should_disengage"))

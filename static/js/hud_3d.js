@@ -38,8 +38,16 @@
   const HEX_MAGENTA = 0xd900ff;
   const HEX_GOLD = 0xffb700;
   const HEX_GREEN = 0x00ff88;
+  const HEX_ALERT = 0xff3366;
+  const HEX_NIGHT = 0x3d64a8;
+  const HEX_CARING = 0xff9955;
 
   let COLOR_CYAN, COLOR_ELECTRIC, COLOR_DEEP_BLUE, COLOR_WHITE, COLOR_MAGENTA, COLOR_GOLD, COLOR_GREEN;
+  let currentMood = 'calm';
+  let currentMoodColor = null;
+  let targetMoodColor = null;
+  let pulseSpeedFactor = 1.0;
+  let targetPulseSpeed = 1.0;
 
   // Éléments du DOM
   const $ = (id) => document.getElementById(id);
@@ -251,6 +259,37 @@
     COLOR_MAGENTA = new THREE.Color(HEX_MAGENTA);
     COLOR_GOLD = new THREE.Color(HEX_GOLD);
     COLOR_GREEN = new THREE.Color(HEX_GREEN);
+
+    currentMoodColor = new THREE.Color(HEX_CYAN);
+    targetMoodColor = new THREE.Color(HEX_CYAN);
+  }
+
+  function applyMood(mood, hexColor, speed) {
+    currentMood = (mood || 'calm').toLowerCase();
+    const moodPalette = {
+      calm: HEX_CYAN,
+      friendly: HEX_GOLD,
+      success: HEX_GREEN,
+      quantum: HEX_MAGENTA,
+      night: HEX_NIGHT,
+      caring: HEX_CARING,
+      alert: HEX_ALERT,
+    };
+    if (hexColor && typeof THREE !== 'undefined' && THREE.Color) {
+      try {
+        if (targetMoodColor) targetMoodColor.set(hexColor);
+      } catch (_) {
+        if (targetMoodColor) targetMoodColor.set(moodPalette[currentMood] || HEX_CYAN);
+      }
+    } else if (targetMoodColor) {
+      targetMoodColor.set(moodPalette[currentMood] || HEX_CYAN);
+    }
+
+    if (typeof speed === 'number') {
+      targetPulseSpeed = speed;
+    } else {
+      targetPulseSpeed = currentMood === 'night' ? 0.65 : currentMood === 'alert' ? 1.8 : currentMood === 'success' || currentMood === 'friendly' ? 1.25 : 1.0;
+    }
   }
 
   // =========================================================================
@@ -670,8 +709,9 @@
       ctx.clearRect(0, 0, w, h);
 
       // Halo central
+      const moodHex = currentMoodColor ? `#${currentMoodColor.getHexString()}` : '#00f3ff';
       const grad = ctx.createRadialGradient(cx, cy, baseR * 0.1, cx, cy, baseR * 1.5);
-      grad.addColorStop(0, currentView === 'quantum' ? 'rgba(217, 0, 255, 0.35)' : 'rgba(0, 243, 255, 0.35)');
+      grad.addColorStop(0, `${moodHex}55`);
       grad.addColorStop(1, 'rgba(2, 6, 14, 0)');
       ctx.fillStyle = grad;
       ctx.beginPath();
@@ -679,7 +719,7 @@
       ctx.fill();
 
       // Anneaux concentriques
-      ctx.strokeStyle = '#00f3ff';
+      ctx.strokeStyle = moodHex;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(cx, cy, baseR, 0, Math.PI * 2);
@@ -858,6 +898,10 @@
 
   function handleVoiceInteractResult(data, playAudioManually = false) {
     if (!data || data.ignored) return;
+
+    if (data.mood || data.mood_color) {
+      applyMood(data.mood, data.mood_color, data.pulse_speed);
+    }
 
     const rawUser = String(data.user_text || '').trim();
     const isHallucination = HALLUCINATION_BLACK_LIST.some((h) => rawUser.toLowerCase().includes(h));
@@ -1253,6 +1297,9 @@
             applyMetrics(data.cpu_percent, data.ram_percent, data.hostname);
           }
           const remoteTs = Number(data.last_updated || 0);
+          if (data.mood || data.mood_color) {
+            applyMood(data.mood, data.mood_color, data.pulse_speed);
+          }
           if (remoteTs > lastRemoteHudUpdated) {
             lastRemoteHudUpdated = remoteTs;
             if (data.user_transcript && userTextEl) {
@@ -1290,6 +1337,29 @@
     const elapsed = clock ? clock.getElapsedTime() : Date.now() * 0.001;
     const voiceBoost = 1.0 + liveVoiceRms * 3.2;
 
+    // 0. Transition fluide des couleurs et de la pulsation émotionnelle (Lerp 60 FPS)
+    if (currentMoodColor && targetMoodColor) {
+      currentMoodColor.lerp(targetMoodColor, 0.045);
+      pulseSpeedFactor += (targetPulseSpeed - pulseSpeedFactor) * 0.045;
+
+      if (plasmaInnerRing && plasmaInnerRing.material) {
+        plasmaInnerRing.material.color.copy(currentMoodColor);
+      }
+      if (plasmaOuterRing && plasmaOuterRing.material) {
+        plasmaOuterRing.material.color.copy(currentMoodColor);
+      }
+      if (quantumHaloMesh && quantumHaloMesh.material) {
+        quantumHaloMesh.material.color.copy(currentMoodColor);
+      }
+      if (orbitalRingMesh && orbitalRingMesh.material) {
+        if (currentMood === 'alert') {
+          orbitalRingMesh.material.color.set(HEX_ALERT);
+        } else {
+          orbitalRingMesh.material.color.copy(currentMoodColor);
+        }
+      }
+    }
+
     currentCameraZ += (targetCameraZ - currentCameraZ) * 0.08;
     camera.position.z = currentCameraZ;
     camera.lookAt(0, 0, 0);
@@ -1325,8 +1395,11 @@
 
     if (currentView === 'plasma' && plasmaParticles) {
       const positions = plasmaParticles.geometry.attributes.position.array;
+      const colorsAttr = plasmaParticles.geometry.attributes.color;
+      const colorsArr = colorsAttr ? colorsAttr.array : null;
+
       for (let i = 0; i < PLASMA_PARTICLE_COUNT; i++) {
-        plasmaAngles[i] += delta * plasmaSpeeds[i] * voiceBoost;
+        plasmaAngles[i] += delta * plasmaSpeeds[i] * voiceBoost * pulseSpeedFactor;
         const u = plasmaAngles[i];
         const r = plasmaRadii[i] + Math.sin(elapsed * 5 + i) * (1.5 + liveVoiceRms * 8);
 
@@ -1334,16 +1407,24 @@
         positions[idx] = r * Math.cos(u);
         positions[idx + 1] = r * Math.sin(u);
         positions[idx + 2] = plasmaZOffsets[i] + Math.sin(u * 3 + elapsed) * 2.2;
+
+        if (colorsArr && currentMoodColor) {
+          colorsArr[idx] += (currentMoodColor.r - colorsArr[idx]) * 0.035;
+          colorsArr[idx + 1] += (currentMoodColor.g - colorsArr[idx + 1]) * 0.035;
+          colorsArr[idx + 2] += (currentMoodColor.b - colorsArr[idx + 2]) * 0.035;
+        }
       }
       plasmaParticles.geometry.attributes.position.needsUpdate = true;
+      if (colorsAttr) colorsAttr.needsUpdate = true;
 
       if (plasmaInnerRing) {
-        const pulse = 1.0 + Math.sin(elapsed * 4) * 0.025 + liveVoiceRms * 0.25;
+        const breathFreq = currentMood === 'night' ? 2.2 : currentMood === 'alert' ? 6.5 : 4.0;
+        const pulse = 1.0 + Math.sin(elapsed * breathFreq) * 0.03 * pulseSpeedFactor + liveVoiceRms * 0.25;
         plasmaInnerRing.scale.set(pulse, pulse, pulse);
       }
       if (plasmaOuterRing) {
         const pBoost = currentVoicePhase === 'processing' ? 2.2 : 1.0;
-        plasmaOuterRing.rotation.z -= delta * 0.45 * voiceBoost * pBoost;
+        plasmaOuterRing.rotation.z -= delta * 0.45 * voiceBoost * pBoost * pulseSpeedFactor;
       }
     }
 
@@ -1356,7 +1437,14 @@
         : 0;
       const corePulse = 1.0 + Math.sin(elapsed * 5) * 0.06 + liveVoiceRms * 0.4 + phaseCorePulse;
 
-      if (quantumCoreMesh) quantumCoreMesh.scale.set(corePulse, corePulse, corePulse);
+      if (quantumCoreMesh) {
+        quantumCoreMesh.scale.set(corePulse, corePulse, corePulse);
+        if (currentMood === 'alert') {
+          quantumCoreMesh.material.color.set(HEX_ALERT);
+        } else {
+          quantumCoreMesh.material.color.set(0xffffff);
+        }
+      }
 
       const qBoost = currentVoicePhase === 'processing' ? 2.5 : 1.0;
       quantumFilamentRings.forEach((ring, idx) => {
@@ -1411,6 +1499,7 @@
 
   window.MocHUD = {
     applyView,
+    applyMood,
     toggleMicrophone,
     stopAllSpeech,
     submitTextCommand,
