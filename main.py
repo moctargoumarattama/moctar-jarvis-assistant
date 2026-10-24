@@ -570,9 +570,9 @@ def is_self_echo_transcript(transcript: str, runtime: Any = None) -> bool:
     return False
 
 
-def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
+def handle_instant_local_command(text: str, memory: Any = None, client_device: str | None = None) -> str | None:
     """Intercepteur de commandes locales instantanées (0 ms, sans LLM)."""
-    reply = _handle_instant_local_command_logic(text, memory=memory)
+    reply = _handle_instant_local_command_logic(text, memory=memory, client_device=client_device)
     if reply is not None:
         try:
             mood = hud_state_manager.deduce_mood_from_text(reply, text)
@@ -582,11 +582,12 @@ def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
     return reply
 
 
-def _handle_instant_local_command_logic(text: str, memory: Any = None) -> str | None:
+def _handle_instant_local_command_logic(text: str, memory: Any = None, client_device: str | None = None) -> str | None:
     cleaned = (text or "").strip()
     if not cleaned:
         return None
     normalized = _strip_accents_1to1(cleaned).lower()
+    device_label = (client_device or "terminal client").strip()
 
     # 0a. Commandes d'interruption vocale (Barge-In)
     if re.search(r"\b(?:tais[- ]toi|ferme[- ]la|chut|silence)\b", normalized) or normalized in ("tais-toi", "tais toi", "stop", "chut", "silence"):
@@ -670,7 +671,9 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None) -> str | 
 
     # 0a9. Comment ça va & Humeur complice ("comment tu vas", "ça va", "tu as la forme", "la forme")
     if re.search(r"\b(?:comment\s+(?:vas?[- ]tu|tu\s+vas)|(?:[cç]a\s+va|la\s+forme)(?:\s+moctar|\s+jarvis)?$)\b", normalized) or normalized in ("ca va", "ça va", "la forme", "comment tu vas", "comment vas tu", "tu vas bien"):
-        return "Tout tourne comme une horloge Moctar ! Les systèmes sont nominaux sur le Dell M4800. Et toi, la forme ? Prêt à avancer ?"
+        if client_device and client_device != "Serveur local Dell M4800":
+            return f"Tout tourne comme une horloge Moctar ! Le serveur hôte Dell Precision M4800 est nominal, synchronisé avec votre {device_label}. Et toi, la forme ? Prêt à avancer ?"
+        return "Tout tourne comme une horloge Moctar ! Les systèmes sont nominaux sur le serveur Dell Precision M4800. Et toi, la forme ? Prêt à avancer ?"
 
     # 0a10. Remerciements et Fraternité ("merci", "merci mon ami", "merci frérot", "super merci", "bien joué")
     if re.search(r"\b(?:merci\s+(?:mon\s+ami|fr[ée]rot|infiniment|beaucoup|moctar|jarvis)|t['’]es\s+le\s+meilleur|super\s+boulot)\b", normalized) or normalized in ("merci", "super merci", "merci beaucoup", "merci bien", "bien joué", "merci mon ami", "merci frérot"):
@@ -730,7 +733,9 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None) -> str | 
 
     # 1b. Rôle & Métier d'Ingénieur ("c'est quoi ton job", "tu es qui toi", "quel est ton job", "tu sers à quoi", "tu fais quoi")
     if re.search(r"\b(?:c['’]est\s+quoi\s+ton\s+job|quel\s+est\s+ton\s+job|ton\s+job|tu\s+es\s+qui\s+toi|t['’]es\s+qui\s+toi|tu\s+sers\s+[aà]\s+quoi|tu\s+fais\s+quoi|tu\s+sais\s+faire\s+quoi|quel\s+est\s+ton\s+r[ôo]le|ton\s+r[ôo]le)\b", normalized):
-        return "Je suis M.O.C.T.A.R, votre copilote d'ingénierie et système d'intelligence opérationnelle sur ce Dell Precision M4800. Je pilote vos environnements de travail, surveille l'infrastructure NOC, exécute vos commandes et assure le suivi de vos projets en temps réel, Moctar."
+        if client_device and client_device != "Serveur local Dell M4800":
+            return f"Je suis M.O.C.T.A.R, votre copilote d'ingénierie et système d'intelligence opérationnelle. Mes services tournent sur le serveur hôte Dell Precision M4800 et je vous assiste directement sur votre {device_label}, Moctar."
+        return "Je suis M.O.C.T.A.R, votre copilote d'ingénierie et système d'intelligence opérationnelle sur le serveur Dell Precision M4800. Je pilote vos environnements de travail, surveille l'infrastructure NOC, exécute vos commandes et assure le suivi de vos projets en temps réel, Moctar."
 
     # 1c. Transition collaborative ("on va passer à ceci", "on continue", "on enchaîne")
     if re.search(r"\b(?:on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|passons\s+[aà]\s+la\s+suite)\b", normalized):
@@ -782,7 +787,7 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None) -> str | 
             import active_task_tracker
             return active_task_tracker.format_active_task_speech()
         except Exception:
-            return "Nous sommes en veille opérationnelle sur l'infrastructure Dell Precision M4800, Moctar."
+            return f"Nous sommes en veille opérationnelle sur le serveur Dell Precision M4800, connecté à votre {device_label}, Moctar."
 
     # 7. Demande de répétition ("répète", "tu as dit quoi", "qu'est-ce que tu as dit", "j'ai pas entendu")
     if re.search(r"\b(?:r[ée]p[èe]te(?:\s+(?:ce\s+que\s+tu\s+viens\s+de\s+dire|ce\s+que\s+tu\s+as\s+dit|s['’]il\s+te\s+pla[îi]t|un\s+peu))?|qu['’]est[- ]ce\s+que\s+tu\s+as\s+dit|tu\s+as\s+dit\s+quoi|qu['’]as[- ]tu\s+dit|peux[- ]tu\s+r[ée]p[ée]ter|tu\s+disais|j['’]?ai\s+pas\s+(?:bien\s+)?entendu)\b", normalized):
@@ -1143,7 +1148,7 @@ _EXTERNAL_LOCK_HTML = """<!DOCTYPE html>
 
 
 def is_local_request(request: Request) -> bool:
-    """Retourne True si la requête provient du poste local (loopback) ou du réseau privé local (LAN/Wi-Fi)."""
+    """Retourne True si la requête provient du poste local (loopback), du réseau privé local (LAN/Wi-Fi) ou de Tailscale."""
     peer = (request.client.host if request.client else "").strip().lower()
     if peer in _LOOPBACK_HOSTS or peer.startswith("127.") or peer.startswith("::ffff:127."):
         return True
@@ -1151,6 +1156,9 @@ def is_local_request(request: Request) -> bool:
         import ipaddress
         ip = ipaddress.ip_address(peer)
         if ip.is_loopback or ip.is_private or ip.is_link_local:
+            return True
+        # Réseau Tailscale / Carrier Grade NAT (100.64.0.0/10)
+        if ip in ipaddress.ip_network("100.64.0.0/10"):
             return True
     except ValueError:
         pass
@@ -1191,17 +1199,23 @@ def is_external_unlocked(request: Request, settings: Settings | None = None) -> 
 
 
 def _is_allowed_origin_host(p_host: str, t_host: str) -> bool:
-    """Vérifie si les hôtes d'origine et de destination correspondent ou appartiennent au réseau local."""
+    """Vérifie si les hôtes d'origine et de destination correspondent ou appartiennent au réseau local/Tailscale."""
     if p_host == t_host:
         return True
     loopbacks = _LOOPBACK_HOSTS | {"127.0.0.1", "localhost", "::1", "testserver"}
     if p_host in loopbacks and t_host in loopbacks:
         return True
+    # Hôtes locaux mDNS (.local, .lan)
+    if p_host.endswith((".local", ".lan")) or t_host.endswith((".local", ".lan")):
+        return True
     try:
         import ipaddress
         ip_p = ipaddress.ip_address(p_host)
         ip_t = ipaddress.ip_address(t_host)
-        return bool((ip_p.is_private or ip_p.is_loopback) and (ip_t.is_private or ip_t.is_loopback))
+        tailscale_net = ipaddress.ip_network("100.64.0.0/10")
+        p_ok = ip_p.is_private or ip_p.is_loopback or (ip_p in tailscale_net)
+        t_ok = ip_t.is_private or ip_t.is_loopback or (ip_t in tailscale_net)
+        return bool(p_ok and t_ok)
     except ValueError:
         return False
 
@@ -1220,8 +1234,13 @@ def same_origin(request: Request) -> None:
         p_host = (parts.hostname or "").lower()
         t_host = (target.hostname or "").lower()
         hostname_match = _is_allowed_origin_host(p_host, t_host)
-        port_match = (parts.port or (443 if parts.scheme == "https" else 80)) == (target.port or (443 if target.scheme == "https" else 80))
-        scheme_match = parts.scheme in {"http", "https"} and (parts.scheme == target.scheme or is_local_request(request))
+        # En réseau local ou Tailscale, tolérance de port pour les accès multi-appareils et proxies inverses
+        is_local = is_local_request(request)
+        port_match = (
+            (parts.port or (443 if parts.scheme == "https" else 80)) == (target.port or (443 if target.scheme == "https" else 80))
+            or is_local
+        )
+        scheme_match = parts.scheme in {"http", "https"} and (parts.scheme == target.scheme or is_local)
         valid = (scheme_match and hostname_match and port_match
                  and not parts.username and not parts.password and parts.path in {"", "/"}
                  and not parts.query and not parts.fragment)
@@ -2180,9 +2199,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session_duration = VOICE_SESSION_DURATION_SECONDS if VOICE_SESSION_DURATION_SECONDS > 0 else (45.0 if (header_session or header_barge_in or query_session) else 0.0)
         runtime.voice_session_until = time.monotonic() + session_duration
 
+        client_device = (
+            request.headers.get("x-client-device")
+            or request.headers.get("x-device-name")
+            or ""
+        )
+        if not client_device:
+            ua = request.headers.get("user-agent", "")
+            if "Android" in ua:
+                client_device = "Smartphone Android"
+            elif "iPhone" in ua:
+                client_device = "iPhone"
+            elif "iPad" in ua:
+                client_device = "iPad"
+            elif "Windows" in ua:
+                client_device = "PC Windows"
+            elif "Macintosh" in ua:
+                client_device = "Mac"
+            elif "Linux" in ua and "Android" not in ua:
+                peer = (request.client.host if request.client else "")
+                if peer in ("127.0.0.1", "localhost", "::1"):
+                    client_device = "Serveur local Dell M4800"
+                else:
+                    client_device = "Poste Linux"
+            else:
+                client_device = "Terminal client"
+
         agent_result: dict[str, Any] = {}
         memory_instance = getattr(getattr(runtime, "jarvis", None), "memory", None)
-        instant_reply = handle_instant_local_command(command_text, memory=memory_instance)
+        instant_reply = handle_instant_local_command(command_text, memory=memory_instance, client_device=client_device)
         if command_text == _WAKE_ONLY_SENTINEL or _is_pure_filler_or_wake(command_text):
             display_user_text = transcript
             reply_text = VOICE_BUTLER_GREETINGS[0]

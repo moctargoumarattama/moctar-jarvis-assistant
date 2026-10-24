@@ -174,4 +174,43 @@ def test_comprehensive_direct_voice_commands_audit():
         assert att.get("is_directed") is True, f"Doit être adressé au système : {p}"
 
 
+def test_tailscale_and_client_device_awareness():
+    """Vérifie la prise en charge native des IPs Tailscale et la personnalisation selon l'appareil client."""
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+
+    # 1. Tailscale IP reconnue comme locale
+    mock_tailscale_req = SimpleNamespace(client=SimpleNamespace(host="100.68.163.14"), headers={})
+    assert main.is_local_request(mock_tailscale_req) is True
+
+    # 2. Adaptation des réponses instantanées selon le terminal client
+    reply_android = main.handle_instant_local_command("tu sers à quoi", client_device="Smartphone Android")
+    assert reply_android is not None
+    assert "Smartphone Android" in reply_android
+    assert "Dell Precision M4800" in reply_android
+
+    reply_pc = main.handle_instant_local_command("ça va", client_device="PC Windows")
+    assert reply_pc is not None
+    assert "PC Windows" in reply_pc
+    assert "Dell Precision M4800" in reply_pc
+
+    # 3. Requête HTTP interact avec headers d'appareil client
+    with TestClient(main.app, base_url="http://100.68.163.14:5050", client=("100.68.163.14", 50000)) as client_ts:
+        resp = client_ts.post(
+            "/api/voice/interact",
+            json={"text": "comment tu vas"},
+            headers={
+                "Host": "100.68.163.14:5050",
+                "Origin": "http://100.68.163.14:5050",
+                "Sec-Fetch-Site": "same-origin",
+                "X-Voice-Session-Active": "true",
+                "X-Client-Device": "iPad Pro",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("ok") is True
+        assert "iPad Pro" in data.get("reply_text", "") or "Dell" in data.get("reply_text", "")
+
+
 

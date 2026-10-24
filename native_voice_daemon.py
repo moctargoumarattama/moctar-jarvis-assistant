@@ -236,21 +236,7 @@ class NativeVoiceDaemon:
 
         while self.running:
             try:
-                # 1. Évaluation périodique des initiatives proactives (toutes les 25s) si le PC ne joue pas de musique
-                now = time.monotonic()
-                if (now - last_proactive_check) >= 25.0:
-                    last_proactive_check = now
-                    if not is_pc_audio_playing() and self.runtime is not None:
-                        try:
-                            from proactive_companion import ProactiveCompanion
-                            comp = ProactiveCompanion.get_instance()
-                            event = comp.evaluate_proactive_event(self.runtime)
-                            if event and event.get("message"):
-                                LOGGER.info("⚡ [NATIVE INITIATIVE TRIGGER]: %s", event["message"])
-                        except Exception:
-                            pass
-
-                # 2. Lecture non-bloquante du pipe Linux
+                # Lecture non-bloquante du pipe Linux pour déclenchement clavier OS / script
                 if fifo_fd is not None:
                     r, _, _ = select.select([fifo_fd], [], [], 1.0)
                     if fifo_fd in r:

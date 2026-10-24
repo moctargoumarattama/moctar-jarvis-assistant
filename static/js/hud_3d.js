@@ -31,6 +31,43 @@
   // Coordonnées de Moctar (Dell Precision M4800 / Rabat)
   const DEFAULT_COORDS = { lat: 34.020882, lon: -6.841650, label: "Rabat · Dell Precision M4800" };
 
+  // Détection dynamique de l'appareil client (Windows, Android, Mac, iOS, Linux)
+  function detectClientDevice() {
+    const ua = (typeof navigator !== 'undefined' && navigator.userAgent) ? navigator.userAgent : '';
+    let os = 'Client Web';
+    let type = 'desktop';
+
+    if (/Android/i.test(ua)) {
+      os = 'Smartphone Android';
+      type = 'mobile';
+    } else if (/iPhone|iPod/i.test(ua)) {
+      os = 'iPhone';
+      type = 'mobile';
+    } else if (/iPad/i.test(ua) || (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+      os = 'iPad';
+      type = 'tablet';
+    } else if (/Windows NT/i.test(ua)) {
+      os = 'PC Windows';
+      type = 'desktop';
+    } else if (/Macintosh|Mac OS X/i.test(ua)) {
+      os = 'Mac';
+      type = 'desktop';
+    } else if (/Linux/i.test(ua)) {
+      os = 'Poste Linux';
+      type = 'desktop';
+    }
+
+    const browser = /Edg\//i.test(ua) ? 'Edge' : (/Chrome\//i.test(ua) ? 'Chrome' : (/Firefox\//i.test(ua) ? 'Firefox' : (/Safari\//i.test(ua) ? 'Safari' : 'Navigateur')));
+    return {
+      os,
+      type,
+      browser,
+      label: `${os} (${browser})`,
+    };
+  }
+
+  const clientInfo = detectClientDevice();
+
   const HEX_CYAN = 0x00f3ff;
   const HEX_ELECTRIC = 0x00aaff;
   const HEX_DEEP_BLUE = 0x002db3;
@@ -1003,10 +1040,10 @@
     rotationTargets.globe.y = -(theta - Math.PI / 2);
 
     if (gpsCoordsEl) {
-      gpsCoordsEl.textContent = `GPS : ${userCoords.lat.toFixed(4)}°N, ${userCoords.lon.toFixed(4)}°E (Position Moctar Verrouillée)`;
+      gpsCoordsEl.textContent = `GPS : ${userCoords.lat.toFixed(4)}°N, ${userCoords.lon.toFixed(4)}°E (Rabat · Hôte: M4800 · Client: ${clientInfo.os})`;
     }
     if (assistantTextEl && !preserveReply) {
-      assistantTextEl.textContent = "Position géographique verrouillée sur le Dell Precision M4800 à Rabat, Moctar.";
+      assistantTextEl.textContent = `Position géographique verrouillée sur le serveur Dell Precision M4800 (Rabat), connecté à votre ${clientInfo.os}, Moctar.`;
     }
   }
 
@@ -1017,8 +1054,12 @@
       return;
     }
 
-    if (window.isSecureContext === false) {
-      handleVoiceStateChange('error', { message: '⚠️ HTTPS requis pour autoriser le microphone' });
+    if (window.isSecureContext === false && (!window.navigator || !window.navigator.mediaDevices || !window.navigator.mediaDevices.getUserMedia)) {
+      const secureMsg = '⚠️ Accès micro distant : ouvrez en HTTPS ou activez chrome://flags/#unsafely-treat-insecure-origin-as-secure';
+      handleVoiceStateChange('error', { message: secureMsg });
+      if (assistantTextEl) {
+        assistantTextEl.textContent = "Sur un appareil distant en HTTP, le navigateur bloque le micro. Ouvrez en HTTPS ou activez chrome://flags/#unsafely-treat-insecure-origin-as-secure.";
+      }
       return;
     }
 
@@ -1037,7 +1078,12 @@
       }
     } catch (err) {
       console.warn("Erreur toggleMicrophone:", err);
-      handleVoiceStateChange('error');
+      const isSecurity = String(err && (err.name || err.message)).includes('SecurityError') || String(err && (err.name || err.message)).includes('NotAllowedError');
+      const msg = isSecurity
+        ? '⚠️ Autorisation micro refusée ou bloquée par HTTP. Activez HTTPS ou chrome://flags/#unsafely-treat-insecure-origin-as-secure'
+        : '⚠️ Erreur microphone. Vérifiez les autorisations de votre navigateur.';
+      handleVoiceStateChange('error', { message: msg });
+      if (assistantTextEl) assistantTextEl.textContent = msg;
     }
   }
 
@@ -1139,6 +1185,8 @@
         headers: {
           'Content-Type': 'application/json',
           'X-Voice-Session-Active': 'true',
+          'X-Client-Device': clientInfo.label,
+          'X-Client-OS': clientInfo.os,
         },
         credentials: 'include',
         body: JSON.stringify({ text: query }),
@@ -1150,32 +1198,48 @@
         return;
       }
 
+      console.error('[MocHUD] /api/voice/interact HTTP status:', res.status, res.statusText);
+      let errorDetail = '';
+      try {
+        const errData = await res.json();
+        if (errData && (errData.detail || errData.message)) {
+          errorDetail = errData.detail || errData.message;
+        }
+      } catch (_) {}
+
       if (res.status === 403) {
-        let msg = "Accès externe verrouillé : mot de passe requis.";
-        try {
-          const errData = await res.json();
-          if (errData && errData.detail) msg = errData.detail;
-        } catch (_) {}
-        if (assistantTextEl) assistantTextEl.textContent = msg;
+        if (assistantTextEl) assistantTextEl.textContent = errorDetail || "Accès externe verrouillé : mot de passe requis.";
         handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
         return;
       }
 
       // Fallback sur /api/jarvis/query (endpoint NOC)
-      const fallbackRes = await fetch('/api/jarvis/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ prompt: query, source: 'hud_web' }),
-      });
-      if (fallbackRes.ok) {
-        const fbData = await fallbackRes.json();
-        handleVoiceInteractResult({ user_text: query, reply_text: fbData.reply || '' }, true);
-        return;
+      try {
+        const fallbackRes = await fetch('/api/jarvis/query', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Client-Device': clientInfo.label,
+            'X-Client-OS': clientInfo.os,
+          },
+          credentials: 'include',
+          body: JSON.stringify({ prompt: query, source: 'hud_web' }),
+        });
+        if (fallbackRes.ok) {
+          const fbData = await fallbackRes.json();
+          handleVoiceInteractResult({ user_text: query, reply_text: fbData.reply || '' }, true);
+          return;
+        }
+        console.error('[MocHUD] /api/jarvis/query fallback HTTP status:', fallbackRes.status);
+      } catch (fbErr) {
+        console.error('[MocHUD] Fallback query error:', fbErr);
       }
-      if (assistantTextEl) assistantTextEl.textContent = "Erreur de communication avec le serveur, Moctar.";
+
+      const msg = errorDetail ? `Erreur (${res.status}) : ${errorDetail}` : `Erreur de communication avec le serveur (${res.status}), Moctar.`;
+      if (assistantTextEl) assistantTextEl.textContent = msg;
       handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
-    } catch (_) {
+    } catch (netErr) {
+      console.error('[MocHUD] Network exception:', netErr);
       if (assistantTextEl) assistantTextEl.textContent = "Réseau indisponible, Moctar.";
       handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
     }
@@ -1288,6 +1352,32 @@
 
     let lastRemoteHudUpdated = 0;
 
+    let lastProactiveCheck = Date.now();
+    async function checkProactiveEvent() {
+      const now = Date.now();
+      if (now - lastProactiveCheck < 20000) return;
+      lastProactiveCheck = now;
+      if (currentVoicePhase === 'speaking' || currentVoicePhase === 'processing' || activeAudioElement) return;
+
+      try {
+        const pRes = await fetch('/api/voice/proactive', { credentials: 'include' });
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          if (pData && pData.has_event && pData.message) {
+            if (assistantTextEl) assistantTextEl.textContent = pData.message;
+            if (pData.event && pData.event.mood) {
+              applyMood(pData.event.mood);
+            }
+            if (pData.audio_url) {
+              playAudioUrl(pData.audio_url);
+            } else {
+              speakJarvisText(pData.message);
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
     async function sync() {
       let metricsApplied = false;
       // 1. Endpoint NOC /api/snapshot (prioritaire et identique au Dashboard NOC)
@@ -1337,6 +1427,9 @@
           }
         }
       } catch (_) {}
+
+      // 3. Vérification des initiatives proactives vocales (bienveillance, santé, rythme circadien)
+      await checkProactiveEvent();
     }
 
     sync();
@@ -1501,6 +1594,9 @@
   // 6. DÉMARRAGE IMMÉDIAT & INFAILLIBLE
   // =========================================================================
   function boot() {
+    if (gpsCoordsEl) {
+      gpsCoordsEl.textContent = `GPS : 34.0209°N, -6.8417°E (Rabat · Hôte: M4800 · Client: ${clientInfo.os})`;
+    }
     try { startClock(); } catch (e) { console.error(e); }
     try { setupUIEventListeners(); } catch (e) { console.error(e); }
     try { startTelemetrySync(); } catch (e) { console.error(e); }
