@@ -136,9 +136,26 @@ def test_phonetic_repair_for_radio_and_identity():
     repaired_id, _ = stt_phonetic_repair.repair_stt_transcript("Je suis qui toi ?")
     assert "tu es qui toi" in repaired_id.lower()
 
+    repaired_eloigne, _ = stt_phonetic_repair.repair_stt_transcript("Tu m'éloignes de soi ? Tu m'éloignes de soi ?")
+    assert "tu me reçois" in repaired_eloigne.lower()
+
+    repaired_erevois, _ = stt_phonetic_repair.repair_stt_transcript("Tu m'érevois ?")
+    assert "tu me reçois" in repaired_erevois.lower()
+
     # Doit être accepté comme commande directe même hors session
     assert main.is_direct_voice_command("Tu me reçois ?") is True
     assert main.is_direct_voice_command("T'es réçois ?") is True
+    assert main.is_direct_voice_command("Tu m'éloignes de soi ?") is True
+    assert main.is_direct_voice_command("Tu m'érevois ?") is True
+
+    # Doit répondre "5 sur 5 Moctar" en 0ms
+    rep = main.handle_instant_local_command("Tu m'éloignes de soi ?")
+    assert rep is not None
+    assert "5 sur 5" in rep
+
+    rep2 = main.handle_instant_local_command("Tu m'érevois ?")
+    assert rep2 is not None
+    assert "5 sur 5" in rep2
 
 
 def test_jarvis_query_endpoint_intercepts_local_command_0ms(tmp_path: Path):

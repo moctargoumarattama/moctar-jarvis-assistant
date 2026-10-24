@@ -390,7 +390,7 @@ def is_direct_voice_command(text: str) -> bool:
         return True
     if re.search(r"\b(?:mets?\s+l['’]orbe|couleur\s+de\s+l['’]orbe|mode\s+victoire|mode\s+alerte|ambiance\s+chaleureuse|ambiance\s+nuit|orbe\s+(?:vert|or|ambre|nuit|cyan|violet|rouge)|orbe|globe|la\s+terre|terre)\b", norm):
         return True
-    if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague|blague|fais\s+une\s+blague|qui\s+t['’\s]?a\s+(?:cr[ée][ée]|con[çc]u)|tu\s+(?:me\s+)?r[ée][cç]ois|t['’]es\s+r[ée][cç]ois|tu\s+(?:me\s+)?captes?|tu\s+m['’\s]?entends|tu\s+nous\s+entends|tu\s+es\s+l[aà]|t['’\s]?es\s+l[aà]|tu\s+peux\s+parler|parle\s+un\s+peu|parle[- ]nous|test\s+micro|qui\s+est\s+l[aà]|fais\s+voir|actualit[ée]s?|c['’\s]?est\s+quoi\s+le\s+programme|programme)\b", norm):
+    if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague|blague|fais\s+une\s+blague|qui\s+t['’\s]?a\s+(?:cr[ée][ée]|con[çc]u)|tu\s+(?:me\s+)?r[ée][cç]ois|t['’]es\s+r[ée][cç]ois|tu\s+m['’][ée]revois|tu\s+m['’][ée]loignes?\s+de\s+soi|tu\s+(?:me\s+)?captes?|tu\s+m['’\s]?entends|tu\s+nous\s+entends|tu\s+es\s+l[aà]|t['’\s]?es\s+l[aà]|tu\s+peux\s+parler|parle\s+un\s+peu|parle[- ]nous|test\s+micro|qui\s+est\s+l[aà]|fais\s+voir|actualit[ée]s?|c['’\s]?est\s+quoi\s+le\s+programme|programme)\b", norm):
         return True
     # Questions ouvertes directes
     if re.search(r"^(?:comment|pourquoi|qu['’]est[- ]ce|c['’]est\s+quoi|qui\s+est|qui\s+a|quel|quelle|combien|est[- ]ce\s+que|peux[- ]tu|tu\s+peux|sais[- ]tu|tu\s+sais|dis[- ]moi|donne[- ]moi|raconte|explique|cherche|fais[- ]moi|montre[- ]moi)\b", norm):
@@ -679,7 +679,7 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
         return "Il y a 10 types de personnes dans le monde : ceux qui comprennent le binaire, et ceux qui ne le comprennent pas !"
 
     # 0a5. Test Micro, Radio & Écoute ("tu me reçois", "tu me captes", "tu m'entends", "tu nous entends", "test micro")
-    if re.search(r"\b(?:tu\s+(?:me\s+)?r[ée][cç]ois|t['’]es\s+r[ée][cç]ois|tu\s+(?:me\s+)?captes?|tu\s+m['’]entends|tu\s+nous\s+entends|m['’]entends[- ]tu|test\s+micro|tu\s+m['’][ée]coutes|tu\s+es\s+l[aà]|t['’]es\s+l[aà])\b", normalized):
+    if re.search(r"\b(?:tu\s+(?:me\s+)?r[ée][cç]ois|t['’]es\s+r[ée][cç]ois|tu\s+m['’][ée]revois|tu\s+m['’][ée]loignes?\s+de\s+soi|tu\s+(?:me\s+)?captes?|tu\s+m['’]entends|tu\s+nous\s+entends|m['’]entends[- ]tu|test\s+micro|tu\s+m['’][ée]coutes|tu\s+es\s+l[aà]|t['’]es\s+l[aà])\b", normalized):
         return "5 sur 5 Moctar ! Je te reçois fort et clair, liaison parfaite. Je suis là avec toi mon ami !"
 
     # 0a5b. Réassurance empathique immédiate ("tu ne me réponds pas", "tu ne me répondais pas", "tu ne me comprends pas", "je te parle depuis")

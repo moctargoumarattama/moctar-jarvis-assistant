@@ -93,7 +93,8 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     (re.compile(r"\b(?:[aà]|au)\s+(?:niam[eé]|nyamey)\b", re.I), "à Niamey", "city_niamey"),
 
     # 7b. Contrôles radio & Présence
-    (re.compile(r"\b(?:t['’]es\s+r[ée][cç]ois|tu\s+r[ée][cç]ois|t['’]es\s+recois)\b", re.I), "tu me reçois", "wake_radio_recois"),
+    (re.compile(r"\b(?:tu\s+m['’][ée]loignes?\s+de\s+soi|tu\s+m['’][ée]revois|tu\s+m['’]envoies?\s+de\s+soi|tu\s+me\s+revois|tu\s+m['’]aper[cç]ois|t['’]es\s+r[ée][cç]ois|tu\s+r[ée][cç]ois|t['’]es\s+recois|tu\s+m['’]re[cç]ois|tu\s+m['’]erevois|tu\s+m['’]eloigne\s+de\s+soi)\b", re.I), "tu me reçois", "wake_radio_recois"),
+    (re.compile(r"\b(?:tu\s+m['’][ée]coutes?\s+toi|tu\s+m['’]entends?\s+l[aà])\b", re.I), "tu me reçois", "wake_radio_entends"),
     (re.compile(r"\b(?:je\s+suis\s+qui,?\s+toi|tu\s+m['’][ée]lus\s+toi)\b", re.I), "tu es qui toi", "wake_identity_misheard"),
     (re.compile(r"\b(?:pourquoi\s+tu\s+(?:ne\s+)?me\s+r[ée]compenses\s+depuis)\b", re.I), "pourquoi tu ne me réponds pas depuis", "frustration_recompenses"),
     (re.compile(r"\b(?:mode\s+)?(?:hib|hip|heep|hube)\s*3\s*d\b", re.I), "mode HUD 3D", "hud_3d_hib"),

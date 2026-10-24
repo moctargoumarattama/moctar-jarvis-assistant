@@ -178,7 +178,12 @@ VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
             "description": "Obtient la synthèse complète de l'avancement du projet JARVIS (derniers commits Git, état des modules, chantiers récents). À appeler quand Moctar demande 'où en est-on ?', 'qu'est-ce qu'on a fait ?', 'avancement du projet'.",
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "description": "Niveau de synthèse optionnel ('global', 'commits', 'modules').",
+                    }
+                },
             },
         },
     },
@@ -189,7 +194,12 @@ VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
             "description": "Obtient la télémétrie complète du système hôte (CPU %, RAM %, température, disque, réseau).",
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "metric": {
+                        "type": "string",
+                        "description": "Métrique spécifique optionnelle ('cpu', 'ram', 'temp', 'all').",
+                    }
+                },
             },
         },
     },
@@ -200,7 +210,12 @@ VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
             "description": "Nettoie la mémoire vive (RAM), purge les caches temporaires et optimise les ressources du serveur Dell Precision M4800.",
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Cible d'optimisation optionnelle ('ram', 'disk', 'all').",
+                    }
+                },
             },
         },
     },
@@ -557,89 +572,97 @@ def _call_groq_voice_semantic(
         if role in ("user", "assistant", "system") and content:
             norm_messages.append({"role": str(role), "content": str(content)})
 
-    # Modèles Groq ultra-rapides et performants pour le dialogue vocal interactif
-    models_to_try = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+    # Découverte dynamique des modèles autorisés sur la clé Groq
+    discovered_models = []
+    try:
+        discovered_models = ai_brain.get_available_groq_chat_models(groq_api_key)
+    except Exception:
+        pass
+    models_to_try = [m for m in discovered_models if m] or ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 
     for model_name in models_to_try:
-        # 1. Via SDK Groq si disponible
-        try:
-            from groq import Groq
-            client = Groq(api_key=groq_api_key, timeout=3.5)
-            kwargs: dict[str, Any] = {
-                "model": model_name,
-                "messages": norm_messages,
-                "temperature": 0.5,
-                "max_tokens": 250,
-            }
-            if tools:
-                kwargs["tools"] = tools
-                kwargs["tool_choice"] = "auto"
+        # Tente d'abord avec outils, puis repli sans outils sur le même modèle si erreur de schéma
+        tools_options = [tools, None] if tools else [None]
+        for active_tools in tools_options:
+            # 1. Via SDK Groq si disponible
+            try:
+                from groq import Groq
+                client = Groq(api_key=groq_api_key, timeout=6.0)
+                kwargs: dict[str, Any] = {
+                    "model": model_name,
+                    "messages": norm_messages,
+                    "temperature": 0.5,
+                    "max_tokens": 250,
+                }
+                if active_tools:
+                    kwargs["tools"] = active_tools
+                    kwargs["tool_choice"] = "auto"
 
-            completion = client.chat.completions.create(**kwargs)
-            choice = completion.choices[0]
-            msg = choice.message
-            tool_calls = []
-            if getattr(msg, "tool_calls", None):
-                for tc in msg.tool_calls:
-                    fn_name = getattr(tc.function, "name", "")
-                    fn_args = getattr(tc.function, "arguments", "{}")
-                    tool_calls.append({
-                        "name": fn_name,
-                        "function": {"name": fn_name, "arguments": fn_args},
-                        "arguments": fn_args,
-                    })
-            return {
-                "content": msg.content or "",
-                "tool_calls": tool_calls,
-                "finish_reason": "tool_calls" if tool_calls else "stop",
-            }
-        except ImportError:
-            pass
-        except Exception as sdk_err:
-            LOGGER.debug("Groq SDK %s: %s", model_name, sdk_err)
-
-        # 2. Requête HTTP directe vers l'API Groq (fallback direct universel)
-        try:
-            import requests
-            url = "https://api.groq.com/openai/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {groq_api_key}",
-                "Content-Type": "application/json",
-            }
-            payload: dict[str, Any] = {
-                "model": model_name,
-                "messages": norm_messages,
-                "temperature": 0.5,
-                "max_tokens": 250,
-            }
-            if tools:
-                payload["tools"] = tools
-                payload["tool_choice"] = "auto"
-
-            res = requests.post(url, headers=headers, json=payload, timeout=3.5)
-            if res.status_code == 200:
-                data = res.json()
-                choice = data["choices"][0]
-                msg = choice.get("message", {})
-                raw_tool_calls = msg.get("tool_calls") or []
+                completion = client.chat.completions.create(**kwargs)
+                choice = completion.choices[0]
+                msg = choice.message
                 tool_calls = []
-                for tc in raw_tool_calls:
-                    fn = tc.get("function", {})
-                    fn_name = fn.get("name", "")
-                    fn_args = fn.get("arguments", "{}")
-                    tool_calls.append({
-                        "name": fn_name,
-                        "function": {"name": fn_name, "arguments": fn_args},
-                        "arguments": fn_args,
-                    })
+                if getattr(msg, "tool_calls", None):
+                    for tc in msg.tool_calls:
+                        fn_name = getattr(tc.function, "name", "")
+                        fn_args = getattr(tc.function, "arguments", "{}")
+                        tool_calls.append({
+                            "name": fn_name,
+                            "function": {"name": fn_name, "arguments": fn_args},
+                            "arguments": fn_args,
+                        })
                 return {
-                    "content": msg.get("content") or "",
+                    "content": msg.content or "",
                     "tool_calls": tool_calls,
                     "finish_reason": "tool_calls" if tool_calls else "stop",
                 }
-            LOGGER.debug("Groq HTTP %s retour %s: %s", model_name, res.status_code, res.text)
-        except Exception as req_err:
-            LOGGER.debug("Groq HTTP %s: %s", model_name, req_err)
+            except ImportError:
+                pass
+            except Exception as sdk_err:
+                LOGGER.warning("⚡ [GROQ SDK %s] (tools=%s) a échoué: %s", model_name, bool(active_tools), sdk_err)
+
+            # 2. Requête HTTP directe vers l'API Groq (fallback direct universel)
+            try:
+                import requests
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {groq_api_key}",
+                    "Content-Type": "application/json",
+                }
+                payload: dict[str, Any] = {
+                    "model": model_name,
+                    "messages": norm_messages,
+                    "temperature": 0.5,
+                    "max_tokens": 250,
+                }
+                if active_tools:
+                    payload["tools"] = active_tools
+                    payload["tool_choice"] = "auto"
+
+                res = requests.post(url, headers=headers, json=payload, timeout=6.0)
+                if res.status_code == 200:
+                    data = res.json()
+                    choice = data["choices"][0]
+                    msg = choice.get("message", {})
+                    raw_tool_calls = msg.get("tool_calls") or []
+                    tool_calls = []
+                    for tc in raw_tool_calls:
+                        fn = tc.get("function", {})
+                        fn_name = fn.get("name", "")
+                        fn_args = fn.get("arguments", "{}")
+                        tool_calls.append({
+                            "name": fn_name,
+                            "function": {"name": fn_name, "arguments": fn_args},
+                            "arguments": fn_args,
+                        })
+                    return {
+                        "content": msg.get("content") or "",
+                        "tool_calls": tool_calls,
+                        "finish_reason": "tool_calls" if tool_calls else "stop",
+                    }
+                LOGGER.warning("⚡ [GROQ HTTP %s] (tools=%s) HTTP %s: %s", model_name, bool(active_tools), res.status_code, res.text[:200])
+            except Exception as req_err:
+                LOGGER.warning("⚡ [GROQ HTTP %s] (tools=%s) exception: %s", model_name, bool(active_tools), req_err)
 
     return None
 
