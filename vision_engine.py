@@ -167,39 +167,45 @@ class VisionEngine:
         return get_standby_jpeg_bytes()
 
     def _init_cascades(self) -> None:
-        """Charge les cascades Haar officielles d'OpenCV si disponibles."""
+        """Charge les cascades Haar officielles d'OpenCV si disponibles avec recherche multi-chemins."""
         self.face_cascade = None
         self.eye_cascade = None
 
-        if (
-            not CV2_AVAILABLE
-            or cv2 is None
-            or not hasattr(cv2, "CascadeClassifier")
-            or not hasattr(cv2, "data")
-            or not hasattr(cv2.data, "haarcascades")
-        ):
-            LOGGER.info("ℹ️ OpenCV Haar Cascades non disponibles sur cet hôte. NeuroVision opère en mode télémétrie client.")
+        if not CV2_AVAILABLE or cv2 is None or not hasattr(cv2, "CascadeClassifier"):
+            LOGGER.info("ℹ️ OpenCV Haar Cascades non supporté par ce cv2. NeuroVision bascule sur le détecteur adaptatif.")
             return
 
-        try:
-            face_xml = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-            self.face_cascade = cv2.CascadeClassifier(face_xml)
-            if self.face_cascade.empty():
-                LOGGER.info("Cascade faciale vide, mode dégradé.")
-                self.face_cascade = None
-            else:
-                LOGGER.info("✅ Cascade faciale Haar chargée avec succès.")
-        except Exception as exc:
-            LOGGER.info("Information chargement cascade faciale: %s", exc)
-            self.face_cascade = None
+        candidate_dirs = []
+        if hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades"):
+            candidate_dirs.append(cv2.data.haarcascades)
+        candidate_dirs.extend([
+            "/usr/share/opencv4/haarcascades/",
+            "/usr/share/opencv/haarcascades/",
+            "/usr/local/share/opencv4/haarcascades/",
+            "/usr/local/share/opencv/haarcascades/",
+            "/opt/jarvis/venv/lib/python3.14/site-packages/cv2/data/",
+        ])
 
-        try:
-            eye_xml = cv2.data.haarcascades + "haarcascade_eye.xml"
-            self.eye_cascade = cv2.CascadeClassifier(eye_xml)
-            if self.eye_cascade.empty():
-                self.eye_cascade = None
-        except Exception:
-            self.eye_cascade = None
+        for cdir in candidate_dirs:
+            try:
+                face_xml = os.path.join(cdir, "haarcascade_frontalface_default.xml")
+                if os.path.exists(face_xml):
+                    cascade = cv2.CascadeClassifier(face_xml)
+                    if not cascade.empty():
+                        self.face_cascade = cascade
+                        LOGGER.info("✅ Cascade faciale Haar chargée depuis %s", face_xml)
+                        break
+            except Exception:
+                continue
+
+        if self.face_cascade is None and hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades"):
+            try:
+                face_xml = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+                cascade = cv2.CascadeClassifier(face_xml)
+                if not cascade.empty():
+                    self.face_cascade = cascade
+            except Exception:
+                pass
 
     def start(self, enable_server_camera: bool = False) -> bool:
         """Active la session cognitive NeuroVision.
@@ -246,11 +252,11 @@ class VisionEngine:
         """Indique si la vision est activement en cours de capture."""
         return self._running
 
-    def is_user_present(self, timeout_seconds: float = 5.0) -> bool:
-        """Indique si l'utilisateur a été détecté devant l'écran récemment."""
+    def is_user_present(self, timeout_seconds: float = 4.0) -> bool:
+        """Indique si l'utilisateur a été détecté devant l'écran récemment (avec hystérésis)."""
         if not self._running:
             return False
-        return self.face_detected and (time.time() - self.last_face_seen_time < timeout_seconds)
+        return (time.time() - self.last_face_seen_time < timeout_seconds)
 
     def update_client_telemetry(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Met à jour directement la télémétrie reçue du navigateur client (PC de Moctar).
@@ -437,9 +443,9 @@ class VisionEngine:
         if self.face_cascade is not None:
             faces = self.face_cascade.detectMultiScale(
                 gray,
-                scaleFactor=1.15,
-                minNeighbors=4,
-                minSize=(80, 80),
+                scaleFactor=1.10,
+                minNeighbors=3,
+                minSize=(50, 50),
             )
 
             if len(faces) > 0:
@@ -447,45 +453,67 @@ class VisionEngine:
                 self.last_face_seen_time = time.time()
                 (face_x, face_y, face_w, face_h) = faces[0]
 
-                # 1. Analyse ultra-rapide des yeux (EAR)
-                eye_openness = self._detect_eyes_fast(face_x, face_y, face_w, face_h, gray)
-                self.eye_aspect_ratio_history.append(eye_openness)
+        # Détecteur colorimétrique & contour adaptatif si Haar échoue ou est indisponible
+        if not face_found and CV2_AVAILABLE and cv2 is not None and NUMPY_AVAILABLE and np is not None:
+            try:
+                ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
+                skin_mask = cv2.inRange(ycrcb, np.array([0, 130, 75], dtype=np.uint8), np.array([255, 175, 130], dtype=np.uint8))
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+                skin_mask = cv2.morphologyEx(skin_mask, cv2.MORPH_OPEN, kernel)
+                contours, _ = cv2.findContours(skin_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if contours:
+                    max_c = max(contours, key=cv2.contourArea)
+                    area = cv2.contourArea(max_c)
+                    total_area = self.frame_width * self.frame_height
+                    if area > (total_area * 0.03):
+                        fx, fy, fw, fh = cv2.boundingRect(max_c)
+                        if 0.55 <= (fh / max(fw, 1)) <= 2.5:
+                            face_found = True
+                            self.last_face_seen_time = time.time()
+                            face_x, face_y, face_w, face_h = fx, fy, fw, fh
+            except Exception:
+                pass
 
-                # Détection de clignement réel
-                if eye_openness > 0.70:  # Yeux fermés
-                    self.consec_frames_blink += 1
+        if face_found:
+            # 1. Analyse ultra-rapide des yeux (EAR)
+            eye_openness = self._detect_eyes_fast(face_x, face_y, face_w, face_h, gray)
+            self.eye_aspect_ratio_history.append(eye_openness)
+
+            # Détection de clignement réel
+            if eye_openness > 0.70:  # Yeux fermés
+                self.consec_frames_blink += 1
+            else:
+                if self.consec_frames_blink >= self.EYE_ASPECT_RATIO_CONSEC_FRAMES:
+                    self.blink_count += 1
+                    self.last_blink_time = time.time()
+                self.consec_frames_blink = 0
+
+            # 2. Analyse ultra-rapide de la bouche (MAR / Bâillements)
+            mouth_ratio = self._detect_mouth_fast(face_x, face_y, face_w, face_h, gray)
+            if mouth_ratio is not None:
+                self.mouth_aspect_ratio_history.append(mouth_ratio)
+                if mouth_ratio > self.MOUTH_ASPECT_RATIO_THRESHOLD:
+                    self.consec_frames_yawn += 1
                 else:
-                    if self.consec_frames_blink >= self.EYE_ASPECT_RATIO_CONSEC_FRAMES:
-                        self.blink_count += 1
-                        self.last_blink_time = time.time()
-                    self.consec_frames_blink = 0
+                    if self.consec_frames_yawn >= self.MOUTH_ASPECT_RATIO_CONSEC_FRAMES:
+                        self.yawn_count += 1
+                        self.last_yawn_time = time.time()
+                    self.consec_frames_yawn = 0
 
-                # 2. Analyse ultra-rapide de la bouche (MAR / Bâillements)
-                mouth_ratio = self._detect_mouth_fast(face_x, face_y, face_w, face_h, gray)
-                if mouth_ratio is not None:
-                    self.mouth_aspect_ratio_history.append(mouth_ratio)
-                    if mouth_ratio > self.MOUTH_ASPECT_RATIO_THRESHOLD:
-                        self.consec_frames_yawn += 1
-                    else:
-                        if self.consec_frames_yawn >= self.MOUTH_ASPECT_RATIO_CONSEC_FRAMES:
-                            self.yawn_count += 1
-                            self.last_yawn_time = time.time()
-                        self.consec_frames_yawn = 0
+            # 3. Estimation de la pose de tête 3D
+            tilt, roll = self._detect_head_pose_real(face_x, face_y, face_w, face_h)
+            self.head_tilt = tilt
+            self.head_roll = roll
+            self.head_position_history.append((tilt, roll))
 
-                # 3. Estimation de la pose de tête 3D
-                tilt, roll = self._detect_head_pose_real(face_x, face_y, face_w, face_h)
-                self.head_tilt = tilt
-                self.head_roll = roll
-                self.head_position_history.append((tilt, roll))
-
-                # Dessin du rectangle faciale avec liseré cyan JARVIS
-                cv2.rectangle(
-                    frame,
-                    (face_x, face_y),
-                    (face_x + face_w, face_y + face_h),
-                    (0, 243, 255),
-                    2,
-                )
+            # Dessin du rectangle faciale avec liseré cyan JARVIS
+            cv2.rectangle(
+                frame,
+                (face_x, face_y),
+                (face_x + face_w, face_y + face_h),
+                (0, 243, 255),
+                2,
+            )
 
         self.face_detected = face_found
         if not face_found:

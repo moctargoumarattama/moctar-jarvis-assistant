@@ -238,6 +238,8 @@
   animation: nvReticleSpin 20s linear infinite;
   display: grid;
   place-items: center;
+  transition: left 0.12s ease-out, top 0.12s ease-out;
+  pointer-events: none;
 }
 
 @keyframes nvReticleSpin {
