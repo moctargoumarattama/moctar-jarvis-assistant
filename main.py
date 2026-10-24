@@ -685,7 +685,7 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
         return "Il y a 10 types de personnes dans le monde : ceux qui comprennent le binaire, et ceux qui ne le comprennent pas !"
 
     # 0a5. Test Micro, Radio & Écoute ("tu me reçois", "tu me captes", "tu m'entends", "tu nous entends", "test micro")
-    if re.search(r"\b(?:tu\s+(?:me\s+)?r[ée][cç]ois|t['’]es\s+r[ée][cç]ois|tu\s+m['’][ée]revois|tu\s+m['’][ée]loignes?\s+de\s+soi|tu\s+(?:me\s+)?captes?|tu\s+m['’]entends|tu\s+nous\s+entends|m['’]entends[- ]tu|test\s+micro|tu\s+m['’][ée]coutes|tu\s+es\s+l[aà]|t['’]es\s+l[aà])\b", normalized):
+    if re.search(r"\b(?:tu\s+(?:me\s+)?r[ée][cç]ois|t['’]es\s+r[ée][cç]ois|tu\s+m['’][ée]revois|tu\s+m['’][ée]loignes?\s+de\s+(?:soi|toi)|tu\s+(?:me\s+)?captes?|tu\s+m['’]entends|tu\s+nous\s+entends|m['’]entends[- ]tu|test\s+micro|tu\s+m['’][ée]coutes|tu\s+es\s+l[aà]|t['’]es\s+l[aà])\b", normalized):
         return "5 sur 5 Moctar ! Je te reçois fort et clair, liaison parfaite. Je suis là avec toi mon ami !"
 
     # 0a5b. Réassurance empathique immédiate ("tu ne me réponds pas", "tu ne me répondais pas", "tu ne me comprends pas", "je te parle depuis")
@@ -2683,42 +2683,174 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         payload = validate_payload(JarvisQueryPayload, data)
         raw_prompt = payload.prompt.strip()
 
-        # Intercepteur local 0ms pour requêtes système, statut, météo ou identité
+        # 0. Réparation Phonétique & Correction STT en amont
+        clean_prompt, _ = stt_phonetic_repair.repair_stt_transcript(raw_prompt)
+        effective_prompt = clean_prompt or raw_prompt
+
+        session_id = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
+
+        # 1. Intercepteur local 0ms pour requêtes système, statut, météo ou identité
+        instant_reply = None
         try:
             mem = getattr(runtime.jarvis, "memory", None)
             dev = request.headers.get("x-client-device") or ""
-            instant_reply = handle_instant_local_command(raw_prompt, memory=mem, client_device=dev)
-            if instant_reply:
-                return JSONResponse(
-                    {
-                        "status": "success",
-                        "reply": instant_reply,
-                        "thought_chain": ["Commande locale instantanée sans LLM (0ms)"],
-                        "tools_used": [],
-                        "timestamp": collector.utc_now(),
-                    }
-                )
+            instant_reply = handle_instant_local_command(effective_prompt, memory=mem, client_device=dev)
         except Exception:
-            pass
+            instant_reply = None
 
-        try:
-            result = await runtime.jarvis.execute_prompt_async(
-                user_input=raw_prompt,
-                source=payload.source,
-            )
-            return JSONResponse(result)
-        except Exception as exc:
-            LOGGER.exception("Erreur lors de l'exécution de Jarvis")
+        if instant_reply:
+            try:
+                hud_mood = hud_state_manager.deduce_mood_from_text(instant_reply, effective_prompt)
+                hud_state_manager.set_hud_mood(hud_mood)
+                hud_state_manager.set_hud_voice_status(
+                    "speaking",
+                    user_transcript=effective_prompt,
+                    assistant_reply=instant_reply,
+                )
+            except Exception:
+                pass
+            if runtime.jarvis and getattr(runtime.jarvis, "memory", None):
+                try:
+                    runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=effective_prompt)
+                    runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=instant_reply)
+                    if hasattr(runtime.jarvis.memory, "record_conversation_turn_for_profile"):
+                        runtime.jarvis.memory.record_conversation_turn_for_profile(effective_prompt, instant_reply)
+                except Exception:
+                    pass
             return JSONResponse(
                 {
-                    "status": "error",
-                    "reply": f"Erreur interne lors de l'exécution de l'agent : {exc}",
-                    "thought_chain": [],
+                    "status": "success",
+                    "reply": instant_reply,
+                    "thought_chain": ["Commande locale instantanée sans LLM (0ms)"],
                     "tools_used": [],
                     "timestamp": collector.utc_now(),
-                },
-                status_code=500,
+                }
             )
+
+        # 2. Bibliothèque autonome (actions de navigation HUD, mode bureau, musique, git, etc.)
+        is_devops_service = any(w in effective_prompt.lower() for w in ("service", "services", "docker", "vps", "systemctl", "redemarre", "redémarre", "journalctl"))
+        auto_res = {"handled": False}
+        if not is_devops_service:
+            try:
+                db_path = getattr(getattr(runtime, "jarvis", None), "db_path", None)
+                auto_res = autonomous_library.execute_autonomous_task(
+                    effective_prompt,
+                    session_id=session_id,
+                    db_path=db_path,
+                )
+            except Exception as auto_exc:
+                LOGGER.warning("Erreur autonomous_library dans jarvis_query : %s", auto_exc)
+                auto_res = {"handled": False}
+
+        if auto_res.get("handled") is True:
+            reply_text = str(auto_res.get("reply") or "").strip()
+            cat = auto_res.get("task_category") or "locale"
+            try:
+                hud_mood = hud_state_manager.deduce_mood_from_text(reply_text, effective_prompt)
+                hud_state_manager.set_hud_mood(hud_mood)
+                hud_state_manager.set_hud_voice_status(
+                    "speaking",
+                    user_transcript=effective_prompt,
+                    assistant_reply=reply_text,
+                )
+            except Exception:
+                pass
+            if runtime.jarvis and getattr(runtime.jarvis, "memory", None):
+                try:
+                    runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=effective_prompt)
+                    runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
+                    if hasattr(runtime.jarvis.memory, "record_conversation_turn_for_profile"):
+                        runtime.jarvis.memory.record_conversation_turn_for_profile(effective_prompt, reply_text)
+                except Exception:
+                    pass
+            return JSONResponse(
+                {
+                    "status": "success",
+                    "reply": reply_text,
+                    "action": auto_res.get("action"),
+                    "url": auto_res.get("url"),
+                    "title": auto_res.get("title"),
+                    "tools_used": auto_res.get("tools_used", []),
+                    "thought_chain": [f"Action locale autonome exécutée ({cat}) (0ms)"],
+                    "timestamp": collector.utc_now(),
+                }
+            )
+
+        # 3. Traitement sémantique unifié : Moteur vocal rapide Groq LPU avec repli Gemini
+        if (is_devops_service or is_system_command(effective_prompt)) and hasattr(runtime.jarvis, "execute_prompt_async"):
+            try:
+                result = await runtime.jarvis.execute_prompt_async(
+                    user_input=effective_prompt,
+                    source=payload.source,
+                )
+                rep = result.get("reply") or result.get("response") or ""
+                if rep:
+                    try:
+                        hud_mood = hud_state_manager.deduce_mood_from_text(rep, effective_prompt)
+                        hud_state_manager.set_hud_mood(hud_mood)
+                        hud_state_manager.set_hud_voice_status("speaking", user_transcript=effective_prompt, assistant_reply=rep)
+                    except Exception:
+                        pass
+                return JSONResponse(result)
+            except Exception as exc:
+                LOGGER.exception("Erreur lors de l'exécution de Jarvis")
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "reply": f"Erreur interne lors de l'exécution de l'agent : {exc}",
+                        "thought_chain": [],
+                        "tools_used": [],
+                        "timestamp": collector.utc_now(),
+                    },
+                    status_code=500,
+                )
+
+        # Cœur Sémantique Unifié (< 500 ms) pour toutes les requêtes conversationnelles et interactives
+        try:
+            semantic_res = await asyncio.to_thread(
+                execute_voice_semantic_turn,
+                effective_prompt,
+                runtime,
+                session_id,
+                None,
+                VOICE_FAST_SYSTEM_PROMPT,
+            )
+            rep = semantic_res.get("reply") or semantic_res.get("response") or "Je suis là avec toi Moctar."
+            try:
+                hud_mood = hud_state_manager.deduce_mood_from_text(rep, effective_prompt)
+                hud_state_manager.set_hud_mood(hud_mood)
+                hud_state_manager.set_hud_voice_status("speaking", user_transcript=effective_prompt, assistant_reply=rep)
+            except Exception:
+                pass
+            return JSONResponse({
+                "status": "success",
+                "reply": rep,
+                "action": semantic_res.get("action"),
+                "url": semantic_res.get("url"),
+                "title": semantic_res.get("title"),
+                "tools_used": semantic_res.get("tools_used", []),
+                "thought_chain": semantic_res.get("thought_chain", ["Cœur sémantique unifié Groq/Gemini"]),
+                "timestamp": collector.utc_now(),
+            })
+        except Exception as sem_exc:
+            LOGGER.warning("Erreur semantic turn dans jarvis_query : %s, bascule sur agent standard", sem_exc)
+            try:
+                result = await runtime.jarvis.execute_prompt_async(
+                    user_input=effective_prompt,
+                    source=payload.source,
+                )
+                return JSONResponse(result)
+            except Exception as exc:
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "reply": f"Erreur interne lors de l'exécution de l'agent : {exc}",
+                        "thought_chain": [],
+                        "tools_used": [],
+                        "timestamp": collector.utc_now(),
+                    },
+                    status_code=500,
+                )
 
     @application.get("/api/status")
     @application.get("/api/system/ai-status")

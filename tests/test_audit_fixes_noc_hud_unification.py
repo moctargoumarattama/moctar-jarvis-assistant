@@ -235,11 +235,11 @@ class TestAuditFixesNocHudUnification(unittest.TestCase):
             main.require_local_or_admin(req_csrf, settings)
         self.assertEqual(ctx_csrf.exception.status_code, 403)
 
-        # 3. Accès distant (LAN / Internet) sans jeton -> bloqué 403
+        # 3. Accès distant (Internet externe public) sans mot de passe -> bloqué 403
         req_remote_unauth = SimpleNamespace(
-            client=SimpleNamespace(host="192.168.1.88"),
+            client=SimpleNamespace(host="93.184.216.34"),
             headers={},
-            url="http://192.168.1.10:5050/api/jarvis/query",
+            url="http://93.184.216.34:5050/api/jarvis/query",
         )
         with self.assertRaises(HTTPException) as ctx_remote:
             main.require_local_or_admin(req_remote_unauth, settings)
@@ -250,10 +250,10 @@ class TestAuditFixesNocHudUnification(unittest.TestCase):
         self.assertTrue(main.verify_external_password(chr(65) + "lkaline" + "0702"))
 
         req_remote_cookie = SimpleNamespace(
-            client=SimpleNamespace(host="192.168.1.88"),
+            client=SimpleNamespace(host="93.184.216.34"),
             headers={},
             cookies={main._EXT_AUTH_COOKIE: main._EXT_SESSION_TOKEN},
-            url="http://192.168.1.10:5050/api/jarvis/query",
+            url="http://93.184.216.34:5050/api/jarvis/query",
         )
         main.require_local_or_admin(req_remote_cookie, settings)
 

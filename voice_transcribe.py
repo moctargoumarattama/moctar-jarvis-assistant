@@ -492,7 +492,7 @@ def transcribe_groq_api(
     try:
         from groq import Groq  # type: ignore[import-not-found]
 
-        client = Groq(api_key=key, timeout=12.0)
+        client = Groq(api_key=key, timeout=8.0, max_retries=0)
         with audio.open("rb") as f:
             resp = client.audio.transcriptions.create(
                 file=(audio.name, f.read()),

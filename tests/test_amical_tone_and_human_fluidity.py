@@ -139,6 +139,9 @@ def test_phonetic_repair_for_radio_and_identity():
     repaired_eloigne, _ = stt_phonetic_repair.repair_stt_transcript("Tu m'éloignes de soi ? Tu m'éloignes de soi ?")
     assert "tu me reçois" in repaired_eloigne.lower()
 
+    repaired_eloigne_toi, _ = stt_phonetic_repair.repair_stt_transcript("Tu m'éloignes de toi ?")
+    assert "tu me reçois" in repaired_eloigne_toi.lower()
+
     repaired_erevois, _ = stt_phonetic_repair.repair_stt_transcript("Tu m'érevois ?")
     assert "tu me reçois" in repaired_erevois.lower()
 
@@ -146,12 +149,17 @@ def test_phonetic_repair_for_radio_and_identity():
     assert main.is_direct_voice_command("Tu me reçois ?") is True
     assert main.is_direct_voice_command("T'es réçois ?") is True
     assert main.is_direct_voice_command("Tu m'éloignes de soi ?") is True
+    assert main.is_direct_voice_command("Tu m'éloignes de toi ?") is True
     assert main.is_direct_voice_command("Tu m'érevois ?") is True
 
     # Doit répondre "5 sur 5 Moctar" en 0ms
     rep = main.handle_instant_local_command("Tu m'éloignes de soi ?")
     assert rep is not None
     assert "5 sur 5" in rep
+
+    rep_toi = main.handle_instant_local_command("Tu m'éloignes de toi ?")
+    assert rep_toi is not None
+    assert "5 sur 5" in rep_toi
 
     rep2 = main.handle_instant_local_command("Tu m'érevois ?")
     assert rep2 is not None
@@ -241,5 +249,50 @@ def test_whisper_repetition_deduplication_preserves_speech():
     assert res != ""
     assert "reçois" in res.lower()
     assert "salut" in res.lower()
+
+
+def test_noc_and_hud_synchronization_and_autonomous_execution():
+    """Vérifie que /api/jarvis/query et /api/voice/interact partagent la même logique autonome (ex: mode HUD 3D) et synchronisent l'état HUD."""
+    from fastapi.testclient import TestClient
+    import hud_state_manager
+
+    app = main.create_app()
+    with TestClient(app) as client:
+        # 1. Demande de passage au mode HUD 3D depuis le dashboard NOC (/api/jarvis/query)
+        resp = client.post("/api/jarvis/query", json={"prompt": "Mets-toi en mode HUD 3D", "source": "web_text"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert data.get("action") == "open_app"
+        assert data.get("url") == "/hud"
+        assert "HUD 3D" in data["reply"]
+
+        # L'état HUD partagé doit avoir été mis à jour immédiatement
+        hud_st = hud_state_manager.get_hud_state()
+        assert hud_st.get("user_transcript") == "Mets-toi en mode HUD 3D"
+        assert "HUD 3D" in hud_st.get("assistant_reply", "")
+
+
+def test_mic_gain_normalized_to_prevent_clipping():
+    """Vérifie que le gain micro est configuré à 1.0 (et non 2.0) dans les interfaces frontend pour éviter la distorsion audio."""
+    with open("static/index.html", "r", encoding="utf-8") as f:
+        noc_html = f.read()
+    assert "micGain: 1.0" in noc_html
+    assert "micGain: 2.0" not in noc_html
+
+    with open("static/js/hud_3d.js", "r", encoding="utf-8") as f:
+        hud_js = f.read()
+    assert "micGain: 1.0" in hud_js
+    assert "micGain: 2.0" not in hud_js
+
+
+def test_groq_discovery_prioritizes_llama_models():
+    """Vérifie que la découverte des modèles Groq priorise Llama 3.3 70B et Llama 3.1 8B pour éviter les quotas 429."""
+    import ai_brain
+
+    models = ai_brain.get_available_groq_chat_models(api_key="", force_refresh=True)
+    assert len(models) >= 2
+    assert models[0] == "llama-3.3-70b-versatile"
+    assert models[1] == "llama-3.1-8b-instant"
 
 

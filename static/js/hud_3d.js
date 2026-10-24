@@ -865,7 +865,7 @@
       followupMs: 60000,
       vadThreshold: 0.0075,
       vadSilenceMs: 850,
-      micGain: 2.0,
+      micGain: 1.0,
       minRecordingMs: 300,
       mediaDevices: window.navigator ? window.navigator.mediaDevices : null,
       MediaRecorder: window.MediaRecorder,

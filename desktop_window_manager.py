@@ -48,12 +48,23 @@ def _get_linux_display_env() -> Dict[str, str]:
     env = os.environ.copy()
     if "DISPLAY" not in env:
         env["DISPLAY"] = ":0"
+    if "XDG_RUNTIME_DIR" not in env and os.path.isdir("/run/user/1000"):
+        env["XDG_RUNTIME_DIR"] = "/run/user/1000"
     if "XAUTHORITY" not in env:
-        for auth_candidate in (
+        candidates = [
             "/home/moctar/.Xauthority",
             os.path.expanduser("~/.Xauthority"),
-            "/root/.Xauthority",
-        ):
+            "/run/user/1000/gdm/Xauthority",
+        ]
+        run_user = "/run/user/1000"
+        if os.path.isdir(run_user):
+            try:
+                for fname in os.listdir(run_user):
+                    if "xauth" in fname.lower() or "auth" in fname.lower():
+                        candidates.insert(0, os.path.join(run_user, fname))
+            except Exception:
+                pass
+        for auth_candidate in candidates:
             if os.path.exists(auth_candidate):
                 env["XAUTHORITY"] = auth_candidate
                 break

@@ -2012,7 +2012,17 @@ def get_available_groq_chat_models(api_key: str, force_refresh: bool = False) ->
         except Exception as exc:
             logger.debug("Découverte dynamique des modèles Groq indisponible (%s), repli sur la liste par défaut.", exc)
 
-    final_list = discovered if api_key else candidates
+    final_list: list[str] = []
+    # Priorité absolue aux modèles haute capacité et réactivité ultra-rapide
+    for pref in GROQ_MODELS_PRIORITY:
+        if pref in discovered and pref not in final_list:
+            final_list.append(pref)
+    for m in discovered:
+        if m and m not in final_list:
+            final_list.append(m)
+    for pref in candidates:
+        if pref not in final_list:
+            final_list.append(pref)
     _GROQ_MODELS_CACHE = (now, final_list)
     return final_list
 
@@ -2121,7 +2131,7 @@ def voice_fast_llm_reply(
             try:
                 from groq import Groq  # type: ignore[import-not-found]
 
-                client = Groq(api_key=groq_api_key, timeout=8.0)
+                client = Groq(api_key=groq_api_key, timeout=4.0, max_retries=0)
                 start_t = time.perf_counter()
                 completion = client.chat.completions.create(
                     model=cand,
@@ -2159,7 +2169,7 @@ def voice_fast_llm_reply(
                     "temperature": 0.3,
                     "max_tokens": 250,
                 }
-                resp = requests.post(url, headers=headers, json=payload, timeout=8.0)
+                resp = requests.post(url, headers=headers, json=payload, timeout=4.0)
                 if resp.status_code == 200:
                     data = resp.json()
                     reply = str(data["choices"][0]["message"]["content"] or "").strip()

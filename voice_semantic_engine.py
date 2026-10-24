@@ -578,7 +578,17 @@ def _call_groq_voice_semantic(
         discovered_models = ai_brain.get_available_groq_chat_models(groq_api_key)
     except Exception:
         pass
-    models_to_try = [m for m in discovered_models if m] or ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+    preferred_order = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama-3.1-70b-versatile"]
+    models_to_try = []
+    for pref in preferred_order:
+        if pref in discovered_models and pref not in models_to_try:
+            models_to_try.append(pref)
+    for m in discovered_models:
+        if m and m not in models_to_try:
+            models_to_try.append(m)
+    for pref in preferred_order:
+        if pref not in models_to_try:
+            models_to_try.append(pref)
 
     for model_name in models_to_try:
         # Tente d'abord avec outils, puis repli sans outils sur le même modèle si erreur de schéma
@@ -587,7 +597,7 @@ def _call_groq_voice_semantic(
             # 1. Via SDK Groq si disponible
             try:
                 from groq import Groq
-                client = Groq(api_key=groq_api_key, timeout=6.0)
+                client = Groq(api_key=groq_api_key, timeout=4.0, max_retries=0)
                 kwargs: dict[str, Any] = {
                     "model": model_name,
                     "messages": norm_messages,
@@ -619,7 +629,10 @@ def _call_groq_voice_semantic(
             except ImportError:
                 pass
             except Exception as sdk_err:
+                err_str = str(sdk_err).lower()
                 LOGGER.warning("⚡ [GROQ SDK %s] (tools=%s) a échoué: %s", model_name, bool(active_tools), sdk_err)
+                if "429" in err_str or "rate_limit" in err_str:
+                    break
 
             # 2. Requête HTTP directe vers l'API Groq (fallback direct universel)
             try:
@@ -639,7 +652,7 @@ def _call_groq_voice_semantic(
                     payload["tools"] = active_tools
                     payload["tool_choice"] = "auto"
 
-                res = requests.post(url, headers=headers, json=payload, timeout=6.0)
+                res = requests.post(url, headers=headers, json=payload, timeout=4.0)
                 if res.status_code == 200:
                     data = res.json()
                     choice = data["choices"][0]
@@ -660,6 +673,9 @@ def _call_groq_voice_semantic(
                         "tool_calls": tool_calls,
                         "finish_reason": "tool_calls" if tool_calls else "stop",
                     }
+                elif res.status_code == 429:
+                    LOGGER.warning("⚡ [GROQ HTTP %s]: 429 Rate limit, passage au modèle suivant.", model_name)
+                    break
                 LOGGER.warning("⚡ [GROQ HTTP %s] (tools=%s) HTTP %s: %s", model_name, bool(active_tools), res.status_code, res.text[:200])
             except Exception as req_err:
                 LOGGER.warning("⚡ [GROQ HTTP %s] (tools=%s) exception: %s", model_name, bool(active_tools), req_err)
