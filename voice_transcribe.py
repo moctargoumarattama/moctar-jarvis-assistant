@@ -333,11 +333,42 @@ def has_repetitive_hallucination(text: str) -> bool:
     return False
 
 
+def deduplicate_repetitive_text(text: str) -> str:
+    """Réduit les répétitions consécutives de phrases ou segments identiques générées par Whisper."""
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+    # Déduplication de segments répétés (ex: 'Salut, tu me reçois ? Salut, tu me reçois ? Tu me reçois ?' -> 'Salut, tu me reçois ?')
+    segments = [s.strip() for s in re.split(r"(?<=[.!?])\s+", cleaned) if s.strip()]
+    if len(segments) > 1:
+        seen = set()
+        deduped_segments = []
+        for seg in segments:
+            seg_norm = seg.lower().strip(" ,.:;!?-")
+            if seg_norm not in seen:
+                seen.add(seg_norm)
+                deduped_segments.append(seg)
+        if deduped_segments:
+            cleaned = " ".join(deduped_segments)
+
+    # Déduplication de motifs consécutifs (ex: 'Tu me reçois ? Tu me reçois ?')
+    pattern = r"(\b.{3,80}?\b)(?:[\s,.:;!?…—–-]+(?:\1))+"
+    cleaned = re.sub(pattern, r"\1", cleaned, flags=re.IGNORECASE)
+    # Déduplication de mots individuels consécutifs (ex: 'oui oui oui oui' -> 'oui')
+    cleaned = re.sub(r"\b(\w+)(?:\s+\1\b)+", r"\1", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
 def filter_whisper_hallucinations(text: str, *, allow_short_confirmations: bool = False) -> str:
-    """Élimine les hallucinations récurrentes de Whisper sur du silence ou du bruit de fond."""
+    """Élimine les hallucinations récurrentes de Whisper sur du silence ou du bruit de fond sans détruire la parole réelle."""
     cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
     if not cleaned:
         return ""
+
+    # En cas de boucle répétitive Whisper, dédupliquer pour conserver la phrase utile au lieu de l'anéantir
+    if has_repetitive_hallucination(cleaned):
+        cleaned = deduplicate_repetitive_text(cleaned)
+
     lowered = cleaned.lower().strip(" .,!?:;\"'()-[]{}")
     if not lowered:
         return ""
@@ -350,13 +381,11 @@ def filter_whisper_hallucinations(text: str, *, allow_short_confirmations: bool 
             return ""
     if re.search(r"\b(?:is\s+that\s+you|thank\s+you|thanks|how\s+are\s+you|what\s+is|you\s+there|are\s+you|can\s+you|hello\s+world|goodbye)\b", lowered):
         return ""
-    if has_repetitive_hallucination(cleaned):
-        return ""
-    # Rejeter les répétitions dégénérées d'un même mot ou symbole bruité
+    # Rejeter uniquement les répétitions dégénérées d'un seul mot bruité ou symbole
     tokens = [tok for tok in re.split(r"\W+", lowered) if tok]
     if not tokens:
         return ""
-    if len(tokens) >= 4 and len(set(tokens)) == 1:
+    if len(tokens) >= 5 and len(set(tokens)) == 1:
         return ""
     return cleaned
 

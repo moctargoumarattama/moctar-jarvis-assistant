@@ -174,6 +174,8 @@ def test_jarvis_query_endpoint_intercepts_local_command_0ms(tmp_path: Path):
 def test_extract_voice_interact_never_ignores_coherent_sentences():
     """Vérifie qu'aucune phrase cohérente prononcée par Moctar n'est ignorée, même sans mot-clé 'Moctar' préalable."""
     coherent_queries = [
+        "Salut !",
+        "Bonjour !",
         "tu es capable de faire quoi",
         "comment tu vas mon ami",
         "qui es-tu exactement",
@@ -228,4 +230,16 @@ def test_groq_voice_semantic_turn_integration():
     # Sans clé API, doit retourner None immédiatement (0 ms)
     res = voice_semantic_engine._call_groq_voice_semantic([], groq_api_key="")
     assert res is None
+
+
+def test_whisper_repetition_deduplication_preserves_speech():
+    """Vérifie que les répétitions de phrases Whisper (boucles) sont dédupliquées sans détruire la phrase réelle."""
+    import voice_transcribe
+
+    repeated_input = "Salut, tu me reçois ? Salut, tu me reçois ? Tu me reçois ? Tu me reçois ?"
+    res = voice_transcribe.filter_whisper_hallucinations(repeated_input)
+    assert res != ""
+    assert "reçois" in res.lower()
+    assert "salut" in res.lower()
+
 

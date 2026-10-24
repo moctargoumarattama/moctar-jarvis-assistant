@@ -344,8 +344,8 @@ _VOICE_WAKE_ANYWHERE_RE = re.compile(
     re.IGNORECASE,
 )
 _VOICE_FILLER_WORDS = {
-    "au", "yo", "hey", "ok", "bonjour", "salut", "dis", "allo", "allô", "ecoute", "écoute", "oui",
-    "et", "vous", "you", "tout", "le", "monde", "ah", "eh", "oh", "ha",
+    "au", "yo", "hey", "dis", "allo", "allô", "ecoute", "écoute",
+    "et", "vous", "you", "tout", "le", "monde", "ah", "eh", "oh", "ha", "euh", "hum", "bah", "hein",
     "moctar", "moktar", "mokta", "mokhtar", "mouctar", "mouktar", "motard", "mothar", "mothard", "mocthar",
     "moc", "mok", "mokti",
     "moccupe", "m'occupe", "tard", "moccaque", "m'occaque", "jarvis", "elmo",
@@ -380,7 +380,10 @@ def is_direct_voice_command(text: str) -> bool:
         return True
 
     # 0. Salutations directes & Démos pour amis / invités (Ne JAMAIS ignorer une salutation ou démo)
-    if re.search(r"^(?:bonjour|salut|bonsoir|coucou|yo|hello)(?:\s+|$)", norm) or norm in ("bonjour", "salut", "bonsoir", "coucou", "yo", "hello"):
+    clean_norm = norm.strip(" .,:;!?'\"")
+    if clean_norm in ("bonjour", "salut", "bonsoir", "coucou", "yo", "hello"):
+        return True
+    if re.search(r"^(?:bonjour|salut|bonsoir|coucou|yo|hello)(?:[\s!,.:;?]+|$)", norm):
         return True
     if re.search(r"\b(?:dis\s+(?:bonjour|salut|coucou)|salue|passe\s+le\s+bonjour|accueille|pr[ée]sente[- ]toi|fais(?:[- ](?:nous|moi))?\s*(?:une\s+)?d[ée]mo(?:nstration)?|montre\s+(?:ce\s+que\s+tu\s+sais\s+faire|nous|tes\s+capacit[ée]s|de\s+quoi\s+tu\s+es\s+capable)|qu['’]est[- ]ce\s+que\s+tu\s+sais\s+faire|tu\s+sais\s+faire\s+quoi|je\s+(?:te|vous)\s+pr[ée]sente|voici|voil[aà]\s+(?:mon\s+ami|mes\s+amis|mon\s+pote|mes\s+potes|mon\s+coll[èe]gue)?|qui\s+sont\s+mes\s+amis|tu\s+connais\s+qui)\b", norm):
         return True
@@ -529,11 +532,14 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
             return True, clean_text, False
 
     clean_text = filtered.strip(" ,.:;!?-")
-    if not clean_text or _is_pure_filler_or_wake(clean_text):
+    if not clean_text:
         return False, "", False
 
-    if clean_text and is_direct_voice_command(clean_text):
+    if is_direct_voice_command(clean_text):
         return True, clean_text, True
+
+    if _is_pure_filler_or_wake(clean_text):
+        return False, "", False
 
     # Tout énoncé intelligible (2 mots ou plus, ou verbe/question/action évidente)
     # ne doit JAMAIS être ignoré silencieusement.
