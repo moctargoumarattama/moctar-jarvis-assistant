@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b0f19">
   <meta name="description" content="Supervision en temps réel du serveur central, des applications et des VPS distants.">
   <title>Tour de contrôle · NOC</title>
-  <link rel="stylesheet" href="/static/neurovision_hud.css?v=3.0">
+  <link rel="stylesheet" href="/static/neurovision_hud.css?v=3.2">
   <style>
     :root{color-scheme:dark;--bg:#0b0f19;--panel:#111722;--panel-soft:#141c29;--line:#253043;--text:#e5edf8;--muted:#8694aa;--cyan:#5ed9ec;--green:#51dcaa;--amber:#f3bd65;--red:#ff738a;--mono:"Cascadia Code",Consolas,"Liberation Mono",monospace;--sans:Inter,"Segoe UI",Arial,sans-serif}
     *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:32px}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;-webkit-font-smoothing:antialiased}button,input{font:inherit}button,a,input{ -webkit-tap-highlight-color:transparent}button{cursor:pointer}a{color:inherit;text-decoration:none}button:disabled{cursor:not-allowed;opacity:.4}button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}svg{display:block}button svg{pointer-events:none}h1,h2,h3,p{margin:0}button{color:inherit}::selection{background:#236374;color:white}[hidden]{display:none!important}.icon{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.muted{color:var(--muted)}.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}.eyebrow{text-transform:uppercase;letter-spacing:.13em;font-size:10px;font-weight:700;color:var(--muted)}
@@ -233,7 +233,6 @@
     .remote-panel{height:146px;display:flex;flex-direction:column;overflow:hidden}.remote-toolbar{display:flex;align-items:center;justify-content:space-between;gap:7px;padding:7px 10px;border-bottom:1px solid var(--line);background:#131d2c;flex-shrink:0}.remote-tabs{display:flex;gap:4px}.remote-tab{padding:5px 8px;background:transparent;border:1px solid transparent;border-radius:5px;color:#7e91ad;font-size:9px}.remote-tab[aria-selected="true"]{background:#1b3442;border-color:#31535e;color:var(--cyan)}.remote-tab:hover{color:var(--cyan)}.sentinel-agent{font:8px var(--mono);display:flex;align-items:center;gap:5px;color:var(--muted);white-space:nowrap}.sentinel-agent .led{width:4px;height:4px;box-shadow:none}.sentinel-agent[data-tone="success"]{color:var(--green)}.sentinel-agent[data-tone="warning"]{color:var(--amber)}.sentinel-agent[data-tone="error"]{color:var(--red)}.remote-panel .remote-content{flex:1;min-height:0;max-height:none;overflow:auto;scrollbar-width:thin;scrollbar-color:#2b3c54 transparent;border:0;border-radius:0;background:transparent}.remote-panel .vps-empty{padding:14px 12px;min-height:0}.remote-panel .vps-empty-icon{width:26px;height:26px}.remote-panel .vps-empty strong{font-size:10px}.remote-panel .vps-empty p{font-size:9px;margin-top:5px}.sentinel-empty{padding:16px 13px;color:var(--muted);font-size:10px;line-height:1.7}.sentinel-empty strong{display:block;color:#a7bad4;font-weight:500;margin-bottom:4px}.sentinel-incident{padding:9px 12px;border-bottom:1px solid #233045}.sentinel-incident:last-child{border:0}.sentinel-line{display:flex;align-items:center;justify-content:space-between;gap:7px;font:9px var(--mono)}.sentinel-source{min-width:0;overflow-wrap:anywhere;color:#d1def0}.sentinel-source .country-flag{font-family:var(--sans);margin-right:5px;font-size:12px}.sentinel-result{font-size:7px;flex-shrink:0;color:var(--amber)}.sentinel-result[data-blocked="true"]{color:var(--green)}.sentinel-credentials{font:8px/1.6 var(--mono);color:#9aadc8;margin-top:5px;overflow-wrap:anywhere;white-space:pre-wrap}.sentinel-meta{display:flex;justify-content:space-between;gap:7px;font:7px/1.5 var(--mono);color:#6c83a2;margin-top:4px;overflow-wrap:anywhere}.sentinel-queue-warning{padding:5px 10px;border-bottom:1px solid var(--line);color:var(--amber);font-size:8px;flex-shrink:0}
     .voice-strip{display:flex;align-items:center;gap:8px;min-height:28px;padding:6px 13px;background:#142532;border-bottom:1px solid #2a4151;flex-shrink:0}.voice-strip>.icon{width:12px;height:12px;color:var(--cyan)}.voice-trigger{background:none;border:0;text-align:left;padding:0;display:flex;align-items:center;gap:8px;min-width:0;flex:1;overflow:hidden;font-size:9px}.voice-kicker{font-size:8px;letter-spacing:.045em;color:var(--cyan);font-weight:600;white-space:nowrap}.voice-summary{color:#8fa5c1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.voice-status{font:7px var(--mono);color:var(--muted);white-space:nowrap}.voice-status[data-tone="success"]{color:var(--green)}.voice-status[data-tone="warning"]{color:var(--amber)}.voice-status[data-tone="error"]{color:var(--red)}.voice-trigger:disabled{opacity:1;cursor:default}.voice-trigger:not(:disabled):hover .voice-summary{color:#cfdfef}.voice-detail-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:26vh;overflow:auto;margin-top:8px;font-size:12px;line-height:1.8;color:#c4d2e5}.voice-detail-label{font-size:9px;text-transform:uppercase;letter-spacing:.09em;color:var(--cyan);margin-top:19px}.voice-detail-meta{font:9px/1.7 var(--mono);color:var(--muted);margin-top:11px}
     .voice-simulation{margin-top:20px;border-top:1px solid var(--line);padding-top:15px}.voice-simulation summary{cursor:pointer;font-size:11px;color:var(--cyan);font-weight:600}.voice-simulation select{width:100%;background:#0b1320;border:1px solid #35445c;border-radius:7px;padding:11px 12px;color:var(--text);font:11px var(--mono)}.voice-simulation-note{font-size:10px!important;line-height:1.7!important;color:var(--amber)!important}.voice-simulation .dialog-label{margin-top:15px}.voice-simulation-feedback{font-size:11px;line-height:1.7;margin-top:12px;color:var(--red)}.voice-simulation-feedback[data-tone="success"]{color:var(--green)}#voice-dialog{width:min(520px,calc(100% - 32px));max-height:85vh;overflow:auto;padding:26px 28px;border:1px solid rgba(56,189,248,0.22);border-radius:20px;background:radial-gradient(ellipse at 50% 0%,#152438 0%,#0c1421 100%);box-shadow:0 30px 90px rgba(0,0,0,0.8),0 0 40px rgba(56,189,248,0.12);scrollbar-width:thin;scrollbar-color:rgba(56,189,248,0.2) transparent}#voice-dialog[open]{animation:modalSoftPop .28s cubic-bezier(0.16,1,0.3,1) forwards}#voice-dialog::backdrop{background:rgba(3,7,18,0.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
-    #neurovision-dialog{width:min(920px,calc(100% - 32px));max-height:88vh;overflow-y:auto;padding:24px 26px;border:1px solid rgba(0,243,255,0.32);border-radius:20px;background:radial-gradient(ellipse at 50% 0%,#152438 0%,#0c1421 100%);box-shadow:0 30px 90px rgba(0,0,0,0.85),0 0 45px rgba(0,243,255,0.15);scrollbar-width:thin;scrollbar-color:rgba(0,243,255,0.2) transparent;color:var(--text)}#neurovision-dialog[open]{animation:modalSoftPop .28s cubic-bezier(0.16,1,0.3,1) forwards}#neurovision-dialog::backdrop{background:rgba(3,7,18,0.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
     #events-open{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;color:var(--cyan)}#events-open .icon{width:12px;height:12px}
     #events-dialog{width:min(1100px,calc(100% - 32px));height:min(720px,calc(100vh - 48px));height:min(720px,calc(100dvh - 48px));max-height:calc(100vh - 32px);padding:0;overflow:hidden;border:1px solid rgba(56,189,248,0.22);border-radius:20px;background:radial-gradient(ellipse at 80% 0%,rgba(14,116,144,0.2) 0%,transparent 60%),#0c1421;box-shadow:0 30px 90px rgba(0,0,0,0.8),0 0 45px rgba(56,189,248,0.12)}#events-dialog[open]{display:flex;flex-direction:column;animation:modalSoftPop .28s cubic-bezier(0.16,1,0.3,1) forwards}#events-dialog::backdrop{background:rgba(3,7,18,0.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}.events-dialog-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 26px;border-bottom:1px solid rgba(56,189,248,0.15);background:linear-gradient(180deg,#101c2d 0%,#0c1624 100%);flex-shrink:0}.events-dialog-heading{min-width:0}.events-dialog-header .eyebrow{margin-bottom:7px}.events-dialog-header h2{font-size:20px}.events-dialog-header p{margin-top:5px;font-size:11px}.events-dialog-header .button{flex-shrink:0}.events-dialog-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 26px;background:#0e1724;border-bottom:1px solid rgba(56,189,248,0.12);font:10px var(--mono);color:var(--muted);flex-shrink:0}#events-dialog-autoscroll{font-size:11px}#events-dialog .events-list{padding:0 24px;gap:0;scrollbar-width:thin;scrollbar-color:rgba(56,189,248,0.2) transparent}#events-dialog .event-line{grid-template-columns:44px 164px 54px minmax(0,1fr);gap:12px;font:12px/1.8 var(--mono);padding:13px 0;border-bottom:1px solid #1d2b3c;flex-shrink:0}#events-dialog .event-time{font-size:11px;color:#8ea5c1}#events-dialog .event-level{font-size:10px}#events-dialog .event-id{color:#5d7391;font-size:10px}#events-dialog .event-message{white-space:pre-wrap;overflow-wrap:anywhere}#events-dialog .terminal-footer{padding:12px 26px;border-top:1px solid rgba(56,189,248,0.12);background:#0c1624;flex-shrink:0;border-bottom-left-radius:20px;border-bottom-right-radius:20px}#events-dialog-state[data-tone="success"]{color:var(--green)}#events-dialog-state[data-tone="warning"]{color:var(--amber)}body:has(#events-dialog[open]){overflow:hidden}
     @media(max-width:640px){#events-dialog{width:calc(100% - 20px);height:calc(100vh - 24px);height:calc(100dvh - 24px)}.events-dialog-header{padding:16px;gap:10px}.events-dialog-header h2{font-size:16px}.events-dialog-header .button{padding:9px 11px}.events-dialog-toolbar{padding:11px 16px;font-size:9px}#events-dialog .events-list{padding:0 16px}#events-dialog .event-line{grid-template-columns:34px minmax(0,1fr) auto;gap:4px 8px;font-size:11px}#events-dialog .event-message{grid-column:1/-1;margin-top:4px}#events-dialog .terminal-footer{padding:11px 16px;font-size:8px}}
@@ -999,7 +998,7 @@
   <!-- ========================================================================= -->
   <!-- MODAL NEUROVISION : SCANNER COGNITIF & BIOMÉTRIQUE TEMPS RÉEL            -->
   <!-- ========================================================================= -->
-    <dialog id="neurovision-dialog" aria-labelledby="neurovision-dialog-title">
+        <dialog id="neurovision-dialog" aria-labelledby="neurovision-dialog-title">
     <div class="nv-header">
       <div>
         <div class="nv-title-badge">
@@ -1015,8 +1014,8 @@
     </div>
 
     <div class="nv-grid">
-      <!-- Colonne GAUCHE: Viewport Vidéo & Réticules Sci-Fi -->
-      <div style="display:flex; flex-direction:column;">
+      <!-- ================= COLONNE 1 : VIEWPORT VIDÉO & CONTRÔLES ================= -->
+      <div class="nv-col">
         <div class="nv-viewport-card">
           <!-- Flux Vidéo Local (PC Client de Moctar) -->
           <video id="nv-client-video" class="nv-media-element" autoplay playsinline muted style="display:none; transform:scaleX(-1);"></video>
@@ -1039,7 +1038,7 @@
                 <span class="nv-chip-dot"></span>
                 <span id="nv-stream-status-text">CAMÉRA LOCALE ACTIVE</span>
               </div>
-              <div id="nv-fps-tag" class="nv-chip">30 FPS</div>
+              <div id="nv-fps-tag" class="nv-chip">0 FPS</div>
             </div>
           </div>
         </div>
@@ -1058,16 +1057,16 @@
         </div>
       </div>
 
-      <!-- Colonne DROITE: Digital Twin 3D & Télémétrie Biométrique -->
-      <div class="nv-side-col">
-        <!-- 1. Digital Twin 3D : Tête Filaire Gyroscopique -->
+      <!-- ================= COLONNE 2 : DIGITAL TWIN 3D & GYRO ================= -->
+      <div class="nv-col">
+        <!-- Digital Twin 3D : Tête Filaire Gyroscopique -->
         <div class="nv-cyber-card">
           <div class="nv-card-head">
             <span>ORIENTATION 3D TEMPS RÉEL (DIGITAL TWIN)</span>
             <span style="color:var(--nv-cyan);">ACCÉLÉRATION GPU</span>
           </div>
           <div class="nv-3d-wrapper">
-            <canvas id="nv-3d-canvas" width="360" height="190"></canvas>
+            <canvas id="nv-3d-canvas" width="380" height="180"></canvas>
           </div>
           <div class="nv-gyro-readout">
             <div class="nv-gyro-box">
@@ -1081,7 +1080,21 @@
           </div>
         </div>
 
-        <!-- 2. État Cognitif, Jauge Radiale & Onde Cardiaque/EEG -->
+        <!-- Oscilloscope Onde Cérébrale / Cardiaque EEG -->
+        <div class="nv-cyber-card" style="margin-top:auto;">
+          <div class="nv-card-head">
+            <span>FLUX NEURO-ÉLECTRIQUE (SYNTHÈSE EEG)</span>
+            <span style="color:#00ff88; font-size:10px;">60 HZ LIVE</span>
+          </div>
+          <div class="nv-wave-box">
+            <canvas id="nv-wave-canvas" width="380" height="48"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= COLONNE 3 : BIOMÉTRIE & STATISTIQUES ================= -->
+      <div class="nv-col nv-col-stats">
+        <!-- État Cognitif & Jauge Radiale -->
         <div class="nv-cyber-card">
           <div class="nv-card-head">
             <span>CHARGE COGNITIVE & BIOMÉTRIE</span>
@@ -1102,15 +1115,10 @@
               <div style="font-size:10px; color:#7e9bbd;">Score de fatigue multi-facteurs en direct</div>
             </div>
           </div>
-
-          <!-- Oscilloscope Onde Cérébrale / Cardiaque -->
-          <div class="nv-wave-box">
-            <canvas id="nv-wave-canvas" width="360" height="48"></canvas>
-          </div>
         </div>
 
-        <!-- 3. Grille Métriques Clignements / Bâillements / Durée -->
-        <div class="nv-cyber-card">
+        <!-- Grille Métriques Clignements / Bâillements / Durée -->
+        <div class="nv-cyber-card" style="margin-top:auto;">
           <div class="nv-stat-grid">
             <div class="nv-stat-box">
               <div class="nv-stat-label">CLIGNEMENTS</div>
@@ -2894,6 +2902,6 @@
     })();
     // CONTRÔLEUR 3D HOLOGRAPHIQUE NEUROVISION
   </script>
-  <script src="/static/neurovision_hud.js?v=3.0"></script>
+  <script src="/static/neurovision_hud.js?v=3.2"></script>
 </body>
 </html>

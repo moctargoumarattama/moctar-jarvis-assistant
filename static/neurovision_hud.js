@@ -378,13 +378,33 @@
   // 3. MOTEUR 3D DIGITAL TWIN & ANNEAUX GYROSCOPIQUES (CANVAS)
   // =========================================================================
 
+  let is3DInitialized = false;
+  let isWaveInitialized = false;
+
+  function resizeCanvases() {
+    if (canvas3D && canvas3D.parentElement) {
+      const rect = canvas3D.parentElement.getBoundingClientRect();
+      if (rect.width > 50) {
+        canvas3D.width = Math.round(rect.width);
+        canvas3D.height = Math.round(rect.height) || 180;
+      }
+    }
+    if (canvasWave && canvasWave.parentElement) {
+      const rect = canvasWave.parentElement.getBoundingClientRect();
+      if (rect.width > 50) {
+        canvasWave.width = Math.round(rect.width);
+        canvasWave.height = Math.round(rect.height) || 48;
+      }
+    }
+  }
+  window.addEventListener('resize', resizeCanvases);
+
   function init3DDigitalTwin() {
     if (!canvas3D) return;
+    resizeCanvases();
+    if (is3DInitialized) return;
+    is3DInitialized = true;
     const ctx = canvas3D.getContext('2d');
-    const width = canvas3D.width;
-    const height = canvas3D.height;
-    const centerX = width / 2;
-    const centerY = height / 2;
 
     // Définition géométrique d'un visage 3D filaire (Vertices 3D)
     const baseNodes = [
@@ -424,6 +444,11 @@
     let idleAngle = 0;
 
     function render3D() {
+      const width = canvas3D.width || 380;
+      const height = canvas3D.height || 180;
+      const centerX = width / 2;
+      const centerY = height / 2;
+
       // Lissage des angles Yaw et Roll
       currentYaw += (targetYaw - currentYaw) * 0.15;
       currentRoll += (targetRoll - currentRoll) * 0.15;
@@ -540,12 +565,15 @@
 
   function initWaveOscilloscope() {
     if (!canvasWave) return;
+    resizeCanvases();
+    if (isWaveInitialized) return;
+    isWaveInitialized = true;
     const ctx = canvasWave.getContext('2d');
-    const width = canvasWave.width;
-    const height = canvasWave.height;
     let offset = 0;
 
     function renderWave() {
+      const width = canvasWave.width || 380;
+      const height = canvasWave.height || 48;
       offset += 2.5;
       ctx.clearRect(0, 0, width, height);
 
@@ -670,6 +698,7 @@
   if (dialog) {
     const observer = new MutationObserver(() => {
       if (dialog.open) {
+        setTimeout(resizeCanvases, 60);
         init3DDigitalTwin();
         initWaveOscilloscope();
         // Démarre la caméra de l'appareil automatiquement par défaut

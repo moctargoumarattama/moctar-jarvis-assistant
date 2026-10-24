@@ -501,7 +501,7 @@
       font-family: var(--font-sans);
     }
   </style>
-  <link rel="stylesheet" href="/static/neurovision_hud.css?v=3.0">
+  <link rel="stylesheet" href="/static/neurovision_hud.css?v=3.2">
 </head>
 <body>
   <!-- Conteneur 3D WebGL (Three.js) -->
@@ -616,9 +616,9 @@
   <!-- ========================================================================= -->
   <!-- MODAL HOLOGRAPHIQUE NEUROVISION POUR LE HUD 3D (3D ULTRA-CINÉMATIQUE)     -->
   <!-- ========================================================================= -->
-  <div id="hud-neurovision-overlay" class="hud-modal-overlay">
-    <div class="hud-modal-card" style="max-width: 1040px; width: 95vw; max-height: 90vh; overflow-y: auto; padding: 0; background: transparent; border: none; box-shadow: none;">
-      <div id="neurovision-dialog" style="display:block; position:relative; width:100%; border-radius:16px; margin:0;">
+    <div id="hud-neurovision-overlay" class="hud-modal-overlay">
+    <div class="hud-modal-card" style="max-width: 1520px; width: min(1520px, calc(100vw - 32px)); max-height: 94vh; overflow: hidden; padding: 0; background: transparent; border: none; box-shadow: none;">
+      <div id="neurovision-dialog" style="display:block; position:relative; width:100%; border-radius:18px; margin:0;">
         <div class="nv-header">
           <div>
             <div class="nv-title-badge">
@@ -634,8 +634,8 @@
         </div>
 
         <div class="nv-grid">
-          <!-- Colonne GAUCHE: Viewport Vidéo & Réticules Sci-Fi -->
-          <div style="display:flex; flex-direction:column;">
+          <!-- ================= COLONNE 1 : VIEWPORT VIDÉO & CONTRÔLES ================= -->
+          <div class="nv-col">
             <div class="nv-viewport-card">
               <!-- Flux Vidéo Local (PC Client de Moctar) -->
               <video id="nv-client-video" class="nv-media-element" autoplay playsinline muted style="display:none; transform:scaleX(-1);"></video>
@@ -658,7 +658,7 @@
                     <span class="nv-chip-dot"></span>
                     <span id="nv-stream-status-text">CAMÉRA LOCALE ACTIVE</span>
                   </div>
-                  <div id="nv-fps-tag" class="nv-chip">30 FPS</div>
+                  <div id="nv-fps-tag" class="nv-chip">0 FPS</div>
                 </div>
               </div>
             </div>
@@ -677,16 +677,16 @@
             </div>
           </div>
 
-          <!-- Colonne DROITE: Digital Twin 3D & Télémétrie Biométrique -->
-          <div class="nv-side-col">
-            <!-- 1. Digital Twin 3D : Tête Filaire Gyroscopique -->
+          <!-- ================= COLONNE 2 : DIGITAL TWIN 3D & GYRO ================= -->
+          <div class="nv-col">
+            <!-- Digital Twin 3D : Tête Filaire Gyroscopique -->
             <div class="nv-cyber-card">
               <div class="nv-card-head">
                 <span>ORIENTATION 3D TEMPS RÉEL (DIGITAL TWIN)</span>
                 <span style="color:var(--nv-cyan);">ACCÉLÉRATION GPU</span>
               </div>
               <div class="nv-3d-wrapper">
-                <canvas id="nv-3d-canvas" width="360" height="190"></canvas>
+                <canvas id="nv-3d-canvas" width="380" height="180"></canvas>
               </div>
               <div class="nv-gyro-readout">
                 <div class="nv-gyro-box">
@@ -700,7 +700,21 @@
               </div>
             </div>
 
-            <!-- 2. État Cognitif, Jauge Radiale & Onde Cardiaque/EEG -->
+            <!-- Oscilloscope Onde Cérébrale / Cardiaque EEG -->
+            <div class="nv-cyber-card" style="margin-top:auto;">
+              <div class="nv-card-head">
+                <span>FLUX NEURO-ÉLECTRIQUE (SYNTHÈSE EEG)</span>
+                <span style="color:#00ff88; font-size:10px;">60 HZ LIVE</span>
+              </div>
+              <div class="nv-wave-box">
+                <canvas id="nv-wave-canvas" width="380" height="48"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- ================= COLONNE 3 : BIOMÉTRIE & STATISTIQUES ================= -->
+          <div class="nv-col nv-col-stats">
+            <!-- État Cognitif & Jauge Radiale -->
             <div class="nv-cyber-card">
               <div class="nv-card-head">
                 <span>CHARGE COGNITIVE & BIOMÉTRIE</span>
@@ -721,15 +735,10 @@
                   <div style="font-size:10px; color:#7e9bbd;">Score de fatigue multi-facteurs en direct</div>
                 </div>
               </div>
-
-              <!-- Oscilloscope Onde Cérébrale / Cardiaque -->
-              <div class="nv-wave-box">
-                <canvas id="nv-wave-canvas" width="360" height="48"></canvas>
-              </div>
             </div>
 
-            <!-- 3. Grille Métriques Clignements / Bâillements / Durée -->
-            <div class="nv-cyber-card">
+            <!-- Grille Métriques Clignements / Bâillements / Durée -->
+            <div class="nv-cyber-card" style="margin-top:auto;">
               <div class="nv-stat-grid">
                 <div class="nv-stat-box">
                   <div class="nv-stat-label">CLIGNEMENTS</div>
@@ -866,6 +875,6 @@
       }
     })();
   </script>
-  <script src="/static/neurovision_hud.js?v=3.0"></script>
+  <script src="/static/neurovision_hud.js?v=3.2"></script>
 </body>
 </html>
