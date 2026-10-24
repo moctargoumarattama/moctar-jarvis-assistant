@@ -1235,12 +1235,14 @@
         console.error('[MocHUD] Fallback query error:', fbErr);
       }
 
-      const msg = errorDetail ? `Erreur (${res.status}) : ${errorDetail}` : `Erreur de communication avec le serveur (${res.status}), Moctar.`;
+      const msg = res.status === 502 || res.status === 503
+        ? "Le serveur M4800 redémarre ses services, je me reconnecte dans un instant..."
+        : (errorDetail ? `Erreur (${res.status}) : ${errorDetail}` : `Serveur temporairement indisponible (${res.status}), un instant Moctar...`);
       if (assistantTextEl) assistantTextEl.textContent = msg;
       handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
     } catch (netErr) {
       console.error('[MocHUD] Network exception:', netErr);
-      if (assistantTextEl) assistantTextEl.textContent = "Réseau indisponible, Moctar.";
+      if (assistantTextEl) assistantTextEl.textContent = "Liaison au serveur M4800 en cours, réessaie dans un instant mon ami.";
       handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
     }
   }

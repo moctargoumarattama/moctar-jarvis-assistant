@@ -13,9 +13,9 @@
     'yo elmo', 'hey elmo', 'hey el mo', 'el mo', 'elmo',
   ];
   const DEFAULT_FOLLOWUP_MS = 20000;
-  const GREETING = 'À vos ordres Moctar, je vous écoute.';
+  const GREETING = 'Salut Moctar ! Comment tu vas mon ami ? Je suis là, dis-moi tout !';
   const WAKE_READY_MESSAGE = "🟢 À l'écoute — Parlez librement";
-  const VOICE_DETECTED_MESSAGE = '🎙️ Moctar vous écoute...';
+  const VOICE_DETECTED_MESSAGE = "🎙️ Je t'écoute Moctar...";
   const THINKING_MESSAGE = '⚡ M.O.C.T.A.R calcule la réponse...';
 
   // Micro-WAV PCM 8kHz mono 16-bit silencieux valide (46 octets) pour déverrouiller l'autoplay sur Brave / iOS / Chrome

@@ -634,10 +634,13 @@ def summarize_text_file(file_path: str):
 
 def store_memory_fact(
     key: str,
-    value: str,
+    value: Optional[str] = None,
     category: str = "general",
     importance: int = 1,
     memory_instance: Optional[Any] = None,
+    fact: Optional[str] = None,
+    content: Optional[str] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """Enregistre durablement un fait, une préférence ou une configuration dans la mémoire sémantique de JARVIS.
 
@@ -645,18 +648,21 @@ def store_memory_fact(
         - L'agent DOIT appeler cet outil lorsque l'utilisateur lui demande explicitement
           de retenir, mémoriser, se souvenir ou sauvegarder une information importante ou permanente
           (ex: 'Retiens que mon port SSH est le 2222', 'Mémorise que le mot de passe wifi de l'atelier est XYZ',
-          'Souviens-toi que mon adresse IP est 192.168.1.100', 'Garde en mémoire que je préfère le thème sombre').
+          'Souviens-toi que mon adresse IP est 192.168.1.100', 'Garde en mémoire que je préfère le thème sombre',
+          'Retiens que je suis Nigérien').
         - L'agent NE DOIT PAS appeler cet outil pour des tâches temporaires à cocher (utiliser `add_todo`)
           ni pour des notes brutes ou brouillons longs (utiliser `create_note`).
 
     Args:
         key (str): Identifiant ou nom concis du fait technique/préférence (ex: 'ip_vps', 'ssh_port', 'wifi_password').
             Contraintes: Chaîne non vide sans caractères spéciaux complexes.
-        value (str): Contenu exact, valeur ou description de l'information à mémoriser (ex: '192.168.1.100', 'Port 2222').
-        category (str): Domaine de classification du fait (ex: 'system', 'network', 'preferences', 'iot', 'general').
+        value (Optional[str]): Contenu exact, valeur ou description de l'information à mémoriser (ex: '192.168.1.100', 'Port 2222').
+        category (str): Domaine de classification du fait (ex: 'system', 'network', 'preferences', 'iot', 'personal', 'general').
             Défaut: 'general'.
         importance (int): Niveau d'importance du fait de 1 à 5. Défaut: 1.
         memory_instance (Optional[Any]): Instance personnalisée d'AssistantMemory pour les tests.
+        fact (Optional[str]): Alias pour 'value' supporté nativement pour les modèles Function Calling.
+        content (Optional[str]): Alias pour 'value'.
 
     Returns:
         Dict[str, Any]: Dictionnaire standardisé contenant le résultat de la mémorisation :
@@ -670,7 +676,11 @@ def store_memory_fact(
     from assistant_memory import AssistantMemory
 
     action_name = "store_memory_fact"
-    if not key or not str(key).strip() or not value or not str(value).strip():
+    actual_value = str(
+        value or fact or content or kwargs.get("text") or kwargs.get("val") or kwargs.get("info") or ""
+    ).strip()
+
+    if not key or not str(key).strip() or not actual_value:
         return format_action_result(
             action=action_name,
             success=False,
@@ -679,15 +689,28 @@ def store_memory_fact(
             error="EmptyKeyOrValueError",
         )
 
+    clean_key = str(key).strip()
+    clean_cat = str(category or "general").strip()
+
     try:
         mem = memory_instance or AssistantMemory()
-        ok = mem.save_fact(category=category, key=key, value=value, importance=importance)
+        ok = mem.save_fact(category=clean_cat, key=clean_key, value=actual_value, importance=importance)
         if ok:
+            # Synchronisation directe avec le profil vivant de Moctar si fait personnel ou nationalité
+            low_val = actual_value.lower()
+            low_key = clean_key.lower()
+            if "niger" in low_val or "nigérien" in low_val or "nationalit" in low_key:
+                try:
+                    if hasattr(mem, "update_moctar_profile"):
+                        mem.update_moctar_profile({"nationality": "Nigérien", "country": "Niger"})
+                except Exception:
+                    pass
+
             return format_action_result(
                 action=action_name,
                 success=True,
-                message=f"Fait mémorisé avec succès : [{category}] {key} = {value}",
-                data={"category": category, "key": key, "value": value, "importance": importance},
+                message=f"Fait mémorisé avec succès : [{clean_cat}] {clean_key} = {actual_value}",
+                data={"category": clean_cat, "key": clean_key, "value": actual_value, "importance": importance},
                 error=None,
             )
         return format_action_result(

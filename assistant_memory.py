@@ -49,15 +49,17 @@ from contextlib import contextmanager
 
 DEFAULT_MOCTAR_PROFILE: Dict[str, Any] = {
     "name": "Moctar",
+    "nationality": "Nigérien",
+    "country": "Niger",
     "hardware": "Dell Precision M4800 (Linux Ubuntu)",
     "role": "Ingénieur & Pilote des systèmes",
-    "tone_preference": "Naturel, chaleureux, direct, concis et complice",
+    "tone_preference": "Naturel, chaleureux, direct, concis et complice (comme un ami)",
     "preferred_editor": "VS Code",
     "preferred_shell": "bash / zsh",
     "favorite_sports_teams": ["Real Madrid"],
     "favorite_competitions": ["Ligue 1", "Champions League", "Liga", "Premier League"],
     "recent_topics": [],
-    "known_preferences": {},
+    "known_preferences": {"nationality": "Nigérien", "origin": "Niger", "editor": "VS Code"},
     "last_interaction": None,
     "total_turns": 0,
 }
@@ -565,13 +567,17 @@ class AssistantMemory:
                 fav_teams.add(canonical)
         profile["favorite_sports_teams"] = list(fav_teams)
 
-        # 3. Préférences d'outils et de villes
+        # 3. Préférences d'outils, nationalité et villes
         known_prefs = profile.get("known_preferences", {})
         if "vscode" in low_user or "visual studio code" in low_user:
             known_prefs["editor"] = "VS Code"
         if "chrome" in low_user:
             known_prefs["browser"] = "Chrome"
-        if any(w in low_user for w in ("niamey", "niger")):
+        if re.search(r"\b(?:nig[ée]rien(?:ne)?|niger)\b", low_user):
+            profile["nationality"] = "Nigérien"
+            profile["country"] = "Niger"
+            known_prefs["nationality"] = "Nigérien"
+            known_prefs["origin"] = "Niger"
             known_prefs["primary_city"] = "Niamey"
         elif any(w in low_user for w in ("casablanca", "casa", "maroc")):
             known_prefs["secondary_city"] = "Casablanca"
@@ -587,15 +593,17 @@ class AssistantMemory:
         topics_str = ", ".join(recent_topics) if recent_topics else "Général"
         teams = ", ".join(profile.get("favorite_sports_teams", ["Real Madrid"]))
         turn_count = profile.get("total_turns", 0)
+        nationality = profile.get("nationality", "Nigérien")
 
         lines = [
-            "[PROFIL CONTINU DE MOCTAR (PERSONNALISATION VIVANTE)]",
+            "[PROFIL CONTINU DE MOCTAR (PERSONNALISATION VIVANTE & AMICALE)]",
             f"- Utilisateur : {profile.get('name', 'Moctar')} (Ingénieur & Architecte sur {profile.get('hardware', 'Dell Precision M4800')})",
-            f"- Ton souhaité : {profile.get('tone_preference', 'Humain, chaleureux, direct et complice')}",
+            f"- Nationalité & Origine : {nationality} (Niger)",
+            f"- Ton souhaité : {profile.get('tone_preference', 'Humain, chaleureux, direct et complice (comme un ami)')}",
             f"- Équipes & Sports suivis : {teams}",
             f"- Sujets récents abordés : {topics_str}",
             f"- Volume d'échanges partagés : {turn_count} tours de conversation",
-            "- Directive de posture : Ne termine PAS tes phrases par 'Moctar.' à chaque fois. Parle-lui avec naturel et fluidité, et pose de courtes questions de clarification dès que nécessaire.",
+            "- Directive de posture : Tu es son ami et copilote de confiance. Ne sois jamais un valet ou serviteur ('À vos ordres' ou 'Monsieur' sont INTERDITS). Parle-lui comme un frère/ami proche, chaleureux, fier de ses origines nigériennes, vif et ultra-réactif.",
         ]
         return "\n".join(lines)
 

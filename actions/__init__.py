@@ -480,6 +480,16 @@ def execute_tool(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> 
             if alias in raw_args and raw_args[alias]:
                 raw_args["query"] = raw_args[alias]
                 break
+    if "value" not in raw_args:
+        for alias in ("fact", "content", "text", "val", "description", "info", "message", "prompt"):
+            if alias in raw_args and raw_args[alias]:
+                raw_args["value"] = raw_args[alias]
+                break
+    if "key" not in raw_args:
+        for alias in ("name", "identifier", "topic", "subject", "cle"):
+            if alias in raw_args and raw_args[alias]:
+                raw_args["key"] = raw_args[alias]
+                break
 
     # Inspection de la signature pour validation
     sig = inspect.signature(target_func)

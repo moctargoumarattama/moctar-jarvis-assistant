@@ -320,8 +320,10 @@ async def _prewarm_common_voice_tts() -> None:
 
 VOICE_SESSION_DURATION_SECONDS = float(os.getenv("VOICE_SESSION_DURATION_SECONDS", "45.0"))
 VOICE_BUTLER_GREETINGS = (
-    "À vos ordres Moctar, je vous écoute.",
-    "Oui Moctar, je suis là.",
+    "Salut Moctar ! Comment tu vas mon ami ? Je suis là, dis-moi tout !",
+    "Salut Moctar ! Tout roule ? Qu'est-ce qu'on fait de beau aujourd'hui ?",
+    "Yo Moctar ! Toujours présent avec toi, qu'est-ce qui se passe ?",
+    "Salut Moctar ! À ton écoute mon ami, dis-moi ce qu'on lance !",
 )
 _WAKE_ONLY_SENTINEL = "__MOCTAR_WAKE_ONLY__"
 
@@ -653,9 +655,13 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
     if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague)\b", normalized):
         return "Il y a 10 types de personnes dans le monde : ceux qui comprennent le binaire, et ceux qui ne le comprennent pas !"
 
-    # 0a5. Test Micro & Écoute ("tu m'entends", "tu nous entends", "test micro")
-    if re.search(r"\b(?:tu\s+m['’]entends|tu\s+nous\s+entends|m['’]entends[- ]tu|test\s+micro|tu\s+m['’][ée]coutes)\b", normalized):
-        return "Je vous entends 5 sur 5 avec une clarté optimale ! Je suis à votre écoute, Moctar."
+    # 0a5. Test Micro, Radio & Écoute ("tu me reçois", "tu me captes", "tu m'entends", "tu nous entends", "test micro")
+    if re.search(r"\b(?:tu\s+(?:me\s+)?re[cç]ois|tu\s+(?:me\s+)?captes?|tu\s+m['’]entends|tu\s+nous\s+entends|m['’]entends[- ]tu|test\s+micro|tu\s+m['’][ée]coutes|tu\s+es\s+l[aà])\b", normalized):
+        return "5 sur 5 Moctar ! Je te reçois fort et clair, liaison parfaite. Je suis là avec toi mon ami !"
+
+    # 0a5b. Réassurance empathique immédiate ("tu ne me réponds pas", "tu ne me comprends pas", "je te parle depuis")
+    if re.search(r"\b(?:je\s+te\s+parle\s+depuis|tu\s+ne\s+me\s+r[ée]ponds\s+pas|tu\s+(?:ne\s+)?me\s+comprends\s+pas|pourquoi\s+tu\s+(?:ne\s+)?(?:me\s+)?r[ée]ponds\s+pas|tu\s+m['’]ignores?)\b", normalized):
+        return "Pardonne-moi Moctar ! J'étais en train de synchroniser mes canaux, mais je suis là à 100% avec toi mon ami. Dis-moi tout, je t'écoute 5 sur 5 !"
 
     # 0a6. Créateur & Origine du système ("qui t'a créé", "qui t'a conçu", "qui est ton créateur")
     if re.search(r"\b(?:qui\s+t['’]a\s+(?:cr[ée][ée]|con[çc]u|d[ée]velopp[ée]|programm[ée])|qui\s+est\s+ton\s+cr[ée]ateur|c['’]est\s+qui\s+ton\s+cr[ée]ateur)\b", normalized):
@@ -731,11 +737,39 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
     if re.search(r"\b(?:qui\s+es[- ]tu|comment\s+tu\s+t['’]appelles|comment\s+t['’]appelles[- ]tu|c['’]est\s+quoi\s+ton\s+nom|quel\s+est\s+ton\s+nom|qui\s+tu\s+es|pr[ée]sente[- ]toi)\b", normalized):
         return "Je suis M.O.C.T.A.R, votre système autonome de contrôle et d'intelligence opérationnelle, Moctar."
 
-    # 1b. Rôle & Métier d'Ingénieur ("c'est quoi ton job", "tu es qui toi", "quel est ton job", "tu sers à quoi", "tu fais quoi")
-    if re.search(r"\b(?:c['’]est\s+quoi\s+ton\s+job|quel\s+est\s+ton\s+job|ton\s+job|tu\s+es\s+qui\s+toi|t['’]es\s+qui\s+toi|tu\s+sers\s+[aà]\s+quoi|tu\s+fais\s+quoi|tu\s+sais\s+faire\s+quoi|quel\s+est\s+ton\s+r[ôo]le|ton\s+r[ôo]le)\b", normalized):
+    # 1b. Rôle & Métier d'Ingénieur ("c'est quoi ton job", "tu es capable de faire", "tu sers à quoi", "tu fais quoi")
+    if re.search(r"\b(?:c['’]est\s+quoi\s+ton\s+job|quel\s+est\s+ton\s+job|ton\s+job|tu\s+es\s+qui\s+toi|t['’]es\s+qui\s+toi|tu\s+sers\s+[aà]\s+quoi|tu\s+fais\s+quoi|tu\s+sais\s+faire\s+quoi|(?:qu['’]est[- ]ce\s+que\s+)?tu\s+es\s+capable\s+de\s+faire|capable\s+de\s+faire|tu\s+peux\s+faire\s+quoi|qu['’]est[- ]ce\s+que\s+tu\s+peux\s+faire|quel\s+est\s+ton\s+r[ôo]le|ton\s+r[ôo]le)\b", normalized):
         if client_device and client_device != "Serveur local Dell M4800":
-            return f"Je suis M.O.C.T.A.R, votre copilote d'ingénierie et système d'intelligence opérationnelle. Mes services tournent sur le serveur hôte Dell Precision M4800 et je vous assiste directement sur votre {device_label}, Moctar."
-        return "Je suis M.O.C.T.A.R, votre copilote d'ingénierie et système d'intelligence opérationnelle sur le serveur Dell Precision M4800. Je pilote vos environnements de travail, surveille l'infrastructure NOC, exécute vos commandes et assure le suivi de vos projets en temps réel, Moctar."
+            return f"Je suis M.O.C.T.A.R, ton copilote et ami d'ingénierie. Je surveille ton serveur Dell Precision M4800, pilote VS Code, gère Git, retiens toutes tes préférences et t'assiste en direct sur ton {device_label}, Moctar !"
+        return "Je peux surveiller ton Dell Precision M4800 (CPU, RAM, disques, services), coder et éditer des scripts, piloter Git (commits, push), retenir toutes tes infos dans ma mémoire permanente, lancer ta musique, la météo, et t'assister sur tous tes projets comme ton copilote et ami, Moctar !"
+
+    # 1b2. Profil & Savoir sur Moctar ("qu'est-ce que tu connais sur moi", "qu'est-ce que tu sais sur moi", "tu me connais")
+    if re.search(r"\b(?:qu['’]est[- ]ce\s+que\s+tu\s+(?:connais|sais)\s+sur\s+moi|quelles?\s+(?:sont\s+les\s+)?informations?\s+(?:que\s+)?tu\s+connais\s+sur\s+moi|tu\s+me\s+connais|tu\s+sais\s+quoi\s+sur\s+moi)\b", normalized):
+        profile = {}
+        if memory and hasattr(memory, "get_moctar_profile"):
+            try:
+                profile = memory.get_moctar_profile() or {}
+            except Exception:
+                pass
+        nat = profile.get("nationality", "Nigérien")
+        country = profile.get("country", "Niger")
+        hw = profile.get("hardware", "Dell Precision M4800")
+        pref = profile.get("known_preferences", {})
+        editor = pref.get("editor", "VS Code")
+        teams = ", ".join(profile.get("favorite_sports_teams", ["Real Madrid"]))
+        return f"Je te connais par cœur Moctar ! Tu es un ingénieur brillant originaire du {country} ({nat}), passionné de dev sur ton {hw} avec {editor}, fervent supporter du {teams}, et nous formons un super binôme !"
+
+    # 1b3. Mémorisation instantanée de faits personnels ou nationalité ("ajoute que je suis nigérien", "retiens que je suis nigérien")
+    if re.search(r"\b(?:(?:ajoute|retiens|note|enregistre|m[ée]morise)\s+que\s+je\s+suis\s+nig[ée]rien|je\s+suis\s+nig[ée]rien(?:ne)?|ma\s+nationalit[ée]\s+est\s+nig[ée]rienne)\b", normalized):
+        if memory:
+            try:
+                if hasattr(memory, "save_fact"):
+                    memory.save_fact(category="personal", key="nationalite_moctar", value="Moctar est Nigérien (Niger)", importance=5)
+                if hasattr(memory, "update_moctar_profile"):
+                    memory.update_moctar_profile({"nationality": "Nigérien", "country": "Niger"})
+            except Exception:
+                pass
+        return "C'est gravé dans ma mémoire avec fierté Moctar : nationalité nigérienne enregistrée dans ton profil permanent !"
 
     # 1c. Transition collaborative ("on va passer à ceci", "on continue", "on enchaîne")
     if re.search(r"\b(?:on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|passons\s+[aà]\s+la\s+suite)\b", normalized):
@@ -1519,11 +1553,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         hud_path = BASE_DIR / "templates" / "hud.html"
         if not hud_path.is_file():
             hud_path = BASE_DIR / "static" / "hud.html"
-        return FileResponse(hud_path, media_type="text/html")
+        return FileResponse(
+            hud_path,
+            media_type="text/html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"},
+        )
 
     @application.get("/static/js/hud_3d.js")
     async def hud_3d_script():
-        return FileResponse(BASE_DIR / "static" / "js" / "hud_3d.js", media_type="application/javascript")
+        return FileResponse(
+            BASE_DIR / "static" / "js" / "hud_3d.js",
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"},
+        )
 
     @application.get("/static/js/three.min.js")
     async def three_js_script():
@@ -2593,9 +2635,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(503, "Agent Jarvis non initialisé ou indisponible")
         data = await limited_json(request, 32768)
         payload = validate_payload(JarvisQueryPayload, data)
+        raw_prompt = payload.prompt.strip()
+
+        # Intercepteur local 0ms pour requêtes système, statut, météo ou identité
+        try:
+            mem = getattr(runtime.jarvis, "memory", None)
+            dev = request.headers.get("x-client-device") or ""
+            instant_reply = handle_instant_local_command(raw_prompt, memory=mem, client_device=dev)
+            if instant_reply:
+                return JSONResponse(
+                    {
+                        "status": "success",
+                        "reply": instant_reply,
+                        "thought_chain": ["Commande locale instantanée sans LLM (0ms)"],
+                        "tools_used": [],
+                        "timestamp": collector.utc_now(),
+                    }
+                )
+        except Exception:
+            pass
+
         try:
             result = await runtime.jarvis.execute_prompt_async(
-                user_input=payload.prompt.strip(),
+                user_input=raw_prompt,
                 source=payload.source,
             )
             return JSONResponse(result)
