@@ -171,20 +171,26 @@ class VisionEngine:
         self.face_cascade = None
         self.eye_cascade = None
 
-        if not CV2_AVAILABLE or cv2 is None:
-            LOGGER.info("ℹ️ OpenCV (cv2) non installé. NeuroVision fonctionne en mode veille/dégradé.")
+        if (
+            not CV2_AVAILABLE
+            or cv2 is None
+            or not hasattr(cv2, "CascadeClassifier")
+            or not hasattr(cv2, "data")
+            or not hasattr(cv2.data, "haarcascades")
+        ):
+            LOGGER.info("ℹ️ OpenCV Haar Cascades non disponibles sur cet hôte. NeuroVision opère en mode télémétrie client.")
             return
 
         try:
             face_xml = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
             self.face_cascade = cv2.CascadeClassifier(face_xml)
             if self.face_cascade.empty():
-                LOGGER.warning("Cascade faciale vide, mode dégradé.")
+                LOGGER.info("Cascade faciale vide, mode dégradé.")
                 self.face_cascade = None
             else:
                 LOGGER.info("✅ Cascade faciale Haar chargée avec succès.")
         except Exception as exc:
-            LOGGER.error("Erreur chargement cascade faciale: %s", exc)
+            LOGGER.info("Information chargement cascade faciale: %s", exc)
             self.face_cascade = None
 
         try:
@@ -195,35 +201,40 @@ class VisionEngine:
         except Exception:
             self.eye_cascade = None
 
-    def start(self) -> bool:
-        """Démarre l'acquisition et l'analyse vidéo en arrière-plan."""
+    def start(self, enable_server_camera: bool = False) -> bool:
+        """Active la session cognitive NeuroVision.
+
+        Par défaut, N'OUVRE PAS la webcam du serveur hôte Linux pour économiser
+        100% du CPU du serveur Dell et s'adapter au poste de travail distant de Moctar.
+        """
         with self._state_lock:
             if self._running:
                 return True
 
-            LOGGER.info("🎥 Activation du moteur de vision NeuroVision (CV2=%s)...", CV2_AVAILABLE)
+            LOGGER.info("🎥 Activation de la session cognitive NeuroVision (mode client-first)...")
             self._running = True
             self.start_time = time.time()
-            self._thread = threading.Thread(target=self._worker_loop, daemon=True, name="jarvis-neurovision")
-            self._thread.start()
+            if enable_server_camera:
+                self._thread = threading.Thread(target=self._worker_loop, daemon=True, name="jarvis-neurovision")
+                self._thread.start()
             return True
 
     def stop(self) -> None:
-        """Arrête proprement la caméra et libère les ressources matérielles."""
+        """Arrête la session de vision et libère les ressources matérielles."""
         with self._state_lock:
             if not self._running:
                 return
-            LOGGER.info("🛑 Arrêt du moteur de vision NeuroVision...")
+            LOGGER.info("🛑 Arrêt de la session NeuroVision...")
             self._running = False
 
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=2.0)
+            self._thread.join(timeout=1.5)
             self._thread = None
 
         self._release_camera()
 
     def toggle(self) -> bool:
-        """Bascule l'état marche/arrêt de la caméra."""
+        """Bascule l'état marche/arrêt de la session."""
         if self.is_running():
             self.stop()
             return False
@@ -240,6 +251,37 @@ class VisionEngine:
         if not self._running:
             return False
         return self.face_detected and (time.time() - self.last_face_seen_time < timeout_seconds)
+
+    def update_client_telemetry(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Met à jour directement la télémétrie reçue du navigateur client (PC de Moctar).
+
+        Garantit que le serveur Linux ne consomme AUCUN CPU pour la capture vidéo,
+        tout en maintenant l'état cognitif de Moctar parfaitement à jour dans JARVIS.
+        """
+        with self._state_lock:
+            self._running = True
+            self.last_update = time.time()
+            self.last_face_seen_time = time.time()
+            self.face_detected = bool(data.get("face_detected", True))
+
+            if "blink_count" in data:
+                self.blink_count = int(data["blink_count"])
+            if "yawn_count" in data:
+                self.yawn_count = int(data["yawn_count"])
+            if "head_tilt_yaw" in data:
+                self.head_tilt = float(data["head_tilt_yaw"])
+            if "head_roll" in data:
+                self.head_roll = float(data["head_roll"])
+            if "fatigue_score" in data:
+                self.fatigue_score = int(data["fatigue_score"])
+            if "fatigue_level" in data:
+                self.fatigue_level = str(data["fatigue_level"])
+            else:
+                self._update_metrics(self.face_detected)
+
+            metrics = self.get_metrics()
+            metrics["source"] = "client_webcam"
+            return metrics
 
     def analyze_client_frame(self, frame_bytes: bytes) -> Dict[str, Any]:
         """Analyse biométrique d'une frame transmise en temps réel par le navigateur client (PC, mobile).

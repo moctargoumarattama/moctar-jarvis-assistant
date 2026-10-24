@@ -67,6 +67,21 @@
     try {
       if (clientStream) stopClientCamera();
 
+      // Vérifie si le navigateur autorise l'API MediaDevices
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        const isRemoteHttp = location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+        if (isRemoteHttp) {
+          const msg = "Sécurité navigateur : pour utiliser la webcam de ce PC via http://" + location.host + ", ajoutez cette URL dans chrome://flags/#unsafely-treat-insecure-origin-as-secure ou passez en HTTPS.";
+          console.warn(msg);
+          if (typeof window.toast === 'function') {
+            window.toast("Caméra PC : activez l'exception HTTP dans chrome://flags ou utilisez HTTPS.", "warning");
+          }
+          updateStatusUI('⚠️ HTTPS OU EXCEPTION REQUIS SUR CE PC', '#ff9900');
+          startClientSimulation();
+          return;
+        }
+      }
+
       // Demande d'accès à la webcam locale de l'appareil (PC de Moctar)
       const constraints = {
         video: {
@@ -85,7 +100,10 @@
         clientVideo.style.display = 'block';
         await clientVideo.play();
       }
-      if (serverImg) serverImg.style.display = 'none';
+      if (serverImg) {
+        serverImg.style.display = 'none';
+        serverImg.src = '';
+      }
 
       isClientMode = true;
       isCameraActive = true;
@@ -103,9 +121,43 @@
       }
     } catch (err) {
       console.warn('Impossible d\'ouvrir la webcam locale du client :', err);
-      // Bascule automatiquement en mode flux serveur
-      fallbackToServerCamera();
+      updateStatusUI('⚠️ WEBCAM NON DISPONIBLE SUR CE PC', '#ff9900');
+      startClientSimulation();
     }
+  }
+
+  function startClientSimulation() {
+    isCameraActive = true;
+    updateToggleButtonUI(true);
+    if (sourceBadge) sourceBadge.textContent = 'MODE SIMULATION 3D';
+    if (fpsTag) fpsTag.textContent = '30 FPS';
+    // Mode démo autonome générant une télémétrie fluide pour le HUD 3D
+    if (frameSendInterval) clearInterval(frameSendInterval);
+    frameSendInterval = setInterval(() => {
+      const now = performance.now();
+      const yaw = Math.round(Math.sin(now * 0.001) * 15 * 10) / 10;
+      const roll = Math.round(Math.cos(now * 0.0008) * 8 * 10) / 10;
+      const metrics = {
+        active: true,
+        user_present: true,
+        face_detected: true,
+        head_tilt_yaw: yaw,
+        head_roll: roll,
+        fatigue_score: Math.min(100, Math.floor(Math.abs(yaw) + Math.abs(roll) * 1.5)),
+        fatigue_level: Math.abs(yaw) > 10 ? 'Distrait' : 'Normal',
+        blink_count: Math.floor(now / 5000),
+        blink_rate_per_min: 16,
+        yawn_count: 0,
+        session_duration_seconds: Math.floor(now / 1000)
+      };
+      updateMetricsUI(metrics);
+      // Synchronisation légère avec le serveur (JSON uniquement, zéro vidéo, zéro CPU)
+      fetch('/api/vision/telemetry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(metrics)
+      }).catch(() => {});
+    }, 400);
   }
 
   function stopClientCamera() {

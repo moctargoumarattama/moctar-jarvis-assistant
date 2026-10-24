@@ -1722,12 +1722,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/api/vision/stream")
     async def get_vision_stream_endpoint():
-        """Flux vidéo MJPEG continu basse latence directement servi par FastAPI (sans port 5001)."""
+        """Flux vidéo MJPEG passif (ne sollicite pas la webcam physique du serveur)."""
         try:
             from vision_engine import VisionEngine
             engine = VisionEngine.get_instance()
-            if not engine.is_running():
-                engine.start()
             return StreamingResponse(
                 engine.stream_generator(),
                 media_type="multipart/x-mixed-replace; boundary=frame",
@@ -1740,6 +1738,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except Exception:
                 fallback_jpeg = b""
             return Response(content=fallback_jpeg, media_type="image/jpeg")
+
+    @application.post("/api/vision/telemetry")
+    async def update_vision_telemetry_endpoint(request: Request):
+        """Reçoit la télémétrie directe calculée par le navigateur client (PC de Moctar)."""
+        try:
+            data = await request.json()
+            from vision_engine import VisionEngine
+            metrics = VisionEngine.get_instance().update_client_telemetry(data)
+            return JSONResponse(metrics)
+        except Exception as exc:
+            LOGGER.warning("Avertissement réception télémétrie client: %s", exc)
+            return JSONResponse({"status": "error", "message": str(exc)}, status_code=200)
 
     @application.post("/api/vision/toggle")
     async def toggle_vision_endpoint(request: Request):

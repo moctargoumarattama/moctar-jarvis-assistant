@@ -87,6 +87,25 @@ def test_fastapi_vision_routes_registered():
     assert "/api/vision/toggle" in routes
     assert "/api/vision/reset" in routes
     assert "/api/vision/frame" in routes
+    assert "/api/vision/telemetry" in routes
+
+
+def test_update_client_telemetry():
+    """Vérifie la synchronisation directe de télémétrie sans solliciter la caméra du serveur."""
+    from vision_engine import VisionEngine
+    engine = VisionEngine.get_instance()
+    res = engine.update_client_telemetry({
+        "blink_count": 14,
+        "yawn_count": 2,
+        "head_tilt_yaw": 5.5,
+        "head_roll": -2.0,
+        "fatigue_score": 35,
+        "fatigue_level": "Alerte",
+    })
+    assert res["blink_count"] == 14
+    assert res["yawn_count"] == 2
+    assert res["head_tilt_yaw"] == 5.5
+    assert res["source"] == "client_webcam"
 
 
 def test_analyze_client_frame_processing():
