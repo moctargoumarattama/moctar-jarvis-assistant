@@ -21,7 +21,7 @@ from typing import Annotated, Any, Optional
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Path as APIPath, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sse_starlette.sse import EventSourceResponse
 
@@ -844,6 +844,38 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
             cpu, ram = 12, 45
         return f"Processeur à {cpu}%, mémoire vive à {ram}%, tous les systèmes sont nominaux, Moctar."
 
+    # 5b. NeuroVision & Fatigue Cognitive ("active la vision", "coupe la caméra", "niveau de fatigue")
+    if re.search(r"\b(?:active|allume|lance|demarre|d[ée]marre)\s+(?:la\s+)?(?:vision|cam[ée]ra|webcam|neurovision)\b", normalized):
+        try:
+            from vision_engine import VisionEngine
+            VisionEngine.get_instance().start()
+            return "Caméra et vision cognitive NeuroVision activées, Moctar. Je veille sur ton poste."
+        except Exception as exc:
+            return f"Impossible d'activer la vision Moctar : {exc}"
+
+    if re.search(r"\b(?:coupe|arr[êe]te|ferme|d[ée]sactive|eteins|[ée]teins)\s+(?:la\s+)?(?:vision|cam[ée]ra|webcam|neurovision)\b", normalized):
+        try:
+            from vision_engine import VisionEngine
+            VisionEngine.get_instance().stop()
+            return "Caméra et moteur NeuroVision désactivés, Moctar."
+        except Exception as exc:
+            return f"Erreur lors de la désactivation de la vision Moctar : {exc}"
+
+    if re.search(r"\b(?:[ée]tat|niveau|score)\s+de\s+fatigue\b|\b(?:suis[- ]je|je\s+suis)\s+fatigu[ée]\b|\b(?:analyse\s+(?:ma\s+)?fatigue)\b", normalized):
+        try:
+            from vision_engine import VisionEngine
+            v = VisionEngine.get_instance()
+            if not v.is_running():
+                return "Le capteur de vision est actuellement en veille, Moctar. Dis-moi 'active la vision' pour lancer l'analyse."
+            metrics = v.get_metrics()
+            score = metrics.get("fatigue_score", 0)
+            level = metrics.get("fatigue_level", "Normal")
+            yawns = metrics.get("yawn_count", 0)
+            blinks = metrics.get("blink_count", 0)
+            return f"Ton score de fatigue est à {score}%, état {level}. {blinks} clignements et {yawns} bâillements enregistrés, Moctar."
+        except Exception:
+            return "Capteur de vision non disponible pour le moment, Moctar."
+
     # 6. Mémoire de Travail Active ("on en était où", "qu'est-ce qu'on faisait", "rappelle-moi notre tâche", "c'est quoi notre tâche")
     if re.search(r"\b(?:on\s+en\s+[ée]tait\s+o[uù]|qu['’]est[- ]ce\s+qu['’]on\s+faisait|on\s+faisait\s+quoi|rappelle[- ]moi\s+(?:ce\s+qu['’]on\s+fai|notre\s+t[âa]che)|notre\s+t[âa]che\s+en\s+cours|t[âa]che\s+active)\b", normalized):
         try:
@@ -1534,6 +1566,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             try:
+                from vision_engine import VisionEngine
+                VisionEngine.get_instance().stop()
+            except Exception:
+                pass
+            try:
                 from native_voice_daemon import NativeVoiceDaemon
                 NativeVoiceDaemon.get_instance().stop()
             except Exception:
@@ -1657,6 +1694,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pulse_speed = body.get("pulse_speed")
         updated = hud_state_manager.set_hud_mood(mood=mood, color=color, pulse_speed=pulse_speed)
         return JSONResponse(updated)
+
+    # =========================================================================
+    # ENDPOINTS COGNITIFS NEUROVISION UNIFIÉS (Flux MJPEG & Télémétrie)
+    # =========================================================================
+
+    @application.get("/api/vision/metrics")
+    async def get_vision_metrics_endpoint():
+        """Télémétrie cognitive temps réel (clignements, bâillements, fatigue, présence)."""
+        from vision_engine import VisionEngine
+        return JSONResponse(VisionEngine.get_instance().get_metrics())
+
+    @application.get("/api/vision/stream")
+    async def get_vision_stream_endpoint():
+        """Flux vidéo MJPEG continu basse latence directement servi par FastAPI (sans port 5001)."""
+        from vision_engine import VisionEngine
+        engine = VisionEngine.get_instance()
+        if not engine.is_running():
+            engine.start()
+        return StreamingResponse(
+            engine.stream_generator(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
+    @application.post("/api/vision/toggle")
+    async def toggle_vision_endpoint(request: Request):
+        """Bascule marche/arrêt à chaud du capteur webcam (zéro charge CPU en veille)."""
+        require_local_or_admin(request, settings)
+        from vision_engine import VisionEngine
+        engine = VisionEngine.get_instance()
+        active = engine.toggle()
+        return JSONResponse({"active": active, "metrics": engine.get_metrics()})
+
+    @application.post("/api/vision/reset")
+    async def reset_vision_counters_endpoint(request: Request):
+        """Remise à zéro des compteurs de fatigue et de posture de la session."""
+        require_local_or_admin(request, settings)
+        from vision_engine import VisionEngine
+        VisionEngine.get_instance().reset_counters()
+        return JSONResponse({"status": "ok", "message": "Compteurs NeuroVision réinitialisés"})
 
     @application.get("/static/live_metrics.js")
     async def live_metrics_script():

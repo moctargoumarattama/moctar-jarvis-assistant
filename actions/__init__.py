@@ -141,6 +141,38 @@ _INTERNAL_INJECTION_PARAMS = {
 }
 
 
+def control_vision(action: str = "toggle") -> Dict[str, Any]:
+    """Active, désactive ou bascule la caméra et le moteur de vision cognitive NeuroVision.
+
+    Args:
+        action (str): 'start' pour activer, 'stop' pour désactiver, ou 'toggle' pour basculer.
+    """
+    from vision_engine import VisionEngine
+    v = VisionEngine.get_instance()
+    act = (action or "toggle").lower().strip()
+    if act in ("start", "active", "on"):
+        v.start()
+        active = True
+    elif act in ("stop", "desactive", "off", "coupe"):
+        v.stop()
+        active = False
+    else:
+        active = v.toggle()
+    msg = f"Capteur NeuroVision {'activé' if active else 'désactivé'}."
+    return format_action_result("control_vision", True, msg, {"active": active, "metrics": v.get_metrics()})
+
+
+def get_vision_telemetry() -> Dict[str, Any]:
+    """Récupère la télémétrie de vision temps réel (clignements, bâillements, fatigue, posture)."""
+    from vision_engine import VisionEngine
+    v = VisionEngine.get_instance()
+    metrics = v.get_metrics()
+    score = metrics.get("fatigue_score", 0)
+    level = metrics.get("fatigue_level", "Normal")
+    msg = f"Vision cognitive : score de fatigue {score}% ({level}), clignements {metrics.get('blink_count', 0)}, bâillements {metrics.get('yawn_count', 0)}."
+    return format_action_result("get_vision_telemetry", True, msg, metrics)
+
+
 # ==============================================================================
 # TOOL DISPATCHER CENTRAL
 # ==============================================================================
@@ -189,6 +221,10 @@ TOOL_DISPATCHER: Dict[str, Callable[..., Any]] = {
     # HUD 3D Actions
     "switch_hud_view": switch_hud_view,
     "set_hud_mood": set_hud_mood,
+
+    # NeuroVision Actions
+    "control_vision": control_vision,
+    "get_vision_telemetry": get_vision_telemetry,
 
     # Energy Actions
     "calculate_consumption": calculate_consumption,
@@ -586,6 +622,8 @@ __all__ = [
     "TOOL_DISPATCHER",
     "get_all_tools_schema",
     "execute_tool",
+    "control_vision",
+    "get_vision_telemetry",
     "function_to_json_schema",
     "ActionResult",
     "format_action_result",

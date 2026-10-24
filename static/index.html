@@ -232,6 +232,7 @@
     .remote-panel{height:146px;display:flex;flex-direction:column;overflow:hidden}.remote-toolbar{display:flex;align-items:center;justify-content:space-between;gap:7px;padding:7px 10px;border-bottom:1px solid var(--line);background:#131d2c;flex-shrink:0}.remote-tabs{display:flex;gap:4px}.remote-tab{padding:5px 8px;background:transparent;border:1px solid transparent;border-radius:5px;color:#7e91ad;font-size:9px}.remote-tab[aria-selected="true"]{background:#1b3442;border-color:#31535e;color:var(--cyan)}.remote-tab:hover{color:var(--cyan)}.sentinel-agent{font:8px var(--mono);display:flex;align-items:center;gap:5px;color:var(--muted);white-space:nowrap}.sentinel-agent .led{width:4px;height:4px;box-shadow:none}.sentinel-agent[data-tone="success"]{color:var(--green)}.sentinel-agent[data-tone="warning"]{color:var(--amber)}.sentinel-agent[data-tone="error"]{color:var(--red)}.remote-panel .remote-content{flex:1;min-height:0;max-height:none;overflow:auto;scrollbar-width:thin;scrollbar-color:#2b3c54 transparent;border:0;border-radius:0;background:transparent}.remote-panel .vps-empty{padding:14px 12px;min-height:0}.remote-panel .vps-empty-icon{width:26px;height:26px}.remote-panel .vps-empty strong{font-size:10px}.remote-panel .vps-empty p{font-size:9px;margin-top:5px}.sentinel-empty{padding:16px 13px;color:var(--muted);font-size:10px;line-height:1.7}.sentinel-empty strong{display:block;color:#a7bad4;font-weight:500;margin-bottom:4px}.sentinel-incident{padding:9px 12px;border-bottom:1px solid #233045}.sentinel-incident:last-child{border:0}.sentinel-line{display:flex;align-items:center;justify-content:space-between;gap:7px;font:9px var(--mono)}.sentinel-source{min-width:0;overflow-wrap:anywhere;color:#d1def0}.sentinel-source .country-flag{font-family:var(--sans);margin-right:5px;font-size:12px}.sentinel-result{font-size:7px;flex-shrink:0;color:var(--amber)}.sentinel-result[data-blocked="true"]{color:var(--green)}.sentinel-credentials{font:8px/1.6 var(--mono);color:#9aadc8;margin-top:5px;overflow-wrap:anywhere;white-space:pre-wrap}.sentinel-meta{display:flex;justify-content:space-between;gap:7px;font:7px/1.5 var(--mono);color:#6c83a2;margin-top:4px;overflow-wrap:anywhere}.sentinel-queue-warning{padding:5px 10px;border-bottom:1px solid var(--line);color:var(--amber);font-size:8px;flex-shrink:0}
     .voice-strip{display:flex;align-items:center;gap:8px;min-height:28px;padding:6px 13px;background:#142532;border-bottom:1px solid #2a4151;flex-shrink:0}.voice-strip>.icon{width:12px;height:12px;color:var(--cyan)}.voice-trigger{background:none;border:0;text-align:left;padding:0;display:flex;align-items:center;gap:8px;min-width:0;flex:1;overflow:hidden;font-size:9px}.voice-kicker{font-size:8px;letter-spacing:.045em;color:var(--cyan);font-weight:600;white-space:nowrap}.voice-summary{color:#8fa5c1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.voice-status{font:7px var(--mono);color:var(--muted);white-space:nowrap}.voice-status[data-tone="success"]{color:var(--green)}.voice-status[data-tone="warning"]{color:var(--amber)}.voice-status[data-tone="error"]{color:var(--red)}.voice-trigger:disabled{opacity:1;cursor:default}.voice-trigger:not(:disabled):hover .voice-summary{color:#cfdfef}.voice-detail-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:26vh;overflow:auto;margin-top:8px;font-size:12px;line-height:1.8;color:#c4d2e5}.voice-detail-label{font-size:9px;text-transform:uppercase;letter-spacing:.09em;color:var(--cyan);margin-top:19px}.voice-detail-meta{font:9px/1.7 var(--mono);color:var(--muted);margin-top:11px}
     .voice-simulation{margin-top:20px;border-top:1px solid var(--line);padding-top:15px}.voice-simulation summary{cursor:pointer;font-size:11px;color:var(--cyan);font-weight:600}.voice-simulation select{width:100%;background:#0b1320;border:1px solid #35445c;border-radius:7px;padding:11px 12px;color:var(--text);font:11px var(--mono)}.voice-simulation-note{font-size:10px!important;line-height:1.7!important;color:var(--amber)!important}.voice-simulation .dialog-label{margin-top:15px}.voice-simulation-feedback{font-size:11px;line-height:1.7;margin-top:12px;color:var(--red)}.voice-simulation-feedback[data-tone="success"]{color:var(--green)}#voice-dialog{width:min(520px,calc(100% - 32px));max-height:85vh;overflow:auto;padding:26px 28px;border:1px solid rgba(56,189,248,0.22);border-radius:20px;background:radial-gradient(ellipse at 50% 0%,#152438 0%,#0c1421 100%);box-shadow:0 30px 90px rgba(0,0,0,0.8),0 0 40px rgba(56,189,248,0.12);scrollbar-width:thin;scrollbar-color:rgba(56,189,248,0.2) transparent}#voice-dialog[open]{animation:modalSoftPop .28s cubic-bezier(0.16,1,0.3,1) forwards}#voice-dialog::backdrop{background:rgba(3,7,18,0.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+    #neurovision-dialog{width:min(920px,calc(100% - 32px));max-height:88vh;overflow-y:auto;padding:24px 26px;border:1px solid rgba(0,243,255,0.32);border-radius:20px;background:radial-gradient(ellipse at 50% 0%,#152438 0%,#0c1421 100%);box-shadow:0 30px 90px rgba(0,0,0,0.85),0 0 45px rgba(0,243,255,0.15);scrollbar-width:thin;scrollbar-color:rgba(0,243,255,0.2) transparent;color:var(--text)}#neurovision-dialog[open]{animation:modalSoftPop .28s cubic-bezier(0.16,1,0.3,1) forwards}#neurovision-dialog::backdrop{background:rgba(3,7,18,0.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
     #events-open{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;color:var(--cyan)}#events-open .icon{width:12px;height:12px}
     #events-dialog{width:min(1100px,calc(100% - 32px));height:min(720px,calc(100vh - 48px));height:min(720px,calc(100dvh - 48px));max-height:calc(100vh - 32px);padding:0;overflow:hidden;border:1px solid rgba(56,189,248,0.22);border-radius:20px;background:radial-gradient(ellipse at 80% 0%,rgba(14,116,144,0.2) 0%,transparent 60%),#0c1421;box-shadow:0 30px 90px rgba(0,0,0,0.8),0 0 45px rgba(56,189,248,0.12)}#events-dialog[open]{display:flex;flex-direction:column;animation:modalSoftPop .28s cubic-bezier(0.16,1,0.3,1) forwards}#events-dialog::backdrop{background:rgba(3,7,18,0.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}.events-dialog-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 26px;border-bottom:1px solid rgba(56,189,248,0.15);background:linear-gradient(180deg,#101c2d 0%,#0c1624 100%);flex-shrink:0}.events-dialog-heading{min-width:0}.events-dialog-header .eyebrow{margin-bottom:7px}.events-dialog-header h2{font-size:20px}.events-dialog-header p{margin-top:5px;font-size:11px}.events-dialog-header .button{flex-shrink:0}.events-dialog-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 26px;background:#0e1724;border-bottom:1px solid rgba(56,189,248,0.12);font:10px var(--mono);color:var(--muted);flex-shrink:0}#events-dialog-autoscroll{font-size:11px}#events-dialog .events-list{padding:0 24px;gap:0;scrollbar-width:thin;scrollbar-color:rgba(56,189,248,0.2) transparent}#events-dialog .event-line{grid-template-columns:44px 164px 54px minmax(0,1fr);gap:12px;font:12px/1.8 var(--mono);padding:13px 0;border-bottom:1px solid #1d2b3c;flex-shrink:0}#events-dialog .event-time{font-size:11px;color:#8ea5c1}#events-dialog .event-level{font-size:10px}#events-dialog .event-id{color:#5d7391;font-size:10px}#events-dialog .event-message{white-space:pre-wrap;overflow-wrap:anywhere}#events-dialog .terminal-footer{padding:12px 26px;border-top:1px solid rgba(56,189,248,0.12);background:#0c1624;flex-shrink:0;border-bottom-left-radius:20px;border-bottom-right-radius:20px}#events-dialog-state[data-tone="success"]{color:var(--green)}#events-dialog-state[data-tone="warning"]{color:var(--amber)}body:has(#events-dialog[open]){overflow:hidden}
     @media(max-width:640px){#events-dialog{width:calc(100% - 20px);height:calc(100vh - 24px);height:calc(100dvh - 24px)}.events-dialog-header{padding:16px;gap:10px}.events-dialog-header h2{font-size:16px}.events-dialog-header .button{padding:9px 11px}.events-dialog-toolbar{padding:11px 16px;font-size:9px}#events-dialog .events-list{padding:0 16px}#events-dialog .event-line{grid-template-columns:34px minmax(0,1fr) auto;gap:4px 8px;font-size:11px}#events-dialog .event-message{grid-column:1/-1;margin-top:4px}#events-dialog .terminal-footer{padding:11px 16px;font-size:8px}}
@@ -682,7 +683,7 @@
     <header class="cosmos-top">
       <div class="cosmos-brand"><span class="cosmos-logo" aria-hidden="true"><img src="/static/icons/moctar-logo-v2-192.png" width="38" height="38" alt="" decoding="async"></span><div><div class="cosmos-name">M.O.C.T.A.R</div><div class="cosmos-host"><span id="hostname">Connexion en cours…</span><span class="host-platform" id="platform"></span></div></div></div>
       <div class="cosmos-telemetry"><div class="stream-label" id="stream-state" data-tone="warning"><span class="led"></span><span id="stream-state-text">Connexion…</span></div><span class="cosmos-sep" aria-hidden="true"></span><span>Relevé <span class="mono" id="last-update">—</span></span><span class="cosmos-sep" aria-hidden="true"></span><span class="mono" id="uptime">UPTIME —</span></div>
-      <div class="cosmos-top-right"><a href="/hud" class="cosmos-hud-link" id="hud-nav-button" title="Ouvrir le HUD 3D Cybernétique" aria-label="Ouvrir le HUD 3D Cybernétique" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(0,243,255,0.08);border:1px solid rgba(0,243,255,0.45);border-radius:8px;color:#00f3ff;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;text-decoration:none;transition:all .2s ease"><span style="font-size:13px">🌐</span> HUD 3D</a><div class="clock mono"><time id="clock-time">--:--:--</time><div class="clock-date" id="clock-date">—</div></div><div class="status-chip" id="global-status" data-tone="warning" role="status"><span class="led"></span><span id="global-status-text">Initialisation</span></div><button class="cosmos-icon-btn" id="refresh-button" type="button" aria-label="Actualiser les mesures" title="Actualiser les mesures"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg></button></div>
+      <div class="cosmos-top-right"><button class="cosmos-hud-link" id="neurovision-nav-btn" type="button" data-open="neurovision-dialog" title="Ouvrir le Scanner Visuel & Cognitif NeuroVision" aria-haspopup="dialog" aria-controls="neurovision-dialog" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(0,243,255,0.08);border:1px solid rgba(0,243,255,0.45);border-radius:8px;color:#00f3ff;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;cursor:pointer;text-decoration:none;transition:all .2s ease"><span style="font-size:13px">👁️</span> NEUROVISION</button><a href="/hud" class="cosmos-hud-link" id="hud-nav-button" title="Ouvrir le HUD 3D Cybernétique" aria-label="Ouvrir le HUD 3D Cybernétique" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(0,243,255,0.08);border:1px solid rgba(0,243,255,0.45);border-radius:8px;color:#00f3ff;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;text-decoration:none;transition:all .2s ease"><span style="font-size:13px">🌐</span> HUD 3D</a><div class="clock mono"><time id="clock-time">--:--:--</time><div class="clock-date" id="clock-date">—</div></div><div class="status-chip" id="global-status" data-tone="warning" role="status"><span class="led"></span><span id="global-status-text">Initialisation</span></div><button class="cosmos-icon-btn" id="refresh-button" type="button" aria-label="Actualiser les mesures" title="Actualiser les mesures"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg></button></div>
     </header>
     <div class="connection-banner" id="connection-banner" role="status" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v4M12 17h.01"/></svg><span id="connection-message"></span></div>
     <nav class="cosmos-col cosmos-left" aria-label="Supervision locale">
@@ -994,6 +995,111 @@
     <div class="live-metrics-scroll"><div class="live-metrics-context"><div><h3 id="live-metrics-host-title">Hôte central · en attente</h3><p id="live-metrics-last-seen">En attente du premier relevé.</p></div><span class="live-metrics-count" id="live-metrics-count">0 relevé</span></div><div class="live-metrics-notice" id="live-metrics-notice">L’historique se construit pendant cette session, même lorsque cette fenêtre est fermée.</div><div class="live-metrics-grid" id="live-metrics-charts"></div><section class="live-metrics-services" id="live-metrics-services" aria-labelledby="live-metrics-services-title" hidden><h3 id="live-metrics-services-title">Services · dernier état connu</h3><div class="live-metrics-service-grid" id="live-metrics-service-list"></div></section></div>
     <footer class="live-metrics-footer"><span>Historique de session · 1 h maximum · Les coupures de mesure restent visibles. Aucun point simulé.</span><span>Échap pour fermer</span></footer>
   </dialog>
+  <!-- ========================================================================= -->
+  <!-- MODAL NEUROVISION : SCANNER COGNITIF & BIOMÉTRIQUE TEMPS RÉEL            -->
+  <!-- ========================================================================= -->
+  <dialog id="neurovision-dialog" aria-labelledby="neurovision-dialog-title">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; border-bottom:1px solid rgba(0,243,255,0.18); padding-bottom:14px;">
+      <div>
+        <div style="font-family:var(--mono); font-size:10px; font-weight:700; color:var(--cyan); letter-spacing:0.12em;">M.O.C.T.A.R // COGNITIVE SCANNER</div>
+        <h2 id="neurovision-dialog-title" style="font-size:20px; font-weight:700; color:#fff; margin-top:2px; letter-spacing:-0.3px;">Scanner Visuel & Biomutationnel NeuroVision</h2>
+        <p style="font-size:11px; color:#8c9eb9; margin-top:4px;">Surveillance réelle de fatigue cognitive, fréquence des clignements, bâillements et posture.</p>
+      </div>
+      <button type="button" class="live-metrics-close" data-close aria-label="Fermer (Échap)" style="background:transparent; border:none; color:#8c9eb9; font-size:20px; cursor:pointer; padding:4px 8px; border-radius:6px; transition:color .2s;">✕</button>
+    </div>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:20px; align-items:start;">
+      <!-- Colonne GAUCHE: Vidéo & Contrôles Caméra -->
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div style="position:relative; width:100%; border-radius:14px; overflow:hidden; border:2px solid rgba(0,243,255,0.35); background:#060c15; box-shadow:0 8px 30px rgba(0,0,0,0.6);">
+          <img id="nv-video-feed" src="/api/vision/stream" alt="Flux NeuroVision" style="width:100%; height:auto; display:block; min-height:240px; object-fit:cover; background:#040810;" />
+          <div id="nv-stream-chip" style="position:absolute; top:12px; left:12px; padding:4px 10px; border-radius:20px; background:rgba(0,0,0,0.75); border:1px solid rgba(0,243,255,0.4); font-family:var(--mono); font-size:10px; font-weight:700; color:#00f3ff; display:flex; align-items:center; gap:6px;">
+            <span style="width:7px; height:7px; border-radius:50%; background:#00f3ff; display:inline-block;"></span>
+            <span id="nv-stream-status-text">EN VEILLE</span>
+          </div>
+          <div id="nv-fps-tag" style="position:absolute; top:12px; right:12px; padding:4px 8px; border-radius:6px; background:rgba(0,0,0,0.65); font-family:var(--mono); font-size:10px; color:#8c9eb9;">
+            0 FPS
+          </div>
+        </div>
+
+        <!-- Commandes de Contrôle Caméra -->
+        <div style="display:flex; gap:10px;">
+          <button type="button" id="nv-toggle-btn" class="button primary" style="flex:1; padding:12px 16px; font-weight:700; font-size:11px;">
+            📷 ACTIVER LA CAMÉRA
+          </button>
+          <button type="button" id="nv-reset-btn" class="button" style="padding:12px 16px; font-weight:600; font-size:11px;" title="Remettre à zéro les compteurs">
+            🔄 RESET
+          </button>
+        </div>
+      </div>
+
+      <!-- Colonne DROITE: Télémétrie & Détections Réelles -->
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <!-- Carte 1: État Cognitif Global -->
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(0,243,255,0.2); border-radius:14px; padding:16px;">
+          <div style="font-family:var(--mono); font-size:10px; color:#8c9eb9; letter-spacing:0.08em; margin-bottom:8px;">ÉTAT COGNITIF EN DIRECT</div>
+          <div id="nv-state-display" style="font-size:22px; font-weight:800; text-align:center; padding:12px; border-radius:10px; background:rgba(0,243,255,0.08); border:1px solid rgba(0,243,255,0.3); color:#00f3ff; letter-spacing:0.05em; transition:all .3s;">
+            NORMAL
+          </div>
+          
+          <!-- Jauge de fatigue -->
+          <div style="margin-top:14px;">
+            <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:6px;">
+              <span style="color:#bdcde1;">Score de Fatigue Multi-facteurs</span>
+              <strong id="nv-fatigue-pct" style="color:#00f3ff; font-family:var(--mono);">0%</strong>
+            </div>
+            <div style="width:100%; height:10px; background:#0b1320; border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,0.08);">
+              <div id="nv-fatigue-bar" style="width:0%; height:100%; background:linear-gradient(90deg, #00f3ff, #00ff88); border-radius:6px; transition:width .4s ease, background .4s ease;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Carte 2: Grille 2x2 des Capteurs Biomutationnels -->
+        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:10px;">
+          <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; text-align:center;">
+            <div style="font-size:10px; color:#8c9eb9;">Clignements</div>
+            <div id="nv-blink-count" style="font-size:22px; font-weight:700; color:#00f3ff; font-family:var(--mono); margin:4px 0;">0</div>
+            <div style="font-size:9px; color:#64748b;"><span id="nv-blink-rate">0</span> / min</div>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; text-align:center;">
+            <div style="font-size:10px; color:#8c9eb9;">Bâillements</div>
+            <div id="nv-yawn-count" style="font-size:22px; font-weight:700; color:#ffb700; font-family:var(--mono); margin:4px 0;">0</div>
+            <div style="font-size:9px; color:#64748b;">Détectés réels</div>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; text-align:center;">
+            <div style="font-size:10px; color:#8c9eb9;">Inclinaison (Yaw)</div>
+            <div id="nv-yaw-angle" style="font-size:20px; font-weight:700; color:#bdcde1; font-family:var(--mono); margin:4px 0;">0.0°</div>
+            <div style="font-size:9px; color:#64748b;">Axe horizontal</div>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; text-align:center;">
+            <div style="font-size:10px; color:#8c9eb9;">Affaissement (Roll)</div>
+            <div id="nv-roll-angle" style="font-size:20px; font-weight:700; color:#bdcde1; font-family:var(--mono); margin:4px 0;">0.0°</div>
+            <div style="font-size:9px; color:#64748b;">Posture cou/tête</div>
+          </div>
+        </div>
+
+        <!-- Carte 3: Métadonnées & Présence -->
+        <div style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.05); border-radius:10px; padding:12px; font-size:11px; display:flex; flex-direction:column; gap:6px;">
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:#8c9eb9;">Présence Physique :</span>
+            <strong id="nv-presence-status" style="color:#64748b;">EN ATTENTE</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:#8c9eb9;">Durée Session :</span>
+            <span id="nv-session-duration" style="font-family:var(--mono);">0s</span>
+          </div>
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:#8c9eb9;">Statut Matériel :</span>
+            <span id="nv-cam-status" style="font-family:var(--mono); color:#8c9eb9;">Prêt</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
   <div class="toast" id="toast" role="status" hidden></div>
   <script src="/static/voice.js?v=4.0"></script>
   <script src="/static/cosmos.js?v=4.0"></script>
@@ -2753,6 +2859,181 @@
 
       window.addEventListener('pagehide', () => { if (state.stream) state.stream.close(); });
       (async () => { await loadSnapshot(); startStream(); })();
+    })();
+    // ---------------------------------------------------------------------
+    // CONTRÔLEUR SCANNER COGNITIF NEUROVISION
+    // ---------------------------------------------------------------------
+    (() => {
+      const dialog = document.getElementById('neurovision-dialog');
+      const toggleBtn = document.getElementById('nv-toggle-btn');
+      const resetBtn = document.getElementById('nv-reset-btn');
+      const feedImg = document.getElementById('nv-video-feed');
+      let pollTimer = null;
+
+      async function fetchVision() {
+        try {
+          const res = await fetch('/api/vision/metrics');
+          if (!res.ok) return;
+          const m = await res.json();
+          updateUI(m);
+        } catch (e) {
+          console.debug('Vision fetch err', e);
+        }
+      }
+
+      function updateUI(m) {
+        if (!m) return;
+        const active = !!m.active;
+
+        if (toggleBtn) {
+          toggleBtn.textContent = active ? '🛑 COUPER LA CAMÉRA' : '📷 ACTIVER LA CAMÉRA';
+          if (active) {
+            toggleBtn.classList.remove('primary');
+            toggleBtn.classList.add('danger');
+          } else {
+            toggleBtn.classList.remove('danger');
+            toggleBtn.classList.add('primary');
+          }
+        }
+
+        const chip = document.getElementById('nv-stream-chip');
+        const chipText = document.getElementById('nv-stream-status-text');
+        if (chip && chipText) {
+          chipText.textContent = active ? '● EN DIRECT' : '○ EN VEILLE';
+          chip.style.borderColor = active ? 'rgba(0, 255, 136, 0.5)' : 'rgba(0, 243, 255, 0.4)';
+          chip.style.color = active ? '#00ff88' : '#00f3ff';
+        }
+
+        const fpsTag = document.getElementById('nv-fps-tag');
+        if (fpsTag) fpsTag.textContent = (m.measured_fps || 0) + ' FPS';
+
+        const stateDisplay = document.getElementById('nv-state-display');
+        const level = m.fatigue_level || 'Normal';
+        if (stateDisplay) {
+          stateDisplay.textContent = level.toUpperCase();
+          if (level.includes('Sévère')) {
+            stateDisplay.style.background = 'rgba(255, 51, 102, 0.2)';
+            stateDisplay.style.borderColor = '#ff3366';
+            stateDisplay.style.color = '#ff6688';
+          } else if (level.includes('Fatigué')) {
+            stateDisplay.style.background = 'rgba(255, 153, 0, 0.2)';
+            stateDisplay.style.borderColor = '#ff9900';
+            stateDisplay.style.color = '#ffb700';
+          } else if (level.includes('Distrait')) {
+            stateDisplay.style.background = 'rgba(217, 0, 255, 0.2)';
+            stateDisplay.style.borderColor = '#d900ff';
+            stateDisplay.style.color = '#e066ff';
+          } else {
+            stateDisplay.style.background = 'rgba(0, 243, 255, 0.08)';
+            stateDisplay.style.borderColor = 'rgba(0, 243, 255, 0.3)';
+            stateDisplay.style.color = '#00f3ff';
+          }
+        }
+
+        const score = m.fatigue_score || 0;
+        const fatVal = document.getElementById('nv-fatigue-pct');
+        const fatBar = document.getElementById('nv-fatigue-bar');
+        if (fatVal) fatVal.textContent = score + '%';
+        if (fatBar) {
+          fatBar.style.width = Math.min(100, Math.max(0, score)) + '%';
+          if (score >= 70) {
+            fatBar.style.background = 'linear-gradient(90deg, #ff9900, #ff3366)';
+          } else if (score >= 40) {
+            fatBar.style.background = 'linear-gradient(90deg, #00f3ff, #ffb700)';
+          } else {
+            fatBar.style.background = 'linear-gradient(90deg, #00f3ff, #00ff88)';
+          }
+        }
+
+        const bCount = document.getElementById('nv-blink-count');
+        if (bCount) bCount.textContent = m.blink_count || 0;
+        const bRate = document.getElementById('nv-blink-rate');
+        if (bRate) bRate.textContent = m.blink_rate_per_min || 0;
+        const yCount = document.getElementById('nv-yawn-count');
+        if (yCount) yCount.textContent = m.yawn_count || 0;
+        const yAngle = document.getElementById('nv-yaw-angle');
+        if (yAngle) yAngle.textContent = (m.head_tilt_yaw || 0) + '°';
+        const rAngle = document.getElementById('nv-roll-angle');
+        if (rAngle) rAngle.textContent = (m.head_roll || 0) + '°';
+
+        const presStatus = document.getElementById('nv-presence-status');
+        if (presStatus) {
+          if (!active) {
+            presStatus.textContent = 'VEILLE';
+            presStatus.style.color = '#8c9eb9';
+          } else if (m.user_present) {
+            presStatus.textContent = 'PRÉSENT (DÉTECTÉ)';
+            presStatus.style.color = '#00ff88';
+          } else {
+            presStatus.textContent = 'ABSENT / HORS CHAMP';
+            presStatus.style.color = '#ff9900';
+          }
+        }
+
+        const durVal = document.getElementById('nv-session-duration');
+        if (durVal) {
+          const s = m.session_duration_seconds || 0;
+          const min = Math.floor(s / 60);
+          const sec = s % 60;
+          durVal.textContent = min + 'm ' + sec + 's';
+        }
+
+        const camStatus = document.getElementById('nv-cam-status');
+        if (camStatus) {
+          camStatus.textContent = m.camera_connected ? 'Active (Webcam connectée)' : (active ? 'Simulation / Dégradé' : 'Prête en veille');
+        }
+      }
+
+      if (dialog) {
+        const obs = new MutationObserver(() => {
+          if (dialog.open) {
+            if (feedImg) feedImg.src = '/api/vision/stream?t=' + Date.now();
+            fetchVision();
+            if (!pollTimer) pollTimer = setInterval(fetchVision, 1000);
+          } else {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+          }
+        });
+        obs.observe(dialog, { attributes: true, attributeFilter: ['open'] });
+      }
+
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', async () => {
+          try {
+            toggleBtn.disabled = true;
+            const res = await fetch('/api/vision/toggle', { method: 'POST' });
+            if (res.ok) {
+              const data = await res.json();
+              updateUI(data.metrics);
+              if (feedImg) feedImg.src = '/api/vision/stream?t=' + Date.now();
+              if (typeof toast === 'function') {
+                toast(data.active ? 'Caméra NeuroVision activée' : 'Caméra NeuroVision en veille', 'success');
+              }
+            }
+          } catch (err) {
+            console.error('Toggle error:', err);
+          } finally {
+            toggleBtn.disabled = false;
+          }
+        });
+      }
+
+      if (resetBtn) {
+        resetBtn.addEventListener('click', async () => {
+          try {
+            resetBtn.disabled = true;
+            await fetch('/api/vision/reset', { method: 'POST' });
+            setTimeout(fetchVision, 200);
+            if (typeof toast === 'function') {
+              toast('Compteurs NeuroVision réinitialisés', 'success');
+            }
+          } catch (err) {
+            console.error('Reset error:', err);
+          } finally {
+            resetBtn.disabled = false;
+          }
+        });
+      }
     })();
   </script>
 </body>

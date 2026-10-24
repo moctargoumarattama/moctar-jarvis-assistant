@@ -165,6 +165,21 @@ def get_hud_state() -> Dict[str, Any]:
         except Exception:
             pass
 
+    # Télémétrie NeuroVision intégrée
+    try:
+        from vision_engine import VisionEngine
+        v_engine = VisionEngine.get_instance()
+        if v_engine.is_running():
+            state["vision"] = v_engine.get_metrics()
+            if _HUD_STATE["mood"] == "calm" and v_engine.fatigue_score >= 60:
+                state["mood"] = "caring"
+                state["mood_color"] = MOOD_COLORS["caring"]
+                state["pulse_speed"] = 0.8
+        else:
+            state["vision"] = {"active": False}
+    except Exception:
+        state["vision"] = {"active": False}
+
     return state
 
 

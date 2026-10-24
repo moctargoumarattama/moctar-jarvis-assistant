@@ -168,8 +168,42 @@ class ProactiveCompanion:
                     }
         return None
 
+    def check_vision_fatigue_alert(self) -> Optional[Dict[str, Any]]:
+        """Vérifie si le capteur NeuroVision détecte des signes physiologiques de fatigue ou d'assoupissement."""
+        try:
+            from vision_engine import VisionEngine
+            v = VisionEngine.get_instance()
+            if not v.is_running():
+                return None
+
+            metrics = v.get_metrics()
+            score = metrics.get("fatigue_score", 0)
+            yawns = metrics.get("yawn_count", 0)
+            level = metrics.get("fatigue_level", "Normal")
+
+            if score >= 70 or yawns >= 4 or "Sévère" in level:
+                return {
+                    "category": "neurovision_fatigue",
+                    "message": "Moctar, tes clignements sont lourds et je perçois une fatigue soutenue. Fais une vraie pause ou prends un café, je veille sur le poste.",
+                    "priority": "normal",
+                }
+            elif score >= 50 or yawns >= 2:
+                return {
+                    "category": "neurovision_fatigue",
+                    "message": "Moctar, je remarque quelques bâillements et une baisse de tonus. Un petit verre d'eau ou un étirement rapide te ferait du bien mon ami.",
+                    "priority": "low",
+                }
+        except Exception:
+            pass
+        return None
+
     def check_fatigue_alert(self) -> Optional[Dict[str, Any]]:
-        """Vérifie si Moctar est sur une session de code continue prolongée."""
+        """Vérifie si Moctar est sur une session de code continue prolongée (basée sur la vision ou le temps)."""
+        # Priorité aux métriques biométriques réelles si le capteur est actif
+        vision_alert = self.check_vision_fatigue_alert()
+        if vision_alert:
+            return vision_alert
+
         now = time.monotonic()
         session_duration = now - self._work_session_start
         if session_duration >= self.fatigue_threshold_seconds:
