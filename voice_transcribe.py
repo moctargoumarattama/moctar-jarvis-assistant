@@ -393,8 +393,10 @@ def build_dynamic_stt_prompt(
     """
     base_anchors = [
         "Bonjour Moctar, ici M.O.C.T.A.R sur Dell Precision M4800. JARVIS.",
+        "Tu me reçois ? Fort et clair, 5 sur 5, test micro, tu m'entends, tu es là, comment tu vas, la forme,",
+        "qu'est-ce que tu peux faire, de quoi es-tu capable, c'est quoi le programme, aide-moi, dis-moi tout,",
         "Ouvre Visual Studio Code, VS Code, code, terminal, bash, Python, pytest, Git status, commit, push, pull,",
-        "Baba Market, Noor Express, EduManage, HUD 3D, mode NOC, globe terrestre, localise-moi,",
+        "Baba Market, Noor Express, EduManage, mode HUD 3D, mode NOC, globe terrestre, localise-moi,",
         "Docker, Uvicorn, FastAPI, systemctl, NOC, supervision, météo, degrés, Niamey, Maroc,",
         "mode bureau, mode travail, ferme ça, relance-le, mets-le à droite, mets-le à gauche, plein écran, snap,",
         "WhatsApp, volume, musique, Coran.",

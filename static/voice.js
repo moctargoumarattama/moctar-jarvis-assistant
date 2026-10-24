@@ -297,33 +297,13 @@
     }
 
     /**
-     * Bip sonore synthétique discret de début de prise de parole (520Hz -> 780Hz sur 60 ms).
+     * Bip sonore synthétique de début de prise de parole.
+     * Désactivé pour préserver la clarté acoustique absolue du microphone.
+     * Un bip joué sur les haut-parleurs au moment où l'utilisateur commence à parler
+     * polluait le signal audio et provoquait des hallucinations phonétiques dans Whisper.
      */
     function playStartSpeechChime() {
-      try {
-        const ctx = audioCtx || (AudioContextClass ? new AudioContextClass() : null);
-        if (!ctx) return;
-        if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
-          ctx.resume().catch(() => {});
-        }
-        const now = ctx.currentTime;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(520, now);
-        osc.frequency.exponentialRampToValueAtTime(780, now + 0.06);
-
-        gain.gain.setValueAtTime(0.04, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
-
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-
-        osc.start(now);
-        osc.stop(now + 0.065);
-      } catch {
-        // Fallback muet sécurisé si AudioContext bloqué ou indisponible
-      }
+      return;
     }
 
     /**
@@ -1109,7 +1089,7 @@
             if (typeof audioCtx.createGain === 'function') {
               try {
                 inputGainNode = audioCtx.createGain();
-                inputGainNode.gain.value = typeof opts.micGain === 'number' ? opts.micGain : 2.0;
+                inputGainNode.gain.value = typeof opts.micGain === 'number' ? opts.micGain : 1.0;
                 sourceNode.connect(inputGainNode);
               } catch {
                 inputGainNode = null;
