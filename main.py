@@ -1186,42 +1186,45 @@ def is_external_unlocked(request: Request, settings: Settings | None = None) -> 
     return False
 
 
+def _is_allowed_origin_host(p_host: str, t_host: str) -> bool:
+    """Vérifie si les hôtes d'origine et de destination correspondent ou appartiennent au réseau local."""
+    if p_host == t_host:
+        return True
+    loopbacks = _LOOPBACK_HOSTS | {"127.0.0.1", "localhost", "::1", "testserver"}
+    if p_host in loopbacks and t_host in loopbacks:
+        return True
+    try:
+        import ipaddress
+        ip_p = ipaddress.ip_address(p_host)
+        ip_t = ipaddress.ip_address(t_host)
+        return bool((ip_p.is_private or ip_p.is_loopback) and (ip_t.is_private or ip_t.is_loopback))
+    except ValueError:
+        return False
+
+
 def same_origin(request: Request) -> None:
     # Les actions web sont directes ; une page tierce ne peut pas les déclencher.
     site = request.headers.get("sec-fetch-site")
     if site and site.lower() not in {"same-origin", "same-site", "none"}:
         raise HTTPException(403, "Origine non autorisée")
     origin = request.headers.get("origin")
-    if origin:
-        try:
-            parts = urlsplit(origin)
-            target = urlsplit(str(request.url))
-            p_host = (parts.hostname or "").lower()
-            t_host = (target.hostname or "").lower()
-            hostname_match = (p_host == t_host)
-            if not hostname_match:
-                loopbacks = _LOOPBACK_HOSTS | {"127.0.0.1", "localhost", "::1", "testserver"}
-                if p_host in loopbacks and t_host in loopbacks:
-                    hostname_match = True
-                else:
-                    try:
-                        import ipaddress
-                        ip_p = ipaddress.ip_address(p_host)
-                        ip_t = ipaddress.ip_address(t_host)
-                        if (ip_p.is_private or ip_p.is_loopback) and (ip_t.is_private or ip_t.is_loopback):
-                            hostname_match = True
-                    except ValueError:
-                        pass
-
-            port_match = (parts.port or (443 if parts.scheme == "https" else 80)) == (target.port or (443 if target.scheme == "https" else 80))
-            scheme_match = parts.scheme in {"http", "https"} and (parts.scheme == target.scheme or is_local_request(request))
-            valid = (scheme_match and hostname_match and port_match
-                     and not parts.username and not parts.password and parts.path in {"", "/"}
-                     and not parts.query and not parts.fragment)
-        except ValueError:
-            raise HTTPException(403, "Origine non autorisée") from None
-        if not valid:
-            raise HTTPException(403, "Origine non autorisée")
+    if not origin:
+        return
+    try:
+        parts = urlsplit(origin)
+        target = urlsplit(str(request.url))
+        p_host = (parts.hostname or "").lower()
+        t_host = (target.hostname or "").lower()
+        hostname_match = _is_allowed_origin_host(p_host, t_host)
+        port_match = (parts.port or (443 if parts.scheme == "https" else 80)) == (target.port or (443 if target.scheme == "https" else 80))
+        scheme_match = parts.scheme in {"http", "https"} and (parts.scheme == target.scheme or is_local_request(request))
+        valid = (scheme_match and hostname_match and port_match
+                 and not parts.username and not parts.password and parts.path in {"", "/"}
+                 and not parts.query and not parts.fragment)
+    except ValueError:
+        raise HTTPException(403, "Origine non autorisée") from None
+    if not valid:
+        raise HTTPException(403, "Origine non autorisée")
 
 
 def require_local_or_admin(request: Request, settings: Settings) -> None:
@@ -2705,3 +2708,4 @@ def run_server(settings: Settings | None = None) -> None:
 
 if __name__ == "__main__":
     run_server()
+
