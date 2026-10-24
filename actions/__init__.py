@@ -147,30 +147,36 @@ def control_vision(action: str = "toggle") -> Dict[str, Any]:
     Args:
         action (str): 'start' pour activer, 'stop' pour désactiver, ou 'toggle' pour basculer.
     """
-    from vision_engine import VisionEngine
-    v = VisionEngine.get_instance()
-    act = (action or "toggle").lower().strip()
-    if act in ("start", "active", "on"):
-        v.start()
-        active = True
-    elif act in ("stop", "desactive", "off", "coupe"):
-        v.stop()
-        active = False
-    else:
-        active = v.toggle()
-    msg = f"Capteur NeuroVision {'activé' if active else 'désactivé'}."
-    return format_action_result("control_vision", True, msg, {"active": active, "metrics": v.get_metrics()})
+    try:
+        from vision_engine import VisionEngine
+        v = VisionEngine.get_instance()
+        act = (action or "toggle").lower().strip()
+        if act in ("start", "active", "on"):
+            v.start()
+            active = True
+        elif act in ("stop", "desactive", "off", "coupe"):
+            v.stop()
+            active = False
+        else:
+            active = v.toggle()
+        msg = f"Capteur NeuroVision {'activé' if active else 'désactivé'}."
+        return format_action_result("control_vision", True, msg, {"active": active, "metrics": v.get_metrics()})
+    except Exception as exc:
+        return format_action_result("control_vision", False, f"Erreur contrôle vision : {exc}", {"active": False, "error": str(exc)})
 
 
 def get_vision_telemetry() -> Dict[str, Any]:
     """Récupère la télémétrie de vision temps réel (clignements, bâillements, fatigue, posture)."""
-    from vision_engine import VisionEngine
-    v = VisionEngine.get_instance()
-    metrics = v.get_metrics()
-    score = metrics.get("fatigue_score", 0)
-    level = metrics.get("fatigue_level", "Normal")
-    msg = f"Vision cognitive : score de fatigue {score}% ({level}), clignements {metrics.get('blink_count', 0)}, bâillements {metrics.get('yawn_count', 0)}."
-    return format_action_result("get_vision_telemetry", True, msg, metrics)
+    try:
+        from vision_engine import VisionEngine
+        v = VisionEngine.get_instance()
+        metrics = v.get_metrics()
+        score = metrics.get("fatigue_score", 0)
+        level = metrics.get("fatigue_level", "Normal")
+        msg = f"Vision cognitive : score de fatigue {score}% ({level}), clignements {metrics.get('blink_count', 0)}, bâillements {metrics.get('yawn_count', 0)}."
+        return format_action_result("get_vision_telemetry", True, msg, metrics)
+    except Exception as exc:
+        return format_action_result("get_vision_telemetry", False, f"Vision non disponible : {exc}", {"active": False, "fatigue_score": 0, "fatigue_level": "Normal", "error": str(exc)})
 
 
 # ==============================================================================

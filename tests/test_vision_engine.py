@@ -87,3 +87,28 @@ def test_fastapi_vision_routes_registered():
     assert "/api/vision/toggle" in routes
     assert "/api/vision/reset" in routes
 
+
+def test_standby_jpeg_bytes_is_valid_jpeg():
+    """Vérifie que la mire de secours renvoie toujours un JPEG binaire valide."""
+    from vision_engine import get_standby_jpeg_bytes
+    data = get_standby_jpeg_bytes()
+    assert isinstance(data, bytes)
+    assert len(data) > 0
+    # Vérification signature JPEG (Start Of Image 0xFFD8 et End Of Image 0xFFD9)
+    assert data[:2] == b"\xff\xd8"
+    assert data[-2:] == b"\xff\xd9"
+
+
+def test_vision_engine_graceful_degradation_without_cv2():
+    """Simule un hôte sans OpenCV (cv2 absent) pour vérifier la tolérance aux pannes."""
+    import vision_engine
+    with patch.object(vision_engine, "CV2_AVAILABLE", False), patch.object(vision_engine, "cv2", None):
+        engine = VisionEngine(camera_index=99)
+        engine._open_camera()
+        assert engine.simulation is True
+        metrics = engine.get_metrics()
+        assert metrics["cv2_available"] is False
+        assert metrics["camera_connected"] is False
+        assert metrics["status"] == "cv2_missing"
+        assert "opencv-python" in metrics["message"].lower()
+

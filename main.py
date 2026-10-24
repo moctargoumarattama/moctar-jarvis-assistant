@@ -1702,37 +1702,69 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/api/vision/metrics")
     async def get_vision_metrics_endpoint():
         """Télémétrie cognitive temps réel (clignements, bâillements, fatigue, présence)."""
-        from vision_engine import VisionEngine
-        return JSONResponse(VisionEngine.get_instance().get_metrics())
+        try:
+            from vision_engine import VisionEngine
+            return JSONResponse(VisionEngine.get_instance().get_metrics())
+        except Exception as exc:
+            LOGGER.warning("Avertissement récupération métriques vision: %s", exc)
+            return JSONResponse({
+                "active": False,
+                "cv2_available": False,
+                "camera_connected": False,
+                "user_present": False,
+                "fatigue_score": 0,
+                "fatigue_level": "Normal",
+                "blink_count": 0,
+                "yawn_count": 0,
+                "status": "degraded",
+                "error": str(exc),
+            })
 
     @application.get("/api/vision/stream")
     async def get_vision_stream_endpoint():
         """Flux vidéo MJPEG continu basse latence directement servi par FastAPI (sans port 5001)."""
-        from vision_engine import VisionEngine
-        engine = VisionEngine.get_instance()
-        if not engine.is_running():
-            engine.start()
-        return StreamingResponse(
-            engine.stream_generator(),
-            media_type="multipart/x-mixed-replace; boundary=frame",
-        )
+        try:
+            from vision_engine import VisionEngine
+            engine = VisionEngine.get_instance()
+            if not engine.is_running():
+                engine.start()
+            return StreamingResponse(
+                engine.stream_generator(),
+                media_type="multipart/x-mixed-replace; boundary=frame",
+            )
+        except Exception as exc:
+            LOGGER.warning("Avertissement flux vidéo vision: %s", exc)
+            try:
+                from vision_engine import get_standby_jpeg_bytes
+                fallback_jpeg = get_standby_jpeg_bytes()
+            except Exception:
+                fallback_jpeg = b""
+            return Response(content=fallback_jpeg, media_type="image/jpeg")
 
     @application.post("/api/vision/toggle")
     async def toggle_vision_endpoint(request: Request):
         """Bascule marche/arrêt à chaud du capteur webcam (zéro charge CPU en veille)."""
         require_local_or_admin(request, settings)
-        from vision_engine import VisionEngine
-        engine = VisionEngine.get_instance()
-        active = engine.toggle()
-        return JSONResponse({"active": active, "metrics": engine.get_metrics()})
+        try:
+            from vision_engine import VisionEngine
+            engine = VisionEngine.get_instance()
+            active = engine.toggle()
+            return JSONResponse({"active": active, "metrics": engine.get_metrics()})
+        except Exception as exc:
+            LOGGER.warning("Avertissement toggle vision: %s", exc)
+            return JSONResponse({"active": False, "error": str(exc)}, status_code=200)
 
     @application.post("/api/vision/reset")
     async def reset_vision_counters_endpoint(request: Request):
         """Remise à zéro des compteurs de fatigue et de posture de la session."""
         require_local_or_admin(request, settings)
-        from vision_engine import VisionEngine
-        VisionEngine.get_instance().reset_counters()
-        return JSONResponse({"status": "ok", "message": "Compteurs NeuroVision réinitialisés"})
+        try:
+            from vision_engine import VisionEngine
+            VisionEngine.get_instance().reset_counters()
+            return JSONResponse({"status": "ok", "message": "Compteurs NeuroVision réinitialisés"})
+        except Exception as exc:
+            LOGGER.warning("Avertissement reset vision: %s", exc)
+            return JSONResponse({"status": "error", "message": str(exc)}, status_code=200)
 
     @application.get("/static/live_metrics.js")
     async def live_metrics_script():

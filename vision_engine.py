@@ -9,6 +9,7 @@ Intègre les capacités réelles de vision par ordinateur développées dans Neu
 6. Détection de présence physique de Moctar devant le Dell Precision M4800.
 7. Génération de flux vidéo MJPEG natif pour FastAPI et le HUD 3D (sans serveur Flask ni port 5001).
 8. Contrôle dynamique de l'acquisition (démarrage/arrêt à chaud, zéro CPU en veille).
+9. Tolérance aux pannes maximale : dégradation gracieuse en mode simulation/veille si OpenCV (cv2) n'est pas installé.
 """
 
 from __future__ import annotations
@@ -18,12 +19,70 @@ import threading
 import time
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, Generator, Optional, Tuple
 
-import cv2
-import numpy as np
+# Import sécurisé d'OpenCV (cv2) et NumPy pour résilience multi-environnements (Linux/Windows)
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None
+    CV2_AVAILABLE = False
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    np = None
+    NUMPY_AVAILABLE = False
 
 LOGGER = logging.getLogger("jarvis.vision")
+
+# Image de veille statique de secours si cv2 est absent
+_STANDBY_IMAGE_PATH = Path(__file__).parent / "static" / "standby_frame.jpg"
+_FALLBACK_1X1_JPEG = (
+    b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00H\x00H\x00\x00\xff\xdb\x00C\x00\x08\x06\x06"
+    b"\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a"
+    b"\x1f\x1e\x1d\x1a\x1c\x1c $.' \",#\x1c\x1c(7),01444\x1f'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01"
+    b"\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00"
+    b"\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00"
+    b"?\x00\xbf\x00\xff\xd9"
+)
+_CACHED_STANDBY_JPEG: Optional[bytes] = None
+
+
+def get_standby_jpeg_bytes() -> bytes:
+    """Renvoie les octets JPEG de la mire de veille de manière garantie."""
+    global _CACHED_STANDBY_JPEG
+    if _CACHED_STANDBY_JPEG is not None:
+        return _CACHED_STANDBY_JPEG
+
+    # 1. Tente de lire l'image statique pré-générée du dossier static/
+    if _STANDBY_IMAGE_PATH.exists():
+        try:
+            _CACHED_STANDBY_JPEG = _STANDBY_IMAGE_PATH.read_bytes()
+            return _CACHED_STANDBY_JPEG
+        except Exception:
+            pass
+
+    # 2. Si cv2 et numpy sont installés, génère dynamiquement
+    if CV2_AVAILABLE and NUMPY_AVAILABLE and cv2 is not None and np is not None:
+        try:
+            img = np.zeros((360, 480, 3), dtype=np.uint8)
+            img[:] = (18, 14, 10)
+            cv2.putText(img, "M.O.C.T.A.R // NEUROVISION STANDBY", (35, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 243, 255), 2)
+            cv2.putText(img, "Capteur pret - En attente d'activation", (65, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 160), 1)
+            ret, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if ret:
+                _CACHED_STANDBY_JPEG = buf.tobytes()
+                return _CACHED_STANDBY_JPEG
+        except Exception:
+            pass
+
+    # 3. Fallback JPEG minimal garanti
+    _CACHED_STANDBY_JPEG = _FALLBACK_1X1_JPEG
+    return _CACHED_STANDBY_JPEG
 
 
 class VisionEngine:
@@ -43,7 +102,7 @@ class VisionEngine:
         self._state_lock = threading.Lock()
 
         # Matériel et capture
-        self.cap: Optional[cv2.VideoCapture] = None
+        self.cap: Optional[Any] = None
         self.simulation = False
 
         # Dimensions optimisées v2.2 (faible charge CPU Dell Precision M4800)
@@ -98,8 +157,24 @@ class VisionEngine:
                 cls._instance = cls()
             return cls._instance
 
+    @staticmethod
+    def is_cv2_available() -> bool:
+        """Indique si la bibliothèque OpenCV est installée dans l'environnement Python."""
+        return CV2_AVAILABLE
+
+    @staticmethod
+    def get_standby_jpeg_bytes() -> bytes:
+        return get_standby_jpeg_bytes()
+
     def _init_cascades(self) -> None:
-        """Charge les cascades Haar officielles d'OpenCV."""
+        """Charge les cascades Haar officielles d'OpenCV si disponibles."""
+        self.face_cascade = None
+        self.eye_cascade = None
+
+        if not CV2_AVAILABLE or cv2 is None:
+            LOGGER.info("ℹ️ OpenCV (cv2) non installé. NeuroVision fonctionne en mode veille/dégradé.")
+            return
+
         try:
             face_xml = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
             self.face_cascade = cv2.CascadeClassifier(face_xml)
@@ -126,7 +201,7 @@ class VisionEngine:
             if self._running:
                 return True
 
-            LOGGER.info("🎥 Activation du moteur de vision NeuroVision...")
+            LOGGER.info("🎥 Activation du moteur de vision NeuroVision (CV2=%s)...", CV2_AVAILABLE)
             self._running = True
             self.start_time = time.time()
             self._thread = threading.Thread(target=self._worker_loop, daemon=True, name="jarvis-neurovision")
@@ -167,9 +242,14 @@ class VisionEngine:
         return self.face_detected and (time.time() - self.last_face_seen_time < timeout_seconds)
 
     def _open_camera(self) -> bool:
-        """Ouvre la webcam avec les paramètres optimaux."""
+        """Ouvre la webcam avec les paramètres optimaux si cv2 est présent."""
+        if not CV2_AVAILABLE or cv2 is None:
+            self.simulation = True
+            return False
+
         try:
-            self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW if cv2.__name__ and hasattr(cv2, "CAP_DSHOW") else cv2.CAP_ANY)
+            backend = getattr(cv2, "CAP_DSHOW", cv2.CAP_ANY) if hasattr(cv2, "CAP_DSHOW") else cv2.CAP_ANY
+            self.cap = cv2.VideoCapture(self.camera_index, backend)
             if not self.cap.isOpened():
                 # Deuxième tentative générique
                 self.cap = cv2.VideoCapture(self.camera_index)
@@ -203,16 +283,16 @@ class VisionEngine:
 
     def _worker_loop(self) -> None:
         """Boucle d'acquisition et de traitement continu à faible empreinte CPU."""
-        has_camera = self._open_camera()
+        has_camera = self._open_camera() if CV2_AVAILABLE else False
         frame_skip = 0
 
         while self._running:
             loop_start = time.monotonic()
 
-            if not has_camera or self.simulation or self.cap is None:
-                # Mode simulation / veille quand aucune webcam n'est accessible
-                annotated = self._generate_standby_frame()
-                self._update_jpeg(annotated)
+            if not CV2_AVAILABLE or not has_camera or self.simulation or self.cap is None:
+                # Mode veille / simulation quand aucune webcam ou cv2 n'est disponible
+                self._latest_jpeg_frame = get_standby_jpeg_bytes()
+                self._new_frame_event.set()
                 time.sleep(0.5)
                 continue
 
@@ -252,8 +332,11 @@ class VisionEngine:
 
         self._release_camera()
 
-    def _process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, bool]:
+    def _process_frame(self, frame: Any) -> Tuple[Any, bool]:
         """Analyse réelle du visage, des yeux, de la bouche et de l'orientation."""
+        if not CV2_AVAILABLE or cv2 is None or not NUMPY_AVAILABLE or np is None:
+            return frame, False
+
         # Redimensionnement et effet miroir
         frame = cv2.resize(frame, (self.frame_width, self.frame_height))
         frame = cv2.flip(frame, 1)
@@ -325,8 +408,10 @@ class VisionEngine:
         self._update_metrics(face_found)
         return frame, face_found
 
-    def _detect_eyes_fast(self, face_x: int, face_y: int, face_w: int, face_h: int, gray: np.ndarray) -> float:
+    def _detect_eyes_fast(self, face_x: int, face_y: int, face_w: int, face_h: int, gray: Any) -> float:
         """Détection optimisée de l'ouverture des yeux par rapport de pixels sombres."""
+        if not CV2_AVAILABLE or cv2 is None or not NUMPY_AVAILABLE or np is None:
+            return 0.8
         eye_y_end = face_y + int(face_h * 0.40)
         eye_region = gray[face_y:eye_y_end, face_x:face_x + face_w]
 
@@ -337,8 +422,10 @@ class VisionEngine:
         eye_openness = 1.0 - (black_pixels / binary.size)
         return float(eye_openness)
 
-    def _detect_mouth_fast(self, face_x: int, face_y: int, face_w: int, face_h: int, gray: np.ndarray) -> Optional[float]:
+    def _detect_mouth_fast(self, face_x: int, face_y: int, face_w: int, face_h: int, gray: Any) -> Optional[float]:
         """Détection optimisée de l'ouverture de bouche (bâillements)."""
+        if not CV2_AVAILABLE or cv2 is None or not NUMPY_AVAILABLE or np is None:
+            return None
         mouth_start = face_y + int(face_h * 0.65)
         mouth_end = face_y + face_h
         mouth_roi = gray[mouth_start:mouth_end, face_x:face_x + face_w]
@@ -376,7 +463,7 @@ class VisionEngine:
         score = 0.0
         duration_minutes = max((time.time() - self.start_time) / 60.0, 0.1)
 
-        # 1. Taux de clignement par minute (un taux anormalement élevé traduit la sécheresse et la fatigue oculaire)
+        # 1. Taux de clignement par minute
         blink_rate = self.blink_count / duration_minutes
         if blink_rate > 24.0:
             score += min((blink_rate - 15.0) * 1.8, 30.0)
@@ -389,9 +476,9 @@ class VisionEngine:
         if head_drift > 6.0:
             score += min(head_drift * 1.2, 20.0)
 
-        # 4. Yeux mi-clos de manière prolongée
+        # 4. Yeux mi-clos de manière prolongée (calcul pur sans dépendance stricte)
         if len(self.eye_aspect_ratio_history) > 0:
-            avg_eye = float(np.mean(list(self.eye_aspect_ratio_history)))
+            avg_eye = float(sum(self.eye_aspect_ratio_history) / len(self.eye_aspect_ratio_history))
             if avg_eye < 0.35:
                 score += 15.0
 
@@ -423,8 +510,11 @@ class VisionEngine:
             else:
                 self.fatigue_level = "Normal"
 
-    def _render_hud_overlay(self, frame: np.ndarray, face_detected: bool) -> np.ndarray:
+    def _render_hud_overlay(self, frame: Any, face_detected: bool) -> Any:
         """Dessine une télémétrie sobre dans le style du HUD JARVIS."""
+        if not CV2_AVAILABLE or cv2 is None or frame is None:
+            return frame
+
         overlay = frame.copy()
 
         # Barre supérieure d'état
@@ -453,17 +543,13 @@ class VisionEngine:
 
         return overlay
 
-    def _generate_standby_frame(self) -> np.ndarray:
-        """Génère une mire d'attente propre lorsque la webcam est désactivée."""
-        img = np.zeros((self.frame_height, self.frame_width, 3), dtype=np.uint8)
-        # Fond sombre dégradé
-        img[:] = (18, 14, 10)
-        cv2.putText(img, "M.O.C.T.A.R // NEUROVISION VEILLE", (40, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 243, 255), 2)
-        cv2.putText(img, "Capteur pret - En attente d'activation", (65, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 160), 1)
-        return img
-
-    def _update_jpeg(self, frame: np.ndarray) -> None:
+    def _update_jpeg(self, frame: Any) -> None:
         """Encode en JPEG léger (qualité 75) pour le flux MJPEG temps réel."""
+        if not CV2_AVAILABLE or cv2 is None or frame is None:
+            self._latest_jpeg_frame = get_standby_jpeg_bytes()
+            self._new_frame_event.set()
+            return
+
         try:
             ret, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if ret:
@@ -480,25 +566,34 @@ class VisionEngine:
         """Générateur HTTP multipart pour flux vidéo MJPEG continu (FastAPI StreamingResponse)."""
         while True:
             # Attend une nouvelle frame ou timeout
-            self._new_frame_event.wait(timeout=0.1)
+            self._new_frame_event.wait(timeout=0.2)
             self._new_frame_event.clear()
             frame = self._latest_jpeg_frame
             if frame is None:
-                standby = self._generate_standby_frame()
-                _, buf = cv2.imencode(".jpg", standby, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                frame = buf.tobytes()
+                frame = get_standby_jpeg_bytes()
 
             yield (b"--frame\r\n"
                    b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
+
+            # Si le moteur est arrêté ou cv2 indisponible, réduit le débit (2 FPS)
+            if not self._running or not CV2_AVAILABLE:
+                time.sleep(0.5)
 
     def get_metrics(self) -> Dict[str, Any]:
         """Télémétrie complète au format JSON pour l'API Jarvis et le HUD."""
         duration_minutes = max((time.time() - self.start_time) / 60.0, 0.1)
         blink_rate = round(self.blink_count / duration_minutes, 1)
+        is_cam_open = (
+            CV2_AVAILABLE
+            and not self.simulation
+            and self.cap is not None
+            and getattr(self.cap, "isOpened", lambda: False)()
+        )
 
         return {
             "active": self._running,
-            "camera_connected": not self.simulation and (self.cap is not None and self.cap.isOpened()),
+            "cv2_available": CV2_AVAILABLE,
+            "camera_connected": bool(is_cam_open),
             "user_present": self.is_user_present(),
             "face_detected": self.face_detected,
             "blink_count": self.blink_count,
@@ -511,6 +606,8 @@ class VisionEngine:
             "session_duration_seconds": int(time.time() - self.start_time),
             "measured_fps": round(self.measured_fps, 1),
             "timestamp": datetime.now().strftime("%H:%M:%S"),
+            "status": "nominal" if CV2_AVAILABLE else "cv2_missing",
+            "message": "Vision nominale" if CV2_AVAILABLE else "Module opencv-python non installé sur cet hôte (mode simulation/veille)",
         }
 
     def reset_counters(self) -> None:
@@ -529,4 +626,3 @@ class VisionEngine:
             self.mouth_aspect_ratio_history.clear()
             self.head_position_history.clear()
             LOGGER.info("🔄 Compteurs NeuroVision réinitialisés.")
-
