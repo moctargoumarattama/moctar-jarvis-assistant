@@ -54,6 +54,7 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     # 3. CPU, RAM & Matériel
     (re.compile(r"\b(?:la|de\s+la)\s+rame\b", re.I), "la RAM", "ram_repair"),
     (re.compile(r"\b(?:le|du)\s+(?:ces?\s*p[uù]|c['’]?est\s*p[uù]|c['’]?est\s*plus|s[ée]pu)\b", re.I), "le CPU", "cpu_repair"),
+    (re.compile(r"\b(?:ces?\s*p[uù]|c['’]?est\s*p[uù]|c['’]?est\s*plus)\b", re.I), "CPU", "cpu_standalone_repair"),
     (re.compile(r"\b(?:temp[ée]rature|chauffe)\s+du\s+ces?\s*p[uù]\b", re.I), "température du CPU", "cpu_temp"),
     (re.compile(r"\ble\s+dis\s+que\s+dur\b", re.I), "le disque dur", "disk_repair"),
     (re.compile(r"\bles\s+dis\s+ques?\b", re.I), "les disques", "disks_repair"),
@@ -123,6 +124,10 @@ _PHONETIC_WORD_MAP: Dict[str, str] = {
     "gougueule": "Google",
     "sépu": "CPU",
     "cepu": "CPU",
+    "sepu": "CPU",
+    "ramme": "RAM",
+    "nock": "NOC",
+    "noque": "NOC",
     "systemctl": "systemctl",
     "journalctl": "journalctl",
     "terminaux": "terminal",

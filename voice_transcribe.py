@@ -598,7 +598,7 @@ def transcribe_audio(
             condition_on_previous_text=False,
             compression_ratio_threshold=2.2,
             no_speech_threshold=0.6,
-            initial_prompt=None,
+            initial_prompt=build_dynamic_stt_prompt(),
         )
         pieces: list[str] = []
         size = 0

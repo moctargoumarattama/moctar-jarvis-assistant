@@ -245,6 +245,11 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
 
     has_interrogative = any(norm.startswith(q) or f" {q}" in norm for q in _DIRECTED_INTERROGATIVES)
     has_demo_intent = bool(re.search(r"\b(?:d[ée]mo|ami|amis|invit[ée]s?|potes?|blague|rire|capacit[ée]s?|montre|pr[ée]sente|salue|accueille)\b", norm))
+    has_system_or_common_command = bool(re.search(
+        r"\b(?:cpu|ram|m[ée]t[ée]o|statut|heure|l['’\s]?heure|batterie|disque|m[ée]moire|musique|pause|stop|blague|programme|actualit[ée]s?|terre|globe|orbe|noc|hud|aide[- ]moi|aide|fais\s+voir|tu\s+m['’\s]?entends|tu\s+nous\s+entends|c['’\s]?est\s+quoi\s+le\s+programme|qu['’\s]?est[- ]ce\s+que\s+tu\s+fais)\b",
+        norm,
+    ))
+    has_social_greeting = bool(re.search(r"^(?:salut|bonjour|bonsoir|coucou|yo|hello)\b", norm))
     is_direct_query = is_wake_call or bool(re.search(
         r"\b(?:tu\s+es\s+qui|t['’]es\s+qui|qui\s+es[- ]tu|qui\s+tu\s+es|c['’]est\s+quoi\s+ton\s+job|quel\s+est\s+ton\s+job|"
         r"ton\s+job|ton\s+r[ôo]le|tu\s+sers\s+[aà]\s+quoi|tu\s+fais\s+quoi|tu\s+sais\s+faire\s+quoi|"
@@ -253,7 +258,7 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
     ))
 
     # 5. Détection de la réflexion à voix haute (Thinking Out Loud) UNIQUEMENT en l'absence de tout ordre ou question
-    if not (has_explicit_wake or has_second_person or has_imperative or has_interrogative or has_demo_intent or is_direct_query):
+    if not (has_explicit_wake or has_second_person or has_imperative or has_interrogative or has_demo_intent or is_direct_query or has_system_or_common_command or has_social_greeting):
         for p in _THINKING_PREFIX_PATTERNS:
             if p.search(norm):
                 return {
@@ -284,8 +289,17 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
                 "reason": "single_hesitation_token",
             }
 
-    # Si explicitement interpellé (avec 'Moctar', question directe d'identité/rôle, verbe d'action clair ou démo)
-    if has_explicit_wake or is_direct_query or has_demo_intent or has_imperative or has_interrogative or (is_session_active and has_second_person):
+    # Si explicitement interpellé (avec 'Moctar', question directe d'identité/rôle, verbe d'action clair, commande système ou salutation)
+    if (
+        has_explicit_wake
+        or is_direct_query
+        or has_demo_intent
+        or has_imperative
+        or has_interrogative
+        or has_system_or_common_command
+        or has_social_greeting
+        or (is_session_active and has_second_person)
+    ):
         return {
             "intent": "directed_speech",
             "is_directed": True,

@@ -158,3 +158,20 @@ def test_voice_interact_on_wan_requires_external_password():
         assert resp_unlocked.status_code == 200
 
 
+def test_comprehensive_direct_voice_commands_audit():
+    """Audit exhaustif : vérifie que 31 commandes naturelles de la vie réelle sont reconnues 5/5 sans mot-clé."""
+    test_phrases = [
+        "cpu", "ram", "statut", "statut systeme", "meteo", "la meteo", "l heure",
+        "batterie", "disque", "memoire", "pause", "stop", "blague", "musique",
+        "la terre", "globe", "orbe", "hud", "mode noc", "aide-moi", "fais voir",
+        "qui est la", "salut a tous", "bonsoir tout le monde", "tu m entends",
+        "affiche la terre", "lance la musique", "ouvre le bureau",
+        "c est quoi le programme", "actualites", "qu est ce que tu fais",
+    ]
+    for p in test_phrases:
+        assert main.is_direct_voice_command(p) is True, f"Doit être direct : {p}"
+        att = dynamic_attention_engine.classify_utterance_attention(p, is_session_active=False)
+        assert att.get("is_directed") is True, f"Doit être adressé au système : {p}"
+
+
+

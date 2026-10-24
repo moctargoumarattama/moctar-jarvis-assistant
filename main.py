@@ -367,11 +367,15 @@ def _is_pure_filler_or_wake(text: str) -> bool:
 
 def is_direct_voice_command(text: str) -> bool:
     """Identifie les ordres opérationnels explicites exécutables directement sans mot de réveil préalable."""
-    if not text or len(text.strip()) < 3:
+    if not text or len(text.strip()) < 2:
         return False
     # Réparation phonétique amont préalable pour reconnaître les commandes vocales altérées
     repaired, _ = stt_phonetic_repair.repair_stt_transcript(text)
     norm = _strip_accents_1to1(repaired).lower().strip()
+
+    # Détection immédiate de tout mot-clé système strict (cpu, ram, statut, docker, vps, service, etc.)
+    if is_system_command(norm) or is_system_command(repaired):
+        return True
 
     # 0. Salutations directes & Démos pour amis / invités (Ne JAMAIS ignorer une salutation ou démo)
     if re.search(r"^(?:bonjour|salut|bonsoir|coucou|yo|hello)(?:\s+|$)", norm) or norm in ("bonjour", "salut", "bonsoir", "coucou", "yo", "hello"):
@@ -382,9 +386,9 @@ def is_direct_voice_command(text: str) -> bool:
         return True
     if re.search(r"\b(?:merci\s+(?:mon\s+ami|fr[ée]rot|moctar|jarvis))\b", norm):
         return True
-    if re.search(r"\b(?:mets?\s+l['’]orbe|couleur\s+de\s+l['’]orbe|mode\s+victoire|mode\s+alerte|ambiance\s+chaleureuse|ambiance\s+nuit|orbe\s+(?:vert|or|ambre|nuit|cyan|violet|rouge))\b", norm):
+    if re.search(r"\b(?:mets?\s+l['’]orbe|couleur\s+de\s+l['’]orbe|mode\s+victoire|mode\s+alerte|ambiance\s+chaleureuse|ambiance\s+nuit|orbe\s+(?:vert|or|ambre|nuit|cyan|violet|rouge)|orbe|globe|la\s+terre|terre)\b", norm):
         return True
-    if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague|fais\s+une\s+blague|qui\s+t['’]a\s+(?:cr[ée][ée]|con[çc]u)|tu\s+m['’]entends|tu\s+nous\s+entends|tu\s+es\s+l[aà]|t['’]es\s+l[aà]|tu\s+peux\s+parler|parle\s+un\s+peu|parle[- ]nous|test\s+micro)\b", norm):
+    if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague|blague|fais\s+une\s+blague|qui\s+t['’\s]?a\s+(?:cr[ée][ée]|con[çc]u)|tu\s+m['’\s]?entends|tu\s+nous\s+entends|tu\s+es\s+l[aà]|t['’\s]?es\s+l[aà]|tu\s+peux\s+parler|parle\s+un\s+peu|parle[- ]nous|test\s+micro|qui\s+est\s+l[aà]|fais\s+voir|actualit[ée]s?|c['’\s]?est\s+quoi\s+le\s+programme|programme)\b", norm):
         return True
     # Questions ouvertes directes
     if re.search(r"^(?:comment|pourquoi|qu['’]est[- ]ce|c['’]est\s+quoi|qui\s+est|qui\s+a|quel|quelle|combien|est[- ]ce\s+que|peux[- ]tu|tu\s+peux|sais[- ]tu|tu\s+sais|dis[- ]moi|donne[- ]moi|raconte|explique|cherche|fais[- ]moi|montre[- ]moi)\b", norm):
@@ -402,13 +406,13 @@ def is_direct_voice_command(text: str) -> bool:
     if re.search(r"\b(?:ouvre|ouvrir|lance|lancer|active|activer|demarre|d[ée]marre|open)\b", norm):
         return True
     # 2. Heure & Date
-    if re.search(r"\b(?:quelle?\s+heure|il\s+est\s+quelle?\s+heure|donne\s+l['’]heure|quel\s+jour|quelle?\s+date|on\s+est\s+le\s+combien)\b", norm):
+    if re.search(r"\b(?:quelle?\s+heure|il\s+est\s+quelle?\s+heure|donne\s+l['’]heure|l['’]heure|heure|quel\s+jour|quelle?\s+date|on\s+est\s+le\s+combien)\b", norm):
         return True
     # 3. Météo & Climat
-    if re.search(r"\b(?:m[ée]t[ée]o|quel\s+temps|quel\s+degr[ée]|combien\s+de\s+degr[ée]s?|pleut[- ]il|est[- ]ce\s+qu['’]il\s+pleut|il\s+fait\s+quel\s+degr[ée]|fait\s+quel\s+degr[ée])\b", norm):
+    if re.search(r"\b(?:m[ée]t[ée]o|la\s+m[ée]t[ée]o|quel\s+temps|quel\s+degr[ée]|combien\s+de\s+degr[ée]s?|pleut[- ]il|est[- ]ce\s+qu['’]il\s+pleut|il\s+fait\s+quel\s+degr[ée]|fait\s+quel\s+degr[ée])\b", norm):
         return True
     # 4. Multimédia & Audio (Lecture, Pause, Volume, Spotify, YouTube)
-    if re.search(r"\b(?:arr[êe]te\s+la\s+musique|stop\s+la\s+musique|pause\s+la\s+musique|pause\s+youtube|mets\s+youtube\s+en\s+pause|youtube\s+en\s+pause|j['’]?ai\s+youtube\s+en\s+pause|pause\s+la\s+vid[ée]o|mets\s+en\s+pause|mets\s+sur\s+pause)\b", norm) or norm.strip(" .,:;!?'\"") in ("pause", "stop", "en pause", "on pause", "mets pause", "pause musique", "stop musique"):
+    if re.search(r"\b(?:arr[êe]te\s+la\s+musique|stop\s+la\s+musique|pause\s+la\s+musique|pause\s+youtube|mets\s+youtube\s+en\s+pause|youtube\s+en\s+pause|j['’]?ai\s+youtube\s+en\s+pause|pause\s+la\s+vid[ée]o|mets\s+en\s+pause|mets\s+sur\s+pause)\b", norm) or norm.strip(" .,:;!?'\"") in ("pause", "stop", "en pause", "on pause", "mets pause", "pause musique", "stop musique", "musique", "la musique"):
         return True
     if re.search(r"\b(?:mets\s+la\s+musique|mets\s+de\s+la\s+musique|lance\s+la\s+musique|lance\s+de\s+la\s+musique|joue\s+de\s+la\s+musique|joue\s+la\s+musique|lance\s+ma\s+playlist|lance\s+spotify|ouvre\s+spotify|reprends?\s+la\s+lecture|remets\s+la\s+musique|relance\s+la\s+musique)\b", norm):
         return True
@@ -426,8 +430,8 @@ def is_direct_voice_command(text: str) -> bool:
         return True
     if re.search(r"\b(?:mets?[-\s]le\s+[aà]\s+(?:droite|gauche)|place\s+[aà]\s+(?:droite|gauche)|snap\s+(?:right|left)|plein\s+[ée]cran|maximise|minimise|r[ée]duis)\b", norm):
         return True
-    # 7. Identité, Rôle, Métier & Capacités ("c'est quoi ton job", "tu es qui toi", "tu sers à quoi")
-    if re.search(r"\b(?:c['’]est\s+quoi\s+ton\s+job|quel\s+est\s+ton\s+job|ton\s+job|ton\s+r[ôo]le|tu\s+es\s+qui|t['’]es\s+qui|qui\s+es[- ]tu|qui\s+tu\s+es|tu\s+sers\s+[aà]\s+quoi|tu\s+fais\s+quoi|tu\s+sais\s+faire\s+quoi|peux[- ]tu\s+m['’]aider|aide[- ]moi)\b", norm):
+    # 7. Identité, Rôle, Métier & Capacités ("c'est quoi ton job", "tu es qui toi", "tu sers à quoi", "qu'est-ce que tu fais")
+    if re.search(r"\b(?:c['’\s]?est\s+quoi\s+ton\s+job|quel\s+est\s+ton\s+job|ton\s+job|ton\s+r[ôo]le|tu\s+es\s+qui|t['’\s]?es\s+qui|qui\s+es[- ]tu|qui\s+tu\s+es|tu\s+sers\s+[aà]\s+quoi|tu\s+fais\s+quoi|qu['’\s]?est[- ]ce\s+que\s+tu\s+fais|tu\s+sais\s+faire\s+quoi|peux[- ]tu\s+m['’\s]?aider|aide[- ]moi|aide\s+moi|c['’\s]?est\s+quoi\s+le\s+programme|le\s+programme)\b", norm):
         return True
     # 8. Transitions collaboratives ("on va passer à ceci", "on continue", "on enchaîne")
     if re.search(r"\b(?:on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|passons\s+[aà]\s+la\s+suite)\b", norm):
