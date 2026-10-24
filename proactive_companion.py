@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
 LOGGER = logging.getLogger("moctar.proactive_companion")
@@ -147,6 +148,26 @@ class ProactiveCompanion:
             pass
         return None
 
+    def check_circadian_wellness(self) -> Optional[Dict[str, Any]]:
+        """Conseils de bienveillance nocturne et de gestion de l'énergie circadienne."""
+        now_dt = datetime.now()
+        hour = now_dt.hour
+        now = time.monotonic()
+        # Nuit tardive : entre 23h et 5h du matin
+        if hour >= 23 or hour < 5:
+            # Ne pas harceler : au moins 30 minutes de session active
+            session_duration = now - self._work_session_start
+            if session_duration >= 1800.0:
+                alert_key = f"circadian_late_night_{now_dt.strftime('%Y%m%d')}"
+                if alert_key not in self._seen_alert_hashes:
+                    self._seen_alert_hashes.add(alert_key)
+                    return {
+                        "category": "circadian_wellness",
+                        "message": "Moctar, il se fait tard dans la nuit. Si tu fatigues un peu, pense à préserver ton sommeil mon ami. Tu veux qu'on sauvegarde tout et qu'on reprenne demain ?",
+                        "priority": "low",
+                    }
+        return None
+
     def check_fatigue_alert(self) -> Optional[Dict[str, Any]]:
         """Vérifie si Moctar est sur une session de code continue prolongée."""
         now = time.monotonic()
@@ -187,7 +208,14 @@ class ProactiveCompanion:
             LOGGER.info("⚡ [PROACTIVE EVENT]: %s", res_event["message"])
             return res_event
 
-        # Priorité 3 : Bienveillance session de travail prolongée
+        # Priorité 3 : Bienveillance circadienne nocturne
+        circadian_event = self.check_circadian_wellness()
+        if circadian_event:
+            self._last_trigger_time = time.monotonic()
+            LOGGER.info("⚡ [PROACTIVE EVENT]: %s", circadian_event["message"])
+            return circadian_event
+
+        # Priorité 4 : Bienveillance session de travail prolongée
         fatigue_event = self.check_fatigue_alert()
         if fatigue_event:
             self._last_trigger_time = time.monotonic()

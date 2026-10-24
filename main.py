@@ -295,6 +295,15 @@ async def _prewarm_common_voice_tts() -> None:
         "Je vous attends Moctar, prenez votre temps.",
         "Oui Moctar, je suis là !",
         "Pardon Moctar, je n'ai pas bien compris votre phrase. Pouvez-vous répéter ?",
+        "Bonjour Moctar ! Prêt pour cette journée ? Dis-moi ce qu'on attaque en premier !",
+        "Bonjour Moctar ! Bon appétit ou pause bien méritée, je reste disponible !",
+        "Oui Moctar, je suis là ! On avance sur quoi cet après-midi ?",
+        "Bonsoir Moctar ! Content de te retrouver. Dis-moi sur quoi on se concentre ce soir.",
+        "Encore au travail Moctar ? Je reste avec toi, mais pense à préserver ton sommeil. Dis-moi ce qu'on boucle !",
+        "Bonne nuit Moctar ! Repose-toi bien, tu as fait une grosse session. Tous les systèmes sont sous surveillance et je garde tout au chaud pour demain !",
+        "Très bonne idée Moctar, souffle un peu et prends ton temps. Je garde un œil sur la machine pendant ta pause !",
+        "Tout tourne comme une horloge Moctar ! Les systèmes sont nominaux sur le Dell M4800. Et toi, la forme ? Prêt à avancer ?",
+        "Avec grand plaisir Moctar ! On forme une sacrée équipe. Toujours là pour toi !",
     ]
     for p in phrases:
         try:
@@ -361,7 +370,11 @@ def is_direct_voice_command(text: str) -> bool:
     # 0. Salutations directes & Démos pour amis / invités (Ne JAMAIS ignorer une salutation ou démo)
     if re.search(r"^(?:bonjour|salut|bonsoir|coucou|yo|hello)(?:\s+|$)", norm) or norm in ("bonjour", "salut", "bonsoir", "coucou", "yo", "hello"):
         return True
-    if re.search(r"\b(?:dis\s+bonjour|salue|passe\s+le\s+bonjour|pr[ée]sente[- ]toi|fais\s+(?:une\s+)?d[ée]mo(?:nstration)?|montre\s+(?:ce\s+que\s+tu\s+sais\s+faire|nous)|qu['’]est[- ]ce\s+que\s+tu\s+sais\s+faire|je\s+te\s+pr[ée]sente|voici\s+(?:mon\s+ami|mon\s+pote|mon\s+coll[èe]gue))\b", norm):
+    if re.search(r"\b(?:dis\s+bonjour|salue|passe\s+le\s+bonjour|pr[ée]sente[- ]toi|fais\s+(?:une\s+)?d[ée]mo(?:nstration)?|montre\s+(?:ce\s+que\s+tu\s+sais\s+faire|nous)|qu['’]est[- ]ce\s+que\s+tu\s+sais\s+faire|je\s+te\s+pr[ée]sente|voici\s+(?:mon\s+ami|mon\s+pote|mon\s+coll[èe]gue)?|qui\s+sont\s+mes\s+amis|tu\s+connais\s+qui)\b", norm):
+        return True
+    if re.search(r"\b(?:bonne\s+nuit|je\s+vais\s+dormir|je\s+vais\s+me\s+coucher|je\s+suis\s+fatigu[ée]|pause\s+caf[ée]|je\s+fais\s+une\s+pause|comment\s+tu\s+vas|comment\s+vas[- ]tu|[cç]a\s+va|la\s+forme)\b", norm) or norm in ("merci", "merci beaucoup", "super merci", "merci mon ami", "merci frérot", "bien joué"):
+        return True
+    if re.search(r"\b(?:merci\s+(?:mon\s+ami|fr[ée]rot|moctar|jarvis))\b", norm):
         return True
     if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague|qui\s+t['’]a\s+(?:cr[ée][ée]|con[çc]u)|tu\s+m['’]entends|tu\s+nous\s+entends|test\s+micro)\b", norm):
         return True
@@ -563,17 +576,50 @@ def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
     if re.search(r"\b(?:dis\s+bonjour|salue|passe\s+le\s+bonjour)\s+(?:[aà]\s+)?(?:mes\s+(?:amis|potes|invit[ée]s|coll[èe]gues)|tout\s+le\s+monde|la\s+famille|l['’][ée]quipe)\b", normalized):
         return "Bonjour à tous et bienvenue ! Je suis M.O.C.T.A.R, l'intelligence cybernétique et copilote d'ingénierie de Moctar. Ravi de faire votre connaissance !"
 
-    # 0a2b. Présentation personnalisée d'un ami ("je te présente Karim", "voici mon ami Youssef")
-    match_intro = re.search(r"\b(?:je\s+te\s+pr[ée]sente|voici\s+(?:mon\s+ami|mon\s+pote|mon\s+coll[èe]gue)?)\s+([A-ZÀ-ÿa-z-]{2,20})\b", cleaned, re.IGNORECASE)
+    # 0a2b. Présentation personnalisée ou salutation d'un ami ("je te présente Karim", "voici mon ami Youssef", "dis bonjour à Moussa", "salue Karim")
+    match_intro = re.search(r"\b(?:je\s+te\s+pr[ée]sente|voici(?:\s+mon\s+(?:ami|pote|coll[èe]gue))?|(?:dis\s+bonjour|salue|passe\s+le\s+bonjour)\s+[aà]|je\s+suis\s+avec|accueil(?:le)?)\s+([A-ZÀ-ÿa-z-]{2,20})\b", cleaned, re.IGNORECASE)
     if match_intro:
         friend_name = match_intro.group(1).capitalize()
-        if friend_name.lower() not in ("moctar", "moktar", "un", "une", "mon", "ce", "cette", "le", "la"):
-            if memory and hasattr(memory, "save_fact"):
+        if friend_name.lower() not in ("moctar", "moktar", "un", "une", "mon", "ce", "cette", "le", "la", "mes", "tout"):
+            is_known = False
+            if memory and hasattr(memory, "get_known_friend"):
+                try:
+                    existing = memory.get_known_friend(friend_name)
+                    if existing and isinstance(existing, dict):
+                        is_known = True
+                        if hasattr(memory, "record_friend"):
+                            memory.record_friend(friend_name)
+                except Exception:
+                    pass
+            elif memory and hasattr(memory, "save_fact"):
                 try:
                     memory.save_fact("known_friends", friend_name.lower(), f"Ami de Moctar : {friend_name}", importance=3)
                 except Exception:
                     pass
-            return f"Enchanté {friend_name} ! Bienvenue sur le poste de travail et centre de commandement de Moctar. Ravi de faire ta connaissance !"
+
+            if is_known:
+                return f"Ravi de te revoir {friend_name} ! Toujours un plaisir de t'accueillir sur le système de Moctar. Comment vas-tu ?"
+            else:
+                if memory and hasattr(memory, "record_friend"):
+                    try:
+                        memory.record_friend(friend_name)
+                    except Exception:
+                        pass
+                return f"Enchanté {friend_name} ! Bienvenue sur le poste de travail et centre de commandement de Moctar. Ravi de faire ta connaissance !"
+
+    # 0a2c. Liste des amis connus de Moctar ("qui sont mes amis", "tu connais qui", "liste mes amis")
+    if re.search(r"\b(?:qui\s+sont\s+mes\s+amis|tu\s+connais\s+qui|liste\s+(?:de\s+)?mes\s+amis|qui\s+est\s+avec\s+nous)\b", normalized):
+        if memory and hasattr(memory, "get_all_known_friends"):
+            try:
+                friends_list = memory.get_all_known_friends()
+                if friends_list:
+                    names = [f.get("name") for f in friends_list if f.get("name")]
+                    if names:
+                        names_str = ", ".join(names[:-1]) + f" et {names[-1]}" if len(names) > 1 else names[0]
+                        return f"Tu m'as déjà présenté {names_str}, Moctar. C'est toujours un vrai plaisir de les accueillir !"
+            except Exception:
+                pass
+        return "Tu ne m'as pas encore présenté tes amis, Moctar. Dès qu'un ami passe, dis-moi 'Je te présente...' et je m'en souviendrai !"
 
     # 0a3. Démonstration des capacités du système ("fais une démo", "fais une démonstration", "montre ce que tu sais faire")
     if re.search(r"\b(?:fais\s+(?:une\s+)?d[ée]mo(?:nstration)?|montre\s+(?:ce\s+que\s+tu\s+sais\s+faire|nous)|qu['’]est[- ]ce\s+que\s+tu\s+sais\s+faire)\b", normalized):
@@ -591,6 +637,22 @@ def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
     if re.search(r"\b(?:qui\s+t['’]a\s+(?:cr[ée][ée]|con[çc]u|d[ée]velopp[ée]|programm[ée])|qui\s+est\s+ton\s+cr[ée]ateur|c['’]est\s+qui\s+ton\s+cr[ée]ateur)\b", normalized):
         return "J'ai été conçu, programmé et entraîné sur mesure par Moctar pour être son copilote d'ingénierie autonome et système d'intelligence opérationnelle."
 
+    # 0a7. Coucher, Sommeil et Bonne Nuit ("bonne nuit", "je vais dormir", "je vais me coucher", "je suis fatigué")
+    if re.search(r"\b(?:bonne\s+nuit|je\s+vais\s+(?:dormir|me\s+coucher|au\s+lit|pioncer)|je\s+suis\s+fatigu[ée]|on\s+(?:arr[êe]te|[ée]teint|coupe)\s+(?:pour\s+ce\s+soir|pour\s+aujourd['’]hui)|[aà]\s+demain)\b", normalized):
+        return "Bonne nuit Moctar ! Repose-toi bien, tu as fait une grosse session. Tous les systèmes sont sous surveillance et je garde tout au chaud pour demain !"
+
+    # 0a8. Pauses bienveillantes ("je fais une pause", "pause café", "je prends l'air", "je souffle un peu")
+    if re.search(r"\b(?:je\s+fais\s+une\s+pause|pause\s+caf[ée]|je\s+prends\s+(?:l['’]air|une\s+pause)|je\s+vais\s+prendre\s+l['’]air|je\s+souffle\s+un\s+peu)\b", normalized):
+        return "Très bonne idée Moctar, souffle un peu et prends ton temps. Je garde un œil sur la machine pendant ta pause !"
+
+    # 0a9. Comment ça va & Humeur complice ("comment tu vas", "ça va", "tu as la forme", "la forme")
+    if re.search(r"\b(?:comment\s+(?:vas?[- ]tu|tu\s+vas)|(?:[cç]a\s+va|la\s+forme)(?:\s+moctar|\s+jarvis)?$)\b", normalized) or normalized in ("ca va", "ça va", "la forme", "comment tu vas", "comment vas tu", "tu vas bien"):
+        return "Tout tourne comme une horloge Moctar ! Les systèmes sont nominaux sur le Dell M4800. Et toi, la forme ? Prêt à avancer ?"
+
+    # 0a10. Remerciements et Fraternité ("merci", "merci mon ami", "merci frérot", "super merci", "bien joué")
+    if re.search(r"\b(?:merci\s+(?:mon\s+ami|fr[ée]rot|infiniment|beaucoup|moctar|jarvis)|t['’]es\s+le\s+meilleur|super\s+boulot)\b", normalized) or normalized in ("merci", "super merci", "merci beaucoup", "merci bien", "bien joué", "merci mon ami", "merci frérot"):
+        return "Avec grand plaisir Moctar ! On forme une sacrée équipe. Toujours là pour toi !"
+
     # 0b. Présence complice ("t'es là", "tu es là")
     if re.search(r"\b(?:t['’]es\s+l[aà]|tu\s+es\s+l[aà]|es[- ]tu\s+l[aà])\b", normalized):
         hour = datetime.now().hour
@@ -599,7 +661,7 @@ def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
         return "Oui Moctar, je suis là !"
 
     # 0c. Salutations chaleureuses selon le moment de la journée & continuité épisodique
-    if normalized in ("bonjour", "salut", "bonjour moctar", "salut moctar", "moc", "yo moc", "yo mokti"):
+    if normalized in ("bonjour", "salut", "bonjour moctar", "salut moctar", "moc", "yo moc", "yo mokti", "coucou", "hello", "bonjour mon ami", "salut mon ami"):
         hour = datetime.now().hour
         if memory and hasattr(memory, "build_episodic_greeting"):
             try:
@@ -609,15 +671,15 @@ def handle_instant_local_command(text: str, memory: Any = None) -> str | None:
             except Exception:
                 pass
         if 6 <= hour < 12:
-            return "Bonjour Moctar ! Prêt pour cette journée ?"
+            return "Bonjour Moctar ! Prêt pour cette journée ? Dis-moi ce qu'on attaque en premier !"
         elif 12 <= hour < 14:
             return "Bonjour Moctar ! Bon appétit ou pause bien méritée, je reste disponible !"
         elif 14 <= hour < 19:
-            return "Oui Moctar, je suis là ! On avance sur quoi ?"
+            return "Oui Moctar, je suis là ! On avance sur quoi cet après-midi ?"
         elif 19 <= hour < 23:
-            return "Bonsoir Moctar ! Je suis là, qu'est-ce qu'on fait ?"
+            return "Bonsoir Moctar ! Content de te retrouver. Dis-moi sur quoi on se concentre ce soir."
         else:
-            return "Encore au travail Moctar ? Je reste avec toi, dis-moi ce qu'on boucle."
+            return "Encore au travail Moctar ? Je reste avec toi, mais pense à préserver ton sommeil. Dis-moi ce qu'on boucle !"
 
     # 1. Identité ("comment t'appelles-tu", "qui es-tu", "c'est quoi ton nom", etc.)
     if re.search(r"\b(?:qui\s+es[- ]tu|comment\s+tu\s+t['’]appelles|comment\s+t['’]appelles[- ]tu|c['’]est\s+quoi\s+ton\s+nom|quel\s+est\s+ton\s+nom|qui\s+tu\s+es|pr[ée]sente[- ]toi)\b", normalized):

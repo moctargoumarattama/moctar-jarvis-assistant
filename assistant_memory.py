@@ -314,6 +314,12 @@ class AssistantMemory:
             except Exception:
                 hour = 12
 
+        # 0. Continuité nocturne (> 23h ou < 6h) : bienveillance et repos
+        if hour >= 23 or hour < 6:
+            if diff_hours < 4.0:
+                return f"Encore debout Moctar ? Tout à l'heure on était sur {topic}. Pense à souffler un peu, tu veux qu'on boucle ça rapidement ?"
+            return f"Encore au travail Moctar ? Je reste avec toi, dis-moi ce qu'on boucle."
+
         # 1. Continuité WhatsApp récente (< 4 heures)
         if source == "whatsapp" and diff_hours < 4.0:
             return f"Sur WhatsApp tout à l'heure, on parlait de {topic}. Tu veux qu'on reprenne ça, Moctar ?"
@@ -327,6 +333,101 @@ class AssistantMemory:
             return f"On avançait sur {topic}. On continue là-dessus, Moctar ?"
 
         return None
+
+    # ==========================================================================
+    # 1b. GESTION DES AMIS ET INVITÉS DE MOCTAR (PACK DÉMO & ACCUEIL CHALEUREUX)
+    # ==========================================================================
+
+    def record_friend(
+        self,
+        name: str,
+        relation: str = "ami",
+        notes: str = "",
+    ) -> Dict[str, Any]:
+        """Enregistre ou met à jour la visite d'un ami ou invité présenté par Moctar."""
+        clean_name = name.strip()
+        if not clean_name:
+            return {}
+        norm_key = clean_name.lower()
+        now_iso = datetime.now().isoformat(timespec="seconds")
+
+        friend_data = {
+            "name": clean_name.capitalize(),
+            "relation": relation or "ami",
+            "notes": notes or f"Ami de Moctar : {clean_name.capitalize()}",
+            "first_met": now_iso,
+            "last_seen": now_iso,
+            "visit_count": 1,
+        }
+
+        # Vérifie si l'ami existe déjà pour incrémenter les visites
+        existing = self.get_known_friend(clean_name)
+        if existing and isinstance(existing, dict):
+            friend_data["first_met"] = existing.get("first_met", now_iso)
+            friend_data["visit_count"] = int(existing.get("visit_count", 1)) + 1
+            if existing.get("notes") and not notes:
+                friend_data["notes"] = existing["notes"]
+            if existing.get("relation") and relation == "ami":
+                friend_data["relation"] = existing["relation"]
+
+        val_str = json.dumps(friend_data, ensure_ascii=False)
+        self.save_fact(category="known_friends", key=norm_key, value=val_str, importance=3)
+        return friend_data
+
+    def get_known_friend(self, name: str) -> Optional[Dict[str, Any]]:
+        """Récupère les informations d'un ami mémorisé par son prénom."""
+        clean_name = (name or "").strip().lower()
+        if not clean_name:
+            return None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT content FROM memories WHERE category = 'known_friends' AND key = ? LIMIT 1",
+                    (clean_name,)
+                )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    try:
+                        data = json.loads(row[0])
+                        if isinstance(data, dict):
+                            return data
+                    except Exception:
+                        return {
+                            "name": clean_name.capitalize(),
+                            "relation": "ami",
+                            "notes": row[0],
+                            "visit_count": 1,
+                        }
+        except Exception as exc:
+            logger.error("Erreur lors de la lecture de l'ami %s: %s", clean_name, exc)
+        return None
+
+    def get_all_known_friends(self) -> List[Dict[str, Any]]:
+        """Retourne la liste de tous les amis et invités connus de Moctar."""
+        friends: List[Dict[str, Any]] = []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT key, content FROM memories WHERE category = 'known_friends' ORDER BY timestamp DESC"
+                )
+                rows = cursor.fetchall()
+                for r in rows:
+                    try:
+                        d = json.loads(r[1])
+                        if isinstance(d, dict):
+                            friends.append(d)
+                    except Exception:
+                        friends.append({
+                            "name": str(r[0]).capitalize(),
+                            "relation": "ami",
+                            "notes": str(r[1]),
+                            "visit_count": 1,
+                        })
+        except Exception as exc:
+            logger.error("Erreur lors de la lecture de la liste des amis: %s", exc)
+        return friends
 
     # ==========================================================================
     # 1b. PROFIL CONTINU DE MOCTAR (APPRENTISSAGE AUTONOME MULTI-CONVERSATIONS)
