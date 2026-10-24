@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#0b0f19">
   <meta name="description" content="Supervision en temps réel du serveur central, des applications et des VPS distants.">
   <title>Tour de contrôle · NOC</title>
+  <link rel="stylesheet" href="/static/neurovision_hud.css?v=3.0">
   <style>
     :root{color-scheme:dark;--bg:#0b0f19;--panel:#111722;--panel-soft:#141c29;--line:#253043;--text:#e5edf8;--muted:#8694aa;--cyan:#5ed9ec;--green:#51dcaa;--amber:#f3bd65;--red:#ff738a;--mono:"Cascadia Code",Consolas,"Liberation Mono",monospace;--sans:Inter,"Segoe UI",Arial,sans-serif}
     *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:32px}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;-webkit-font-smoothing:antialiased}button,input{font:inherit}button,a,input{ -webkit-tap-highlight-color:transparent}button{cursor:pointer}a{color:inherit;text-decoration:none}button:disabled{cursor:not-allowed;opacity:.4}button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}svg{display:block}button svg{pointer-events:none}h1,h2,h3,p{margin:0}button{color:inherit}::selection{background:#236374;color:white}[hidden]{display:none!important}.icon{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.muted{color:var(--muted)}.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}.eyebrow{text-transform:uppercase;letter-spacing:.13em;font-size:10px;font-weight:700;color:var(--muted)}
@@ -998,102 +999,133 @@
   <!-- ========================================================================= -->
   <!-- MODAL NEUROVISION : SCANNER COGNITIF & BIOMÉTRIQUE TEMPS RÉEL            -->
   <!-- ========================================================================= -->
-  <dialog id="neurovision-dialog" aria-labelledby="neurovision-dialog-title">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; border-bottom:1px solid rgba(0,243,255,0.18); padding-bottom:14px;">
+    <dialog id="neurovision-dialog" aria-labelledby="neurovision-dialog-title">
+    <div class="nv-header">
       <div>
-        <div style="font-family:var(--mono); font-size:10px; font-weight:700; color:var(--cyan); letter-spacing:0.12em;">M.O.C.T.A.R // COGNITIVE SCANNER</div>
-        <h2 id="neurovision-dialog-title" style="font-size:20px; font-weight:700; color:#fff; margin-top:2px; letter-spacing:-0.3px;">Scanner Visuel & Biomutationnel NeuroVision</h2>
-        <p style="font-size:11px; color:#8c9eb9; margin-top:4px;">Surveillance réelle de fatigue cognitive, fréquence des clignements, bâillements et posture.</p>
+        <div class="nv-title-badge">
+          <span class="nv-chip-dot"></span>
+          <span>M.O.C.T.A.R // COGNITIVE HOLOGRAPHIC SCANNER</span>
+          <span style="opacity:0.4;">|</span>
+          <span id="nv-source-badge" style="color:#ffffff;">WEBCAM DE CET ÉCRAN</span>
+        </div>
+        <h2 id="neurovision-dialog-title" class="nv-title-h2">Scanner Visuel & Biomutationnel NeuroVision 3D</h2>
+        <p class="nv-subtitle">Surveillance biométrique temps réel adaptative · Flux direct caméra locale ou serveur · Modélisation 3D</p>
       </div>
-      <button type="button" class="live-metrics-close" data-close aria-label="Fermer (Échap)" style="background:transparent; border:none; color:#8c9eb9; font-size:20px; cursor:pointer; padding:4px 8px; border-radius:6px; transition:color .2s;">✕</button>
+      <button type="button" class="nv-close-btn" data-close aria-label="Fermer (Échap)">✕</button>
     </div>
 
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:20px; align-items:start;">
-      <!-- Colonne GAUCHE: Vidéo & Contrôles Caméra -->
-      <div style="display:flex; flex-direction:column; gap:12px;">
-        <div style="position:relative; width:100%; border-radius:14px; overflow:hidden; border:2px solid rgba(0,243,255,0.35); background:#060c15; box-shadow:0 8px 30px rgba(0,0,0,0.6);">
-          <img id="nv-video-feed" src="/api/vision/stream" alt="Flux NeuroVision" style="width:100%; height:auto; display:block; min-height:240px; object-fit:cover; background:#040810;" />
-          <div id="nv-stream-chip" style="position:absolute; top:12px; left:12px; padding:4px 10px; border-radius:20px; background:rgba(0,0,0,0.75); border:1px solid rgba(0,243,255,0.4); font-family:var(--mono); font-size:10px; font-weight:700; color:#00f3ff; display:flex; align-items:center; gap:6px;">
-            <span style="width:7px; height:7px; border-radius:50%; background:#00f3ff; display:inline-block;"></span>
-            <span id="nv-stream-status-text">EN VEILLE</span>
-          </div>
-          <div id="nv-fps-tag" style="position:absolute; top:12px; right:12px; padding:4px 8px; border-radius:6px; background:rgba(0,0,0,0.65); font-family:var(--mono); font-size:10px; color:#8c9eb9;">
-            0 FPS
+    <div class="nv-grid">
+      <!-- Colonne GAUCHE: Viewport Vidéo & Réticules Sci-Fi -->
+      <div style="display:flex; flex-direction:column;">
+        <div class="nv-viewport-card">
+          <!-- Flux Vidéo Local (PC Client de Moctar) -->
+          <video id="nv-client-video" class="nv-media-element" autoplay playsinline muted style="display:none; transform:scaleX(-1);"></video>
+          <!-- Flux Vidéo de Secours Serveur -->
+          <img id="nv-server-feed" class="nv-media-element" src="/api/vision/stream" alt="Flux NeuroVision" />
+
+          <!-- Overlays Holographiques 3D Sci-Fi -->
+          <div class="nv-hud-overlay">
+            <div class="nv-corner tl"></div>
+            <div class="nv-corner tr"></div>
+            <div class="nv-corner bl"></div>
+            <div class="nv-corner br"></div>
+            <div class="nv-laser-scan"></div>
+            <div class="nv-reticle">
+              <div class="nv-reticle-inner"></div>
+              <div class="nv-reticle-label">LOCK: MOCTAR</div>
+            </div>
+            <div class="nv-viewport-top-bar">
+              <div class="nv-chip">
+                <span class="nv-chip-dot"></span>
+                <span id="nv-stream-status-text">CAMÉRA LOCALE ACTIVE</span>
+              </div>
+              <div id="nv-fps-tag" class="nv-chip">30 FPS</div>
+            </div>
           </div>
         </div>
 
-        <!-- Commandes de Contrôle Caméra -->
-        <div style="display:flex; gap:10px;">
-          <button type="button" id="nv-toggle-btn" class="button primary" style="flex:1; padding:12px 16px; font-weight:700; font-size:11px;">
-            📷 ACTIVER LA CAMÉRA
+        <!-- Commandes de Contrôle Caméra Adaptative -->
+        <div class="nv-controls-bar">
+          <button type="button" id="nv-toggle-btn" class="nv-btn primary" style="flex:1;">
+            📷 ACTIVER LA CAMÉRA DE CET ÉCRAN
           </button>
-          <button type="button" id="nv-reset-btn" class="button" style="padding:12px 16px; font-weight:600; font-size:11px;" title="Remettre à zéro les compteurs">
-            🔄 RESET
+          <button type="button" id="nv-switch-source-btn" class="nv-btn" title="Basculer entre la caméra de cet écran et celle du serveur">
+            🔄 SOURCE
+          </button>
+          <button type="button" id="nv-reset-btn" class="nv-btn" title="Remettre à zéro les compteurs">
+            ⚡ RESET
           </button>
         </div>
       </div>
 
-      <!-- Colonne DROITE: Télémétrie & Détections Réelles -->
-      <div style="display:flex; flex-direction:column; gap:14px;">
-        <!-- Carte 1: État Cognitif Global -->
-        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(0,243,255,0.2); border-radius:14px; padding:16px;">
-          <div style="font-family:var(--mono); font-size:10px; color:#8c9eb9; letter-spacing:0.08em; margin-bottom:8px;">ÉTAT COGNITIF EN DIRECT</div>
-          <div id="nv-state-display" style="font-size:22px; font-weight:800; text-align:center; padding:12px; border-radius:10px; background:rgba(0,243,255,0.08); border:1px solid rgba(0,243,255,0.3); color:#00f3ff; letter-spacing:0.05em; transition:all .3s;">
-            NORMAL
+      <!-- Colonne DROITE: Digital Twin 3D & Télémétrie Biométrique -->
+      <div class="nv-side-col">
+        <!-- 1. Digital Twin 3D : Tête Filaire Gyroscopique -->
+        <div class="nv-cyber-card">
+          <div class="nv-card-head">
+            <span>ORIENTATION 3D TEMPS RÉEL (DIGITAL TWIN)</span>
+            <span style="color:var(--nv-cyan);">ACCÉLÉRATION GPU</span>
           </div>
-          
-          <!-- Jauge de fatigue -->
-          <div style="margin-top:14px;">
-            <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:6px;">
-              <span style="color:#bdcde1;">Score de Fatigue Multi-facteurs</span>
-              <strong id="nv-fatigue-pct" style="color:#00f3ff; font-family:var(--mono);">0%</strong>
+          <div class="nv-3d-wrapper">
+            <canvas id="nv-3d-canvas" width="360" height="190"></canvas>
+          </div>
+          <div class="nv-gyro-readout">
+            <div class="nv-gyro-box">
+              <span>YAW (INCLINAISON)</span>
+              <strong id="nv-yaw-angle">0.0°</strong>
             </div>
-            <div style="width:100%; height:10px; background:#0b1320; border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,0.08);">
-              <div id="nv-fatigue-bar" style="width:0%; height:100%; background:linear-gradient(90deg, #00f3ff, #00ff88); border-radius:6px; transition:width .4s ease, background .4s ease;"></div>
+            <div class="nv-gyro-box">
+              <span>ROLL (AFFAISSEMENT)</span>
+              <strong id="nv-roll-angle">0.0°</strong>
             </div>
           </div>
         </div>
 
-        <!-- Carte 2: Grille 2x2 des Capteurs Biomutationnels -->
-        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:10px;">
-          <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; text-align:center;">
-            <div style="font-size:10px; color:#8c9eb9;">Clignements</div>
-            <div id="nv-blink-count" style="font-size:22px; font-weight:700; color:#00f3ff; font-family:var(--mono); margin:4px 0;">0</div>
-            <div style="font-size:9px; color:#64748b;"><span id="nv-blink-rate">0</span> / min</div>
+        <!-- 2. État Cognitif, Jauge Radiale & Onde Cardiaque/EEG -->
+        <div class="nv-cyber-card">
+          <div class="nv-card-head">
+            <span>CHARGE COGNITIVE & BIOMÉTRIE</span>
+            <span id="nv-presence-status" style="color:#00ff88;">VERROUILLÉ</span>
+          </div>
+          <div class="nv-fatigue-section">
+            <div class="nv-radial-box">
+              <svg class="nv-radial-svg" viewBox="0 0 74 74">
+                <circle class="nv-radial-bg" cx="37" cy="37" r="30"></circle>
+                <circle id="nv-radial-stroke" class="nv-radial-fill" cx="37" cy="37" r="30"></circle>
+              </svg>
+              <div class="nv-radial-center">
+                <span id="nv-radial-score-text">0%</span>
+              </div>
+            </div>
+            <div class="nv-fatigue-text">
+              <div id="nv-state-display" class="nv-state-pill">NORMAL</div>
+              <div style="font-size:10px; color:#7e9bbd;">Score de fatigue multi-facteurs en direct</div>
+            </div>
           </div>
 
-          <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; text-align:center;">
-            <div style="font-size:10px; color:#8c9eb9;">Bâillements</div>
-            <div id="nv-yawn-count" style="font-size:22px; font-weight:700; color:#ffb700; font-family:var(--mono); margin:4px 0;">0</div>
-            <div style="font-size:9px; color:#64748b;">Détectés réels</div>
-          </div>
-
-          <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; text-align:center;">
-            <div style="font-size:10px; color:#8c9eb9;">Inclinaison (Yaw)</div>
-            <div id="nv-yaw-angle" style="font-size:20px; font-weight:700; color:#bdcde1; font-family:var(--mono); margin:4px 0;">0.0°</div>
-            <div style="font-size:9px; color:#64748b;">Axe horizontal</div>
-          </div>
-
-          <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; text-align:center;">
-            <div style="font-size:10px; color:#8c9eb9;">Affaissement (Roll)</div>
-            <div id="nv-roll-angle" style="font-size:20px; font-weight:700; color:#bdcde1; font-family:var(--mono); margin:4px 0;">0.0°</div>
-            <div style="font-size:9px; color:#64748b;">Posture cou/tête</div>
+          <!-- Oscilloscope Onde Cérébrale / Cardiaque -->
+          <div class="nv-wave-box">
+            <canvas id="nv-wave-canvas" width="360" height="48"></canvas>
           </div>
         </div>
 
-        <!-- Carte 3: Métadonnées & Présence -->
-        <div style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.05); border-radius:10px; padding:12px; font-size:11px; display:flex; flex-direction:column; gap:6px;">
-          <div style="display:flex; justify-content:space-between;">
-            <span style="color:#8c9eb9;">Présence Physique :</span>
-            <strong id="nv-presence-status" style="color:#64748b;">EN ATTENTE</strong>
+        <!-- 3. Grille Métriques Clignements / Bâillements / Durée -->
+        <div class="nv-cyber-card">
+          <div class="nv-stat-grid">
+            <div class="nv-stat-box">
+              <div class="nv-stat-label">CLIGNEMENTS</div>
+              <div id="nv-blink-count" class="nv-stat-val">0</div>
+              <div class="nv-stat-sub"><span id="nv-blink-rate">0</span> / min</div>
+            </div>
+            <div class="nv-stat-box">
+              <div class="nv-stat-label">BÂILLEMENTS</div>
+              <div id="nv-yawn-count" class="nv-stat-val" style="color:#ffb700;">0</div>
+              <div class="nv-stat-sub">Détectés réels</div>
+            </div>
           </div>
-          <div style="display:flex; justify-content:space-between;">
-            <span style="color:#8c9eb9;">Durée Session :</span>
-            <span id="nv-session-duration" style="font-family:var(--mono);">0s</span>
-          </div>
-          <div style="display:flex; justify-content:space-between;">
-            <span style="color:#8c9eb9;">Statut Matériel :</span>
-            <span id="nv-cam-status" style="font-family:var(--mono); color:#8c9eb9;">Prêt</span>
+          <div class="nv-meta-strip" style="margin-top:10px;">
+            <span>Durée de surveillance :</span>
+            <strong id="nv-session-duration">0m 0s</strong>
           </div>
         </div>
       </div>
@@ -2860,181 +2892,8 @@
       window.addEventListener('pagehide', () => { if (state.stream) state.stream.close(); });
       (async () => { await loadSnapshot(); startStream(); })();
     })();
-    // ---------------------------------------------------------------------
-    // CONTRÔLEUR SCANNER COGNITIF NEUROVISION
-    // ---------------------------------------------------------------------
-    (() => {
-      const dialog = document.getElementById('neurovision-dialog');
-      const toggleBtn = document.getElementById('nv-toggle-btn');
-      const resetBtn = document.getElementById('nv-reset-btn');
-      const feedImg = document.getElementById('nv-video-feed');
-      let pollTimer = null;
-
-      async function fetchVision() {
-        try {
-          const res = await fetch('/api/vision/metrics');
-          if (!res.ok) return;
-          const m = await res.json();
-          updateUI(m);
-        } catch (e) {
-          console.debug('Vision fetch err', e);
-        }
-      }
-
-      function updateUI(m) {
-        if (!m) return;
-        const active = !!m.active;
-
-        if (toggleBtn) {
-          toggleBtn.textContent = active ? '🛑 COUPER LA CAMÉRA' : '📷 ACTIVER LA CAMÉRA';
-          if (active) {
-            toggleBtn.classList.remove('primary');
-            toggleBtn.classList.add('danger');
-          } else {
-            toggleBtn.classList.remove('danger');
-            toggleBtn.classList.add('primary');
-          }
-        }
-
-        const chip = document.getElementById('nv-stream-chip');
-        const chipText = document.getElementById('nv-stream-status-text');
-        if (chip && chipText) {
-          chipText.textContent = active ? '● EN DIRECT' : '○ EN VEILLE';
-          chip.style.borderColor = active ? 'rgba(0, 255, 136, 0.5)' : 'rgba(0, 243, 255, 0.4)';
-          chip.style.color = active ? '#00ff88' : '#00f3ff';
-        }
-
-        const fpsTag = document.getElementById('nv-fps-tag');
-        if (fpsTag) fpsTag.textContent = (m.measured_fps || 0) + ' FPS';
-
-        const stateDisplay = document.getElementById('nv-state-display');
-        const level = m.fatigue_level || 'Normal';
-        if (stateDisplay) {
-          stateDisplay.textContent = level.toUpperCase();
-          if (level.includes('Sévère')) {
-            stateDisplay.style.background = 'rgba(255, 51, 102, 0.2)';
-            stateDisplay.style.borderColor = '#ff3366';
-            stateDisplay.style.color = '#ff6688';
-          } else if (level.includes('Fatigué')) {
-            stateDisplay.style.background = 'rgba(255, 153, 0, 0.2)';
-            stateDisplay.style.borderColor = '#ff9900';
-            stateDisplay.style.color = '#ffb700';
-          } else if (level.includes('Distrait')) {
-            stateDisplay.style.background = 'rgba(217, 0, 255, 0.2)';
-            stateDisplay.style.borderColor = '#d900ff';
-            stateDisplay.style.color = '#e066ff';
-          } else {
-            stateDisplay.style.background = 'rgba(0, 243, 255, 0.08)';
-            stateDisplay.style.borderColor = 'rgba(0, 243, 255, 0.3)';
-            stateDisplay.style.color = '#00f3ff';
-          }
-        }
-
-        const score = m.fatigue_score || 0;
-        const fatVal = document.getElementById('nv-fatigue-pct');
-        const fatBar = document.getElementById('nv-fatigue-bar');
-        if (fatVal) fatVal.textContent = score + '%';
-        if (fatBar) {
-          fatBar.style.width = Math.min(100, Math.max(0, score)) + '%';
-          if (score >= 70) {
-            fatBar.style.background = 'linear-gradient(90deg, #ff9900, #ff3366)';
-          } else if (score >= 40) {
-            fatBar.style.background = 'linear-gradient(90deg, #00f3ff, #ffb700)';
-          } else {
-            fatBar.style.background = 'linear-gradient(90deg, #00f3ff, #00ff88)';
-          }
-        }
-
-        const bCount = document.getElementById('nv-blink-count');
-        if (bCount) bCount.textContent = m.blink_count || 0;
-        const bRate = document.getElementById('nv-blink-rate');
-        if (bRate) bRate.textContent = m.blink_rate_per_min || 0;
-        const yCount = document.getElementById('nv-yawn-count');
-        if (yCount) yCount.textContent = m.yawn_count || 0;
-        const yAngle = document.getElementById('nv-yaw-angle');
-        if (yAngle) yAngle.textContent = (m.head_tilt_yaw || 0) + '°';
-        const rAngle = document.getElementById('nv-roll-angle');
-        if (rAngle) rAngle.textContent = (m.head_roll || 0) + '°';
-
-        const presStatus = document.getElementById('nv-presence-status');
-        if (presStatus) {
-          if (!active) {
-            presStatus.textContent = 'VEILLE';
-            presStatus.style.color = '#8c9eb9';
-          } else if (m.user_present) {
-            presStatus.textContent = 'PRÉSENT (DÉTECTÉ)';
-            presStatus.style.color = '#00ff88';
-          } else {
-            presStatus.textContent = 'ABSENT / HORS CHAMP';
-            presStatus.style.color = '#ff9900';
-          }
-        }
-
-        const durVal = document.getElementById('nv-session-duration');
-        if (durVal) {
-          const s = m.session_duration_seconds || 0;
-          const min = Math.floor(s / 60);
-          const sec = s % 60;
-          durVal.textContent = min + 'm ' + sec + 's';
-        }
-
-        const camStatus = document.getElementById('nv-cam-status');
-        if (camStatus) {
-          camStatus.textContent = m.camera_connected ? 'Active (Webcam connectée)' : (active ? 'Simulation / Dégradé' : 'Prête en veille');
-        }
-      }
-
-      if (dialog) {
-        const obs = new MutationObserver(() => {
-          if (dialog.open) {
-            if (feedImg) feedImg.src = '/api/vision/stream?t=' + Date.now();
-            fetchVision();
-            if (!pollTimer) pollTimer = setInterval(fetchVision, 1000);
-          } else {
-            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-          }
-        });
-        obs.observe(dialog, { attributes: true, attributeFilter: ['open'] });
-      }
-
-      if (toggleBtn) {
-        toggleBtn.addEventListener('click', async () => {
-          try {
-            toggleBtn.disabled = true;
-            const res = await fetch('/api/vision/toggle', { method: 'POST' });
-            if (res.ok) {
-              const data = await res.json();
-              updateUI(data.metrics);
-              if (feedImg) feedImg.src = '/api/vision/stream?t=' + Date.now();
-              if (typeof toast === 'function') {
-                toast(data.active ? 'Caméra NeuroVision activée' : 'Caméra NeuroVision en veille', 'success');
-              }
-            }
-          } catch (err) {
-            console.error('Toggle error:', err);
-          } finally {
-            toggleBtn.disabled = false;
-          }
-        });
-      }
-
-      if (resetBtn) {
-        resetBtn.addEventListener('click', async () => {
-          try {
-            resetBtn.disabled = true;
-            await fetch('/api/vision/reset', { method: 'POST' });
-            setTimeout(fetchVision, 200);
-            if (typeof toast === 'function') {
-              toast('Compteurs NeuroVision réinitialisés', 'success');
-            }
-          } catch (err) {
-            console.error('Reset error:', err);
-          } finally {
-            resetBtn.disabled = false;
-          }
-        });
-      }
-    })();
+    // CONTRÔLEUR 3D HOLOGRAPHIQUE NEUROVISION
   </script>
+  <script src="/static/neurovision_hud.js?v=3.0"></script>
 </body>
 </html>

@@ -86,6 +86,19 @@ def test_fastapi_vision_routes_registered():
     assert "/api/vision/stream" in routes
     assert "/api/vision/toggle" in routes
     assert "/api/vision/reset" in routes
+    assert "/api/vision/frame" in routes
+
+
+def test_analyze_client_frame_processing():
+    """Vérifie le traitement d'une frame transmise par un client distant (PC de Moctar)."""
+    from vision_engine import VisionEngine, get_standby_jpeg_bytes
+    engine = VisionEngine.get_instance()
+    jpeg_bytes = get_standby_jpeg_bytes()
+    metrics = engine.analyze_client_frame(jpeg_bytes)
+    assert metrics["active"] is True
+    assert metrics.get("source") == "client_webcam"
+    assert "fatigue_score" in metrics
+    assert "blink_count" in metrics
 
 
 def test_standby_jpeg_bytes_is_valid_jpeg():

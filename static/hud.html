@@ -501,6 +501,7 @@
       font-family: var(--font-sans);
     }
   </style>
+  <link rel="stylesheet" href="/static/neurovision_hud.css?v=3.0">
 </head>
 <body>
   <!-- Conteneur 3D WebGL (Three.js) -->
@@ -612,91 +613,139 @@
   <!-- ========================================================================= -->
   <!-- MODAL HOLOGRAPHIQUE NEUROVISION POUR LE HUD 3D                           -->
   <!-- ========================================================================= -->
+  <!-- ========================================================================= -->
+  <!-- MODAL HOLOGRAPHIQUE NEUROVISION POUR LE HUD 3D (3D ULTRA-CINÉMATIQUE)     -->
+  <!-- ========================================================================= -->
   <div id="hud-neurovision-overlay" class="hud-modal-overlay">
-    <div class="hud-modal-card">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; border-bottom:1px solid rgba(0,243,255,0.2); padding-bottom:14px;">
-        <div>
-          <div style="font-family:var(--font-mono); font-size:10px; font-weight:700; color:var(--cyan); letter-spacing:0.12em;">M.O.C.T.A.R // COGNITIVE CORE HUD</div>
-          <h2 style="font-size:20px; font-weight:700; color:#fff; margin-top:2px;">Scanner Visuel & Biomutationnel NeuroVision</h2>
-          <p style="font-size:11px; color:#8c9eb9; margin-top:4px;">Surveillance biométrique temps réel : fatigue, clignements, bâillements et posture.</p>
-        </div>
-        <button type="button" id="hud-nv-close-btn" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); color:#8c9eb9; font-size:18px; cursor:pointer; width:34px; height:34px; border-radius:8px; display:grid; place-items:center; transition:all .2s;">✕</button>
-      </div>
-
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:20px; align-items:start;">
-        <!-- Colonne Gauche: Flux Vidéo -->
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div style="position:relative; width:100%; border-radius:14px; overflow:hidden; border:2px solid rgba(0,243,255,0.35); background:#060c15; box-shadow:0 8px 30px rgba(0,0,0,0.6);">
-            <img id="hud-nv-video-feed" src="/api/vision/stream" alt="Flux NeuroVision" style="width:100%; height:auto; display:block; min-height:240px; object-fit:cover; background:#040810;" />
-            <div id="hud-nv-stream-chip" style="position:absolute; top:12px; left:12px; padding:4px 10px; border-radius:20px; background:rgba(0,0,0,0.75); border:1px solid rgba(0,243,255,0.4); font-family:var(--font-mono); font-size:10px; font-weight:700; color:#00f3ff; display:flex; align-items:center; gap:6px;">
-              <span style="width:7px; height:7px; border-radius:50%; background:#00f3ff; display:inline-block;"></span>
-              <span id="hud-nv-status-text">EN VEILLE</span>
+    <div class="hud-modal-card" style="max-width: 1040px; width: 95vw; max-height: 90vh; overflow-y: auto; padding: 0; background: transparent; border: none; box-shadow: none;">
+      <div id="neurovision-dialog" style="display:block; position:relative; width:100%; border-radius:16px; margin:0;">
+        <div class="nv-header">
+          <div>
+            <div class="nv-title-badge">
+              <span class="nv-chip-dot"></span>
+              <span>M.O.C.T.A.R // COGNITIVE HOLOGRAPHIC SCANNER</span>
+              <span style="opacity:0.4;">|</span>
+              <span id="nv-source-badge" style="color:#ffffff;">WEBCAM DE CET ÉCRAN</span>
             </div>
-            <div id="hud-nv-fps-tag" style="position:absolute; top:12px; right:12px; padding:4px 8px; border-radius:6px; background:rgba(0,0,0,0.65); font-family:var(--font-mono); font-size:10px; color:#8c9eb9;">
-              0 FPS
-            </div>
+            <h2 id="neurovision-dialog-title" class="nv-title-h2">Scanner Visuel & Biomutationnel NeuroVision 3D</h2>
+            <p class="nv-subtitle">Surveillance biométrique temps réel adaptative · Flux direct caméra locale ou serveur · Modélisation 3D</p>
           </div>
-
-          <div style="display:flex; gap:10px;">
-            <button type="button" id="hud-nv-toggle-btn" class="mode-pill active" style="flex:1; justify-content:center; padding:12px; font-size:11px;">
-              📷 ACTIVER LA CAMÉRA
-            </button>
-            <button type="button" id="hud-nv-reset-btn" class="mode-pill" style="justify-content:center; padding:12px 16px; font-size:11px;">
-              🔄 RESET
-            </button>
-          </div>
+          <button type="button" id="hud-nv-close-btn" class="nv-close-btn" aria-label="Fermer">✕</button>
         </div>
 
-        <!-- Colonne Droite: Métriques -->
-        <div style="display:flex; flex-direction:column; gap:14px;">
-          <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(0,243,255,0.2); border-radius:14px; padding:16px;">
-            <div style="font-family:var(--font-mono); font-size:10px; color:#8c9eb9; margin-bottom:8px;">ÉTAT COGNITIF EN DIRECT</div>
-            <div id="hud-nv-state-display" style="font-size:22px; font-weight:800; text-align:center; padding:12px; border-radius:10px; background:rgba(0,243,255,0.08); border:1px solid rgba(0,243,255,0.3); color:#00f3ff; letter-spacing:0.05em;">
-              NORMAL
+        <div class="nv-grid">
+          <!-- Colonne GAUCHE: Viewport Vidéo & Réticules Sci-Fi -->
+          <div style="display:flex; flex-direction:column;">
+            <div class="nv-viewport-card">
+              <!-- Flux Vidéo Local (PC Client de Moctar) -->
+              <video id="nv-client-video" class="nv-media-element" autoplay playsinline muted style="display:none; transform:scaleX(-1);"></video>
+              <!-- Flux Vidéo de Secours Serveur -->
+              <img id="nv-server-feed" class="nv-media-element" src="/api/vision/stream" alt="Flux NeuroVision" />
+
+              <!-- Overlays Holographiques 3D Sci-Fi -->
+              <div class="nv-hud-overlay">
+                <div class="nv-corner tl"></div>
+                <div class="nv-corner tr"></div>
+                <div class="nv-corner bl"></div>
+                <div class="nv-corner br"></div>
+                <div class="nv-laser-scan"></div>
+                <div class="nv-reticle">
+                  <div class="nv-reticle-inner"></div>
+                  <div class="nv-reticle-label">LOCK: MOCTAR</div>
+                </div>
+                <div class="nv-viewport-top-bar">
+                  <div class="nv-chip">
+                    <span class="nv-chip-dot"></span>
+                    <span id="nv-stream-status-text">CAMÉRA LOCALE ACTIVE</span>
+                  </div>
+                  <div id="nv-fps-tag" class="nv-chip">30 FPS</div>
+                </div>
+              </div>
             </div>
-            
-            <div style="margin-top:14px;">
-              <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:6px;">
-                <span style="color:#bdcde1;">Score de Fatigue Multi-facteurs</span>
-                <strong id="hud-nv-fatigue-pct" style="color:#00f3ff; font-family:var(--font-mono);">0%</strong>
-              </div>
-              <div style="width:100%; height:10px; background:#0b1320; border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,0.08);">
-                <div id="hud-nv-fatigue-bar" style="width:0%; height:100%; background:linear-gradient(90deg, #00f3ff, #00ff88); border-radius:6px; transition:width .4s ease;"></div>
-              </div>
+
+            <!-- Commandes de Contrôle Caméra Adaptative -->
+            <div class="nv-controls-bar">
+              <button type="button" id="nv-toggle-btn" class="nv-btn primary" style="flex:1;">
+                📷 ACTIVER LA CAMÉRA DE CET ÉCRAN
+              </button>
+              <button type="button" id="nv-switch-source-btn" class="nv-btn" title="Basculer entre la caméra de cet écran et celle du serveur">
+                🔄 SOURCE
+              </button>
+              <button type="button" id="nv-reset-btn" class="nv-btn" title="Remettre à zéro les compteurs">
+                ⚡ RESET
+              </button>
             </div>
           </div>
 
-          <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:10px;">
-            <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; text-align:center;">
-              <div style="font-size:10px; color:#8c9eb9;">Clignements</div>
-              <div id="hud-nv-blink-count" style="font-size:22px; font-weight:700; color:#00f3ff; font-family:var(--font-mono); margin:4px 0;">0</div>
-              <div style="font-size:9px; color:#64748b;"><span id="hud-nv-blink-rate">0</span> / min</div>
+          <!-- Colonne DROITE: Digital Twin 3D & Télémétrie Biométrique -->
+          <div class="nv-side-col">
+            <!-- 1. Digital Twin 3D : Tête Filaire Gyroscopique -->
+            <div class="nv-cyber-card">
+              <div class="nv-card-head">
+                <span>ORIENTATION 3D TEMPS RÉEL (DIGITAL TWIN)</span>
+                <span style="color:var(--nv-cyan);">ACCÉLÉRATION GPU</span>
+              </div>
+              <div class="nv-3d-wrapper">
+                <canvas id="nv-3d-canvas" width="360" height="190"></canvas>
+              </div>
+              <div class="nv-gyro-readout">
+                <div class="nv-gyro-box">
+                  <span>YAW (INCLINAISON)</span>
+                  <strong id="nv-yaw-angle">0.0°</strong>
+                </div>
+                <div class="nv-gyro-box">
+                  <span>ROLL (AFFAISSEMENT)</span>
+                  <strong id="nv-roll-angle">0.0°</strong>
+                </div>
+              </div>
             </div>
-            <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; text-align:center;">
-              <div style="font-size:10px; color:#8c9eb9;">Bâillements</div>
-              <div id="hud-nv-yawn-count" style="font-size:22px; font-weight:700; color:#ffb700; font-family:var(--font-mono); margin:4px 0;">0</div>
-              <div style="font-size:9px; color:#64748b;">Détectés réels</div>
-            </div>
-            <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; text-align:center;">
-              <div style="font-size:10px; color:#8c9eb9;">Inclinaison Tête (Yaw)</div>
-              <div id="hud-nv-yaw-angle" style="font-size:20px; font-weight:700; color:#bdcde1; font-family:var(--font-mono); margin:4px 0;">0.0°</div>
-              <div style="font-size:9px; color:#64748b;">Axe horizontal</div>
-            </div>
-            <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; text-align:center;">
-              <div style="font-size:10px; color:#8c9eb9;">Affaissement (Roll)</div>
-              <div id="hud-nv-roll-angle" style="font-size:20px; font-weight:700; color:#bdcde1; font-family:var(--font-mono); margin:4px 0;">0.0°</div>
-              <div style="font-size:9px; color:#64748b;">Posture cou/tête</div>
-            </div>
-          </div>
 
-          <div style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.05); border-radius:10px; padding:12px; font-size:11px; display:flex; flex-direction:column; gap:6px;">
-            <div style="display:flex; justify-content:space-between;">
-              <span style="color:#8c9eb9;">Présence Physique :</span>
-              <strong id="hud-nv-presence-status" style="color:#64748b;">EN ATTENTE</strong>
+            <!-- 2. État Cognitif, Jauge Radiale & Onde Cardiaque/EEG -->
+            <div class="nv-cyber-card">
+              <div class="nv-card-head">
+                <span>CHARGE COGNITIVE & BIOMÉTRIE</span>
+                <span id="nv-presence-status" style="color:#00ff88;">VERROUILLÉ</span>
+              </div>
+              <div class="nv-fatigue-section">
+                <div class="nv-radial-box">
+                  <svg class="nv-radial-svg" viewBox="0 0 74 74">
+                    <circle class="nv-radial-bg" cx="37" cy="37" r="30"></circle>
+                    <circle id="nv-radial-stroke" class="nv-radial-fill" cx="37" cy="37" r="30"></circle>
+                  </svg>
+                  <div class="nv-radial-center">
+                    <span id="nv-radial-score-text">0%</span>
+                  </div>
+                </div>
+                <div class="nv-fatigue-text">
+                  <div id="nv-state-display" class="nv-state-pill">NORMAL</div>
+                  <div style="font-size:10px; color:#7e9bbd;">Score de fatigue multi-facteurs en direct</div>
+                </div>
+              </div>
+
+              <!-- Oscilloscope Onde Cérébrale / Cardiaque -->
+              <div class="nv-wave-box">
+                <canvas id="nv-wave-canvas" width="360" height="48"></canvas>
+              </div>
             </div>
-            <div style="display:flex; justify-content:space-between;">
-              <span style="color:#8c9eb9;">Durée Session :</span>
-              <span id="hud-nv-session-duration" style="font-family:var(--font-mono);">0s</span>
+
+            <!-- 3. Grille Métriques Clignements / Bâillements / Durée -->
+            <div class="nv-cyber-card">
+              <div class="nv-stat-grid">
+                <div class="nv-stat-box">
+                  <div class="nv-stat-label">CLIGNEMENTS</div>
+                  <div id="nv-blink-count" class="nv-stat-val">0</div>
+                  <div class="nv-stat-sub"><span id="nv-blink-rate">0</span> / min</div>
+                </div>
+                <div class="nv-stat-box">
+                  <div class="nv-stat-label">BÂILLEMENTS</div>
+                  <div id="nv-yawn-count" class="nv-stat-val" style="color:#ffb700;">0</div>
+                  <div class="nv-stat-sub">Détectés réels</div>
+                </div>
+              </div>
+              <div class="nv-meta-strip" style="margin-top:10px;">
+                <span>Durée de surveillance :</span>
+                <strong id="nv-session-duration">0m 0s</strong>
+              </div>
             </div>
           </div>
         </div>
@@ -817,5 +866,6 @@
       }
     })();
   </script>
+  <script src="/static/neurovision_hud.js?v=3.0"></script>
 </body>
 </html>

@@ -1766,6 +1766,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             LOGGER.warning("Avertissement reset vision: %s", exc)
             return JSONResponse({"status": "error", "message": str(exc)}, status_code=200)
 
+    @application.post("/api/vision/frame")
+    async def process_client_vision_frame(request: Request):
+        """Reçoit et analyse une frame vidéo transmise en direct par le navigateur client (PC de Moctar)."""
+        try:
+            body = await request.body()
+            if not body:
+                return JSONResponse({"status": "empty_frame"}, status_code=400)
+
+            content_type = request.headers.get("content-type", "")
+            if "application/json" in content_type:
+                data = await request.json()
+                raw_b64 = data.get("image", "")
+                if "," in raw_b64:
+                    raw_b64 = raw_b64.split(",", 1)[1]
+                import base64
+                frame_bytes = base64.b64decode(raw_b64)
+            else:
+                frame_bytes = body
+
+            from vision_engine import VisionEngine
+            metrics = VisionEngine.get_instance().analyze_client_frame(frame_bytes)
+            return JSONResponse(metrics)
+        except Exception as exc:
+            LOGGER.warning("Avertissement réception frame vision client: %s", exc)
+            return JSONResponse({"error": str(exc), "active": True}, status_code=200)
+
     @application.get("/static/live_metrics.js")
     async def live_metrics_script():
         return FileResponse(BASE_DIR / "static" / "live_metrics.js", media_type="application/javascript")
@@ -1773,6 +1799,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/static/live_metrics.css")
     async def live_metrics_styles():
         return FileResponse(BASE_DIR / "static" / "live_metrics.css", media_type="text/css")
+
+    @application.get("/static/neurovision_hud.js")
+    async def neurovision_hud_script():
+        return FileResponse(BASE_DIR / "static" / "neurovision_hud.js", media_type="application/javascript")
+
+    @application.get("/static/neurovision_hud.css")
+    async def neurovision_hud_styles():
+        return FileResponse(BASE_DIR / "static" / "neurovision_hud.css", media_type="text/css")
 
     @application.get("/static/cosmos.js")
     async def cosmos_script():

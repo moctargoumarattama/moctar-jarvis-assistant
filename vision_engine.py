@@ -241,6 +241,51 @@ class VisionEngine:
             return False
         return self.face_detected and (time.time() - self.last_face_seen_time < timeout_seconds)
 
+    def analyze_client_frame(self, frame_bytes: bytes) -> Dict[str, Any]:
+        """Analyse biométrique d'une frame transmise en temps réel par le navigateur client (PC, mobile).
+
+        Permet à n'importe quel ordinateur connecté à Jarvis (ex: PC portable de Moctar)
+        d'utiliser sa propre webcam locale tout en bénéficiant de l'analyse cognitive
+        centralisée sur le serveur Jarvis.
+        """
+        with self._state_lock:
+            self._running = True
+            self.last_update = time.time()
+
+        if not CV2_AVAILABLE or cv2 is None or not NUMPY_AVAILABLE or np is None:
+            # Mode sans OpenCV sur le serveur : présence confirmée par le flux actif du client
+            self.last_face_seen_time = time.time()
+            self.face_detected = True
+            self._update_metrics(True)
+            metrics = self.get_metrics()
+            metrics["source"] = "client_webcam"
+            return metrics
+
+        try:
+            nparr = np.frombuffer(frame_bytes, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if frame is None or getattr(frame, "size", 0) == 0:
+                metrics = self.get_metrics()
+                metrics["source"] = "client_webcam"
+                return metrics
+
+            self.frame_count += 1
+            # Analyse réelle (Haar, EAR, MAR, Yaw, Roll)
+            processed_frame, face_found = self._process_frame(frame)
+
+            # Mise à jour de la mire JPEG pour le stream MJPEG et les observateurs
+            annotated = self._render_hud_overlay(processed_frame, face_found)
+            self._update_jpeg(annotated)
+
+            metrics = self.get_metrics()
+            metrics["source"] = "client_webcam"
+            return metrics
+        except Exception as exc:
+            LOGGER.warning("Erreur analyse frame client : %s", exc)
+            metrics = self.get_metrics()
+            metrics["source"] = "client_webcam"
+            return metrics
+
     def _open_camera(self) -> bool:
         """Ouvre la webcam avec les paramètres optimaux si cv2 est présent."""
         if not CV2_AVAILABLE or cv2 is None:
