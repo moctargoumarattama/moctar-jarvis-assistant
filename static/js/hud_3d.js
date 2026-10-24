@@ -1140,6 +1140,7 @@
           'Content-Type': 'application/json',
           'X-Voice-Session-Active': 'true',
         },
+        credentials: 'include',
         body: JSON.stringify({ text: query }),
       });
 
@@ -1149,10 +1150,22 @@
         return;
       }
 
+      if (res.status === 403) {
+        let msg = "Accès externe verrouillé : mot de passe requis.";
+        try {
+          const errData = await res.json();
+          if (errData && errData.detail) msg = errData.detail;
+        } catch (_) {}
+        if (assistantTextEl) assistantTextEl.textContent = msg;
+        handleVoiceStateChange(jarvisVoice && jarvisVoice.enabled ? 'wake' : 'off');
+        return;
+      }
+
       // Fallback sur /api/jarvis/query (endpoint NOC)
       const fallbackRes = await fetch('/api/jarvis/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ prompt: query, source: 'hud_web' }),
       });
       if (fallbackRes.ok) {

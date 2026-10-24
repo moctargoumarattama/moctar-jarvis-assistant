@@ -755,6 +755,7 @@
             'X-Voice-Session-Active': (phase === 'listening' || manual || isBargeInSend) ? 'true' : 'false',
             'X-Voice-Barge-In': isBargeInSend ? 'true' : 'false',
           },
+          credentials: 'include',
           body: blob,
         });
         if (!response || !response.ok) {

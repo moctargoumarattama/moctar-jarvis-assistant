@@ -78,3 +78,83 @@ def test_voice_transcribe_candidates_include_opt_jarvis():
     """Vérifie que le répertoire /opt/jarvis est bien inclus dans les chemins de recherche Whisper."""
     candidates = [str(c[0]) for c in voice_transcribe._candidates("base")]
     assert any("/opt/jarvis" in c or "\\opt\\jarvis" in c for c in candidates)
+
+
+def test_is_local_request_recognizes_lan_and_loopback():
+    """Vérifie que les IPs privées (LAN/Wi-Fi) et les adresses de boucle locale sont considérées locales."""
+    from starlette.requests import Request
+
+    def make_mock_request(client_host: str) -> Request:
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/voice/interact",
+            "headers": [(b"host", b"localhost:5050")],
+            "client": (client_host, 12345),
+        }
+        return Request(scope)
+
+    assert main.is_local_request(make_mock_request("127.0.0.1")) is True
+    assert main.is_local_request(make_mock_request("localhost")) is True
+    assert main.is_local_request(make_mock_request("::1")) is True
+    assert main.is_local_request(make_mock_request("192.168.1.50")) is True
+    assert main.is_local_request(make_mock_request("10.0.0.15")) is True
+    assert main.is_local_request(make_mock_request("172.20.10.5")) is True
+    # Une IP publique WAN externe ne doit PAS être considérée locale
+    assert main.is_local_request(make_mock_request("105.158.45.12")) is False
+
+
+def test_voice_interact_on_lan_returns_200_without_password():
+    """Vérifie qu'un terminal sur le réseau local LAN peut envoyer une commande comme 'cpu' sans être bloqué."""
+    from fastapi.testclient import TestClient
+
+    with TestClient(main.app, base_url="http://192.168.1.50:5050", client=("192.168.1.50", 50000)) as client_lan:
+        resp = client_lan.post(
+            "/api/voice/interact",
+            json={"text": "cpu"},
+            headers={
+                "Host": "192.168.1.50:5050",
+                "Origin": "http://192.168.1.50:5050",
+                "Sec-Fetch-Site": "same-origin",
+                "X-Voice-Session-Active": "true",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("ok") is True
+        assert "processeur" in data.get("reply_text", "").lower() or "système" in data.get("reply_text", "").lower()
+
+
+def test_voice_interact_on_wan_requires_external_password():
+    """Vérifie qu'une IP publique WAN externe exige le mot de passe Alkaline0702."""
+    from fastapi.testclient import TestClient
+
+    with TestClient(main.app, base_url="http://105.158.45.12:5050", client=("105.158.45.12", 50000)) as client_wan:
+        # Sans mot de passe -> 403
+        resp_locked = client_wan.post(
+            "/api/voice/interact",
+            json={"text": "cpu"},
+            headers={
+                "Host": "105.158.45.12:5050",
+                "Origin": "http://105.158.45.12:5050",
+                "Sec-Fetch-Site": "same-origin",
+                "X-Voice-Session-Active": "true",
+            },
+        )
+        assert resp_locked.status_code == 403
+
+        # Avec mot de passe Alkaline0702 -> 200
+        resp_unlocked = client_wan.post(
+            "/api/voice/interact",
+            json={"text": "cpu"},
+            headers={
+                "Host": "105.158.45.12:5050",
+                "Origin": "http://105.158.45.12:5050",
+                "Sec-Fetch-Site": "same-origin",
+                "X-Voice-Session-Active": "true",
+                "X-Moctar-Password": "Alkaline0702",
+            },
+        )
+        assert resp_unlocked.status_code == 200
+
+
