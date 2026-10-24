@@ -115,6 +115,8 @@ def test_frustration_reassurance_instant_reply():
         "tu ne me réponds pas",
         "J'ai l'impression que tu ne me comprends pas.",
         "pourquoi tu me réponds pas ?",
+        "Pourquoi tu ne me répondais pas depuis ?",
+        "Pourquoi tu me récompenses depuis ?",
     ]
     for q in queries:
         reply = main.handle_instant_local_command(q)
@@ -122,6 +124,21 @@ def test_frustration_reassurance_instant_reply():
         assert "Pardonne-moi Moctar" in reply
         assert "100%" in reply
         assert "mon ami" in reply
+
+
+def test_phonetic_repair_for_radio_and_identity():
+    """Vérifie que les approximations Whisper (T'es réçois, Je suis qui toi) sont réparées et acceptées directement."""
+    import stt_phonetic_repair
+
+    repaired, rules = stt_phonetic_repair.repair_stt_transcript("T'es réçois ?")
+    assert "tu me reçois" in repaired.lower()
+
+    repaired_id, _ = stt_phonetic_repair.repair_stt_transcript("Je suis qui toi ?")
+    assert "tu es qui toi" in repaired_id.lower()
+
+    # Doit être accepté comme commande directe même hors session
+    assert main.is_direct_voice_command("Tu me reçois ?") is True
+    assert main.is_direct_voice_command("T'es réçois ?") is True
 
 
 def test_jarvis_query_endpoint_intercepts_local_command_0ms(tmp_path: Path):

@@ -52,7 +52,7 @@ MOCTAR_SYSTEM_PROMPT = (
     "Pose spontanément une courte question de clarification dès qu'une intention est ouverte ou mérite d'être affinée."
 )
 PROVIDER_FAILURE_TTL_SECONDS = 30.0
-GEMINI_BACKUP_MODEL = "gemini-2.5-flash"
+GEMINI_BACKUP_MODEL = os.getenv("GEMINI_BACKUP_MODEL", "gemini-2.5-flash-lite")
 GEMINI_COURTESY_OFFLINE_REPLY = (
     "Je subis une micro-coupure de liaison avec le serveur neural, mais je reste en ligne Moctar."
 )
@@ -1657,14 +1657,31 @@ class AIBrain:
                                     response = _call_gemini_generate(GEMINI_BACKUP_MODEL, backup_config)
                                     active_model = GEMINI_BACKUP_MODEL
                                 except Exception as backup_exc:
-                                    if _is_gemini_503_or_server_error(backup_exc):
+                                    if _is_gemini_503_or_server_error(backup_exc) or "404" in str(backup_exc) or "not_found" in str(backup_exc).lower():
                                         logger.warning(
-                                            "Échec persistant du serveur Gemini (%s puis %s): %s. "
-                                            "Renvoi immédiat de la réponse de courtoisie vocale.",
+                                            "Échec du serveur Gemini (%s puis %s): %s. Tentative de secours Groq...",
                                             active_model,
                                             GEMINI_BACKUP_MODEL,
                                             backup_exc,
                                         )
+                                        try:
+                                            last_u = ""
+                                            for m in reversed(messages):
+                                                if m.get("role") == "user" and m.get("content"):
+                                                    last_u = str(m["content"])
+                                                    break
+                                            if last_u:
+                                                groq_res = voice_fast_llm_reply(last_u, system_prompt=system_instruction)
+                                                if groq_res and groq_res != GEMINI_COURTESY_OFFLINE_REPLY:
+                                                    logger.info("⚡ [GROQ LLM RESCUE (200ms)]: Secours immédiat suite à panne Gemini")
+                                                    return {
+                                                        "content": groq_res,
+                                                        "tool_calls": [],
+                                                        "finish_reason": "stop",
+                                                        "fallback_courtesy": False,
+                                                    }
+                                        except Exception:
+                                            pass
                                         return {
                                             "content": GEMINI_COURTESY_OFFLINE_REPLY,
                                             "tool_calls": [],
@@ -1674,9 +1691,27 @@ class AIBrain:
                                     raise
                             else:
                                 logger.warning(
-                                    "Échec persistant Gemini 503 sur %s. Renvoi de la réponse de courtoisie vocale.",
+                                    "Échec persistant Gemini 503 sur %s. Tentative de secours Groq...",
                                     active_model,
                                 )
+                                try:
+                                    last_u = ""
+                                    for m in reversed(messages):
+                                        if m.get("role") == "user" and m.get("content"):
+                                            last_u = str(m["content"])
+                                            break
+                                    if last_u:
+                                        groq_res = voice_fast_llm_reply(last_u, system_prompt=system_instruction)
+                                        if groq_res and groq_res != GEMINI_COURTESY_OFFLINE_REPLY:
+                                            logger.info("⚡ [GROQ LLM RESCUE (200ms)]: Secours immédiat suite à panne Gemini")
+                                            return {
+                                                "content": groq_res,
+                                                "tool_calls": [],
+                                                "finish_reason": "stop",
+                                                "fallback_courtesy": False,
+                                            }
+                                except Exception:
+                                    pass
                                 return {
                                     "content": GEMINI_COURTESY_OFFLINE_REPLY,
                                     "tool_calls": [],
