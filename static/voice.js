@@ -752,7 +752,7 @@
           method: 'POST',
           headers: {
             'Content-Type': (blob && blob.type) || mimeType || 'audio/wav',
-            'X-Voice-Session-Active': (phase === 'listening' || manual || isBargeInSend) ? 'true' : 'false',
+            'X-Voice-Session-Active': (enabled || manual || phase === 'listening' || isBargeInSend) ? 'true' : 'false',
             'X-Voice-Barge-In': isBargeInSend ? 'true' : 'false',
           },
           credentials: 'include',

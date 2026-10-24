@@ -152,3 +152,63 @@ def test_jarvis_query_endpoint_intercepts_local_command_0ms(tmp_path: Path):
         data = resp.json()
         assert "Processeur" in data["reply"]
         assert "mémoire vive" in data["reply"]
+
+
+def test_extract_voice_interact_never_ignores_coherent_sentences():
+    """Vérifie qu'aucune phrase cohérente prononcée par Moctar n'est ignorée, même sans mot-clé 'Moctar' préalable."""
+    coherent_queries = [
+        "tu es capable de faire quoi",
+        "comment tu vas mon ami",
+        "qui es-tu exactement",
+        "cpu",
+        "météo",
+        "pourquoi tu ne me réponds pas",
+        "qu'est-ce que tu peux faire pour moi",
+        "affiche la terre",
+        "arrête la musique",
+    ]
+    for q in coherent_queries:
+        accepted, cmd, wake = main.extract_voice_interact_command(q, session_active=False)
+        assert accepted is True, f"La phrase '{q}' a été rejetée à tort !"
+        assert len(cmd) > 0
+
+    # Les bruits parasites et hésitations vides doivent en revanche être ignorés
+    fillers = ["euh", "ah", "hum", "..."]
+    for f in fillers:
+        accepted, cmd, wake = main.extract_voice_interact_command(f, session_active=False)
+        assert accepted is False, f"Le bruit parasite '{f}' aurait dû être ignoré !"
+
+
+def test_same_origin_allows_reverse_proxy_and_host_matching():
+    """Vérifie que same_origin ne rejette pas les requêtes légitimes derrière Cloudflare Tunnel, Nginx ou Tailscale."""
+    from starlette.requests import Request
+
+    # 1. Requête où l'origin correspond au Host header (ex: https://jarvis.example.com vers port 5050 uvicorn)
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "headers": [
+            (b"host", b"jarvis.moctar.tech"),
+            (b"origin", b"https://jarvis.moctar.tech"),
+            (b"sec-fetch-site", b"same-origin"),
+            (b"x-forwarded-proto", b"https"),
+        ],
+        "server": ("127.0.0.1", 5050),
+        "client": ("127.0.0.1", 45678),
+        "path": "/api/voice/interact",
+        "query_string": b"",
+    }
+    req = Request(scope)
+    # Ne doit pas lever d'exception HTTPException(403)
+    main.same_origin(req)
+
+
+def test_groq_voice_semantic_turn_integration():
+    """Vérifie que le moteur sémantique vocal dispose de la fonction d'interrogation Groq rapide."""
+    import voice_semantic_engine
+
+    assert hasattr(voice_semantic_engine, "_call_groq_voice_semantic")
+    # Sans clé API, doit retourner None immédiatement (0 ms)
+    res = voice_semantic_engine._call_groq_voice_semantic([], groq_api_key="")
+    assert res is None
+

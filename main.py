@@ -529,7 +529,30 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
             return True, clean_text, False
 
     clean_text = filtered.strip(" ,.:;!?-")
+    if not clean_text or _is_pure_filler_or_wake(clean_text):
+        return False, "", False
+
     if clean_text and is_direct_voice_command(clean_text):
+        return True, clean_text, True
+
+    # Tout énoncé intelligible (2 mots ou plus, ou verbe/question/action évidente)
+    # ne doit JAMAIS être ignoré silencieusement.
+    # Dans une interaction vocale avec Moctar, JARVIS doit toujours écouter et répondre comme un humain attentif.
+    words = [w for w in re.split(r"[\s,.:;!?-]+", clean_text) if len(w) > 1]
+    norm_clean = _strip_accents_1to1(clean_text).lower()
+    common_short_commands = {
+        "cpu", "ram", "statut", "status", "meteo", "météo", "heure", "date",
+        "aide", "bonjour", "salut", "merci", "pause", "stop", "musique",
+        "terre", "globe", "plasma", "quantum", "bureau", "code", "terminal",
+    }
+    if len(words) >= 2 or norm_clean in common_short_commands or any(
+        norm_clean.startswith(prefix)
+        for prefix in (
+            "qui", "quoi", "comment", "pourquoi", "quand", "ou ", "où ",
+            "est-ce", "peux-tu", "dis ", "aide", "donne", "fais", "lance",
+            "ouvre", "ferme", "montre", "affiche", "mets", "raconte",
+        )
+    ):
         return True, clean_text, True
 
     return False, "", False
@@ -1267,14 +1290,31 @@ def same_origin(request: Request) -> None:
         target = urlsplit(str(request.url))
         p_host = (parts.hostname or "").lower()
         t_host = (target.hostname or "").lower()
-        hostname_match = _is_allowed_origin_host(p_host, t_host)
-        # En réseau local ou Tailscale, tolérance de port pour les accès multi-appareils et proxies inverses
+        host_header = (request.headers.get("host") or "").split(":", 1)[0].lower()
+
+        # Correspondance d'hôte directe ou réseau privé / Tailscale / mDNS
+        hostname_match = (
+            p_host == t_host
+            or (bool(host_header) and p_host == host_header)
+            or _is_allowed_origin_host(p_host, t_host)
+        )
         is_local = is_local_request(request)
+        forwarded_proto = (request.headers.get("x-forwarded-proto") or "").lower()
+
+        # En réseau local, Tailscale ou derrière reverse proxy HTTPS (Cloudflare, Nginx),
+        # tolérance de schéma et de port pour les accès multi-appareils
+        is_trusted_host = bool(p_host and (p_host == host_header or p_host == t_host))
         port_match = (
             (parts.port or (443 if parts.scheme == "https" else 80)) == (target.port or (443 if target.scheme == "https" else 80))
             or is_local
+            or is_trusted_host
         )
-        scheme_match = parts.scheme in {"http", "https"} and (parts.scheme == target.scheme or is_local)
+        scheme_match = parts.scheme in {"http", "https"} and (
+            parts.scheme == target.scheme
+            or parts.scheme == forwarded_proto
+            or is_local
+            or is_trusted_host
+        )
         valid = (scheme_match and hostname_match and port_match
                  and not parts.username and not parts.password and parts.path in {"", "/"}
                  and not parts.query and not parts.fragment)

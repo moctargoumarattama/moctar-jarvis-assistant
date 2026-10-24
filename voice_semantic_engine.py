@@ -538,6 +538,112 @@ def _format_reply_ending(text: str) -> str:
     return cleaned
 
 
+def _call_groq_voice_semantic(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+    system_prompt: str | None = None,
+    groq_api_key: str = "",
+) -> dict[str, Any] | None:
+    """Interroge le moteur Groq LPU (Llama 3.3 70B) pour une réponse vocale ultra-rapide (< 250 ms) avec Function Calling."""
+    if not groq_api_key:
+        return None
+
+    norm_messages: list[dict[str, str]] = []
+    if system_prompt:
+        norm_messages.append({"role": "system", "content": str(system_prompt)})
+    for m in messages:
+        role = m.get("role")
+        content = m.get("content")
+        if role in ("user", "assistant", "system") and content:
+            norm_messages.append({"role": str(role), "content": str(content)})
+
+    # Modèles Groq ultra-rapides et performants pour le dialogue vocal interactif
+    models_to_try = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+
+    for model_name in models_to_try:
+        # 1. Via SDK Groq si disponible
+        try:
+            from groq import Groq
+            client = Groq(api_key=groq_api_key, timeout=3.5)
+            kwargs: dict[str, Any] = {
+                "model": model_name,
+                "messages": norm_messages,
+                "temperature": 0.5,
+                "max_tokens": 250,
+            }
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = "auto"
+
+            completion = client.chat.completions.create(**kwargs)
+            choice = completion.choices[0]
+            msg = choice.message
+            tool_calls = []
+            if getattr(msg, "tool_calls", None):
+                for tc in msg.tool_calls:
+                    fn_name = getattr(tc.function, "name", "")
+                    fn_args = getattr(tc.function, "arguments", "{}")
+                    tool_calls.append({
+                        "name": fn_name,
+                        "function": {"name": fn_name, "arguments": fn_args},
+                        "arguments": fn_args,
+                    })
+            return {
+                "content": msg.content or "",
+                "tool_calls": tool_calls,
+                "finish_reason": "tool_calls" if tool_calls else "stop",
+            }
+        except ImportError:
+            pass
+        except Exception as sdk_err:
+            LOGGER.debug("Groq SDK %s: %s", model_name, sdk_err)
+
+        # 2. Requête HTTP directe vers l'API Groq (fallback direct universel)
+        try:
+            import requests
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {groq_api_key}",
+                "Content-Type": "application/json",
+            }
+            payload: dict[str, Any] = {
+                "model": model_name,
+                "messages": norm_messages,
+                "temperature": 0.5,
+                "max_tokens": 250,
+            }
+            if tools:
+                payload["tools"] = tools
+                payload["tool_choice"] = "auto"
+
+            res = requests.post(url, headers=headers, json=payload, timeout=3.5)
+            if res.status_code == 200:
+                data = res.json()
+                choice = data["choices"][0]
+                msg = choice.get("message", {})
+                raw_tool_calls = msg.get("tool_calls") or []
+                tool_calls = []
+                for tc in raw_tool_calls:
+                    fn = tc.get("function", {})
+                    fn_name = fn.get("name", "")
+                    fn_args = fn.get("arguments", "{}")
+                    tool_calls.append({
+                        "name": fn_name,
+                        "function": {"name": fn_name, "arguments": fn_args},
+                        "arguments": fn_args,
+                    })
+                return {
+                    "content": msg.get("content") or "",
+                    "tool_calls": tool_calls,
+                    "finish_reason": "tool_calls" if tool_calls else "stop",
+                }
+            LOGGER.debug("Groq HTTP %s retour %s: %s", model_name, res.status_code, res.text)
+        except Exception as req_err:
+            LOGGER.debug("Groq HTTP %s: %s", model_name, req_err)
+
+    return None
+
+
 def execute_voice_semantic_turn(
     command_text: str,
     runtime: Any = None,
@@ -682,8 +788,34 @@ def execute_voice_semantic_turn(
         except Exception:
             brain = None
 
+    # 3. Moteur Vocal Ultra-Rapide Groq LPU (< 250 ms) avec Repli Fluide Gemini
+    groq_api_key = (
+        os.environ.get("GROQ_API_KEY", "")
+        or os.environ.get("NOC_GROQ_API_KEY", "")
+        or getattr(getattr(runtime, "settings", None), "groq_api_key", "")
+        or getattr(ai_brain.config, "GROQ_API_KEY", "")
+        or ""
+    ).strip()
+
     llm_res: dict[str, Any] | None = None
-    if brain and hasattr(brain, "chat"):
+    if groq_api_key:
+        try:
+            t0 = time.perf_counter()
+            llm_res = _call_groq_voice_semantic(
+                chat_messages,
+                tools=VOICE_FAST_TOOLS,
+                system_prompt=full_system_prompt,
+                groq_api_key=groq_api_key,
+            )
+            if llm_res:
+                duration_ms = int((time.perf_counter() - t0) * 1000)
+                LOGGER.info("⚡ [GROQ VOICE SEMANTIC LLM] (%dms): finish_reason=%s, tools=%d",
+                            duration_ms, llm_res.get("finish_reason"), len(llm_res.get("tool_calls", [])))
+        except Exception as groq_err:
+            LOGGER.warning("Appel Groq vocal échoué, repli vers Gemini: %s", groq_err)
+            llm_res = None
+
+    if llm_res is None and brain and hasattr(brain, "chat"):
         try:
             t0 = time.perf_counter()
             llm_res = brain.chat(
@@ -693,10 +825,10 @@ def execute_voice_semantic_turn(
                 temperature=0.6,
             )
             duration_ms = int((time.perf_counter() - t0) * 1000)
-            LOGGER.info("⚡ [VOICE SEMANTIC LLM] (%dms): finish_reason=%s, tools=%d",
+            LOGGER.info("⚡ [GEMINI VOICE SEMANTIC LLM] (%dms): finish_reason=%s, tools=%d",
                         duration_ms, llm_res.get("finish_reason"), len(llm_res.get("tool_calls", [])))
         except Exception as exc:
-            LOGGER.warning("Erreur lors de l'appel LLM sémantique : %s", exc)
+            LOGGER.warning("Erreur lors de l'appel LLM sémantique Gemini : %s", exc)
             llm_res = None
 
     # 3. Traitement des Function Calls s'ils ont été émis par le LLM
