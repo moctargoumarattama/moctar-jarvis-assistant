@@ -127,11 +127,17 @@
     let ambientNoiseFloor = 0.005;
     let proactiveCheckTimer = null;
     const PROACTIVE_POLL_INTERVAL_MS = 25000;
+    let activeVoiceAbortController = null;
+    let currentRequestId = 0;
 
-    function triggerBargeIn() {
-      userBargedIn = true;
-      isAssistantSpeaking = false;
-      bargeInStreak = 0;
+    function abortActiveVoiceNetworkAndAudio() {
+      currentRequestId += 1;
+      if (activeVoiceAbortController) {
+        try {
+          activeVoiceAbortController.abort();
+        } catch {}
+        activeVoiceAbortController = null;
+      }
       if (activeAudioPlaybackFinish) {
         const finish = activeAudioPlaybackFinish;
         activeAudioPlaybackFinish = null;
@@ -144,13 +150,22 @@
           speaker.currentTime = 0;
         } catch {}
       }
-      if (typeof win.speechSynthesis !== 'undefined' && win.speechSynthesis.speaking) {
+      if (typeof win.speechSynthesis !== 'undefined') {
         try { win.speechSynthesis.cancel(); } catch {}
       }
       if (echoDampeningTimer !== null) {
         cancel(echoDampeningTimer);
         echoDampeningTimer = null;
       }
+      isAssistantSpeaking = false;
+      processingAudio = false;
+      job = null;
+    }
+
+    function triggerBargeIn() {
+      userBargedIn = true;
+      bargeInStreak = 0;
+      abortActiveVoiceNetworkAndAudio();
       clearPreRollBuffer();
       isSpeaking = true;
       silenceElapsedMs = 0;
@@ -656,9 +671,12 @@
       const trimmed = String(text || '').trim();
       if (!trimmed || !wanted()) return;
       if (STOP_PHRASES.has(phrase(trimmed))) {
+        generation += 1;
+        abortActiveVoiceNetworkAndAudio();
         phase = 'wake';
         manual = false;
         clearFollowup();
+        updateSolarVoiceState('idle');
         reconcile();
         return;
       }
@@ -718,9 +736,18 @@
       currentRms = 0;
       updateSolarActivity(0, false);
 
+      if (activeVoiceAbortController) {
+        try { activeVoiceAbortController.abort(); } catch {}
+        activeVoiceAbortController = null;
+      }
+      const requestController = (typeof AbortController === 'function') ? new AbortController() : null;
+      activeVoiceAbortController = requestController;
+      const requestId = ++currentRequestId;
+
       try {
         if (typeof opts.transcribe === 'function') {
           const text = await opts.transcribe(blob);
+          if (requestId !== currentRequestId) return;
           if (text) await handleLocalTextTranscript(text);
           return;
         }
@@ -728,7 +755,7 @@
 
         const isBargeInSend = userBargedIn;
         userBargedIn = false;
-        const response = await fetchImpl(interactUrl, {
+        const fetchOptions = {
           method: 'POST',
           headers: {
             'Content-Type': (blob && blob.type) || mimeType || 'audio/wav',
@@ -737,7 +764,14 @@
           },
           credentials: 'include',
           body: blob,
-        });
+        };
+        if (requestController) {
+          fetchOptions.signal = requestController.signal;
+        }
+        const response = await fetchImpl(interactUrl, fetchOptions);
+        if (requestId !== currentRequestId) {
+          return;
+        }
         if (!response || !response.ok) {
           releaseEchoLock();
           if (FOLLOWUP_MS <= 0) {
@@ -747,12 +781,23 @@
           return;
         }
         const payload = await response.json();
-        if (!payload || destroyed || suspended) {
+        if (requestId !== currentRequestId || !payload || destroyed || suspended) {
           releaseEchoLock();
           if (FOLLOWUP_MS <= 0) {
             phase = 'wake';
             manual = false;
           }
+          return;
+        }
+
+        if (payload.user_text && STOP_PHRASES.has(phrase(String(payload.user_text)))) {
+          generation += 1;
+          abortActiveVoiceNetworkAndAudio();
+          phase = 'wake';
+          manual = false;
+          clearFollowup();
+          updateSolarVoiceState('idle');
+          reconcile();
           return;
         }
 
@@ -783,6 +828,7 @@
         job = current;
         clearFollowup();
         try {
+          if (requestId !== currentRequestId) return;
           onInteractResult?.(payload);
           const replyText = String(payload.reply_text || '').trim();
           updateSolarVoiceState('speaking');
@@ -799,21 +845,21 @@
 
           if (chunksToPlay.length > 1) {
             for (const chunkUrl of chunksToPlay) {
-              if (generation !== current.generation || destroyed || suspended || userBargedIn) break;
+              if (requestId !== currentRequestId || generation !== current.generation || destroyed || suspended || userBargedIn) break;
               const ok = await playAudioUrl(chunkUrl);
-              if (userBargedIn) break;
+              if (requestId !== currentRequestId || userBargedIn) break;
               played = ok || played;
             }
-          } else if (chunksToPlay.length === 1 && !userBargedIn) {
+          } else if (chunksToPlay.length === 1 && !userBargedIn && requestId === currentRequestId) {
             played = await playAudioUrl(chunksToPlay[0]);
-          } else if (payload.audio_url && !userBargedIn) {
+          } else if (payload.audio_url && !userBargedIn && requestId === currentRequestId) {
             played = await playAudioUrl(payload.audio_url);
           }
-          if (!played && replyText && !userBargedIn) {
+          if (!played && replyText && !userBargedIn && requestId === currentRequestId) {
             await speakWithNativeSpeechSynthesis(replyText);
           }
           releaseEchoLock();
-          if (generation !== current.generation || destroyed || suspended) return;
+          if (requestId !== currentRequestId || generation !== current.generation || destroyed || suspended) return;
           openFollowup();
         } finally {
           if (job === current) job = null;
@@ -836,6 +882,9 @@
           });
         }
       } finally {
+        if (activeVoiceAbortController === requestController) {
+          activeVoiceAbortController = null;
+        }
         processingAudio = false;
       }
     }
@@ -1270,6 +1319,7 @@
       if (phase !== 'wake') return;
       if (!fetchImpl) return;
 
+      let current = null;
       try {
         const res = await fetchImpl('/api/voice/proactive');
         if (!res || !res.ok) return;
@@ -1281,7 +1331,7 @@
         const initiativeText = String(data.message || '').trim();
         if (!initiativeText) return;
 
-        const current = { generation };
+        current = { generation };
         job = current;
         isAssistantSpeaking = true;
         clearPreRollBuffer();
@@ -1308,9 +1358,15 @@
         // Ouvre automatiquement la fenêtre d'écoute pour la réponse de Moctar (ex: "Oui", "Non merci")
         openFollowup();
       } catch {
-        // En cas d'erreur réseau, ignorer silencieusement
+        // En cas d'erreur réseau ou synthèse, libérer proprement l'état d'écoute
+        if (current && isAssistantSpeaking) {
+          releaseEchoLock();
+        }
       } finally {
-        if (job === current) job = null;
+        if (current && job === current) job = null;
+        if (current && isAssistantSpeaking) {
+          isAssistantSpeaking = false;
+        }
         reconcile();
       }
     }
@@ -1343,6 +1399,7 @@
       get userBargedIn() { return userBargedIn; },
       triggerBargeIn,
       bargeIn: triggerBargeIn,
+      cancelActiveVoice: abortActiveVoiceNetworkAndAudio,
       startPushToTalk,
       stopPushToTalk,
       async enable() {
@@ -1359,13 +1416,11 @@
       },
       disable() {
         generation += 1;
+        abortActiveVoiceNetworkAndAudio();
         enabled = false;
         manual = false;
         phase = 'wake';
         fault = null;
-        if (win.MoctarSpeaker) {
-          try { win.MoctarSpeaker.pause?.(); } catch {}
-        }
         clearFollowup();
         cleanupWebAudio();
         emit('off');
@@ -1384,6 +1439,7 @@
       },
       stopManual() {
         generation += 1;
+        abortActiveVoiceNetworkAndAudio();
         manual = false;
         phase = 'wake';
         clearFollowup();
@@ -1400,6 +1456,7 @@
       },
       suspend() {
         generation += 1;
+        abortActiveVoiceNetworkAndAudio();
         suspended = true;
         manual = false;
         phase = 'wake';
@@ -1413,11 +1470,9 @@
       },
       destroy() {
         generation += 1;
+        abortActiveVoiceNetworkAndAudio();
         enabled = false;
         manual = false;
-        if (win.MoctarSpeaker) {
-          try { win.MoctarSpeaker.pause?.(); } catch {}
-        }
         clearFollowup();
         cleanupWebAudio();
         destroyed = true;

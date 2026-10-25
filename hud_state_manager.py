@@ -148,24 +148,45 @@ def get_hud_state() -> Dict[str, Any]:
             state["mood_color"] = MOOD_COLORS["friendly"]
             state["pulse_speed"] = 0.9
 
-    state["cpu_percent"] = 12.0
-    state["ram_percent"] = 45.0
-    state["ram_used_gb"] = 7.2
-    state["ram_total_gb"] = 16.0
-    state["hostname"] = "moctar-Precision-M4800"
+    now_ts = time.time()
+    now_iso = datetime.now().astimezone().isoformat(timespec="seconds")
+    state["voice_status"] = _HUD_STATE.get("status", "idle")
+    state["timestamp"] = now_ts
+    state["last_check_iso"] = now_iso
 
-    if psutil is not None:
+    try:
+        state["hostname"] = socket.gethostname() or "hote-inconnu"
+    except Exception:
+        state["hostname"] = "hote-inconnu"
+
+    state["cpu_percent"] = None
+    state["ram_percent"] = None
+    state["ram_used_gb"] = None
+    state["ram_total_gb"] = None
+    state["metrics_available"] = False
+    state["metrics_error"] = None
+
+    if psutil is None:
+        state["metrics_error"] = "Module psutil non installé sur cet hôte"
+    else:
         try:
             state["cpu_percent"] = round(float(psutil.cpu_percent(interval=None)), 1)
             mem = psutil.virtual_memory()
             state["ram_percent"] = round(float(mem.percent), 1)
             state["ram_used_gb"] = round(float(mem.used) / (1024**3), 1)
             state["ram_total_gb"] = round(float(mem.total) / (1024**3), 1)
-            state["hostname"] = socket.gethostname()
-        except Exception:
-            pass
+            state["metrics_available"] = True
+            state["metrics_error"] = None
+        except Exception as exc:
+            state["cpu_percent"] = None
+            state["ram_percent"] = None
+            state["ram_used_gb"] = None
+            state["ram_total_gb"] = None
+            state["metrics_available"] = False
+            state["metrics_error"] = f"Erreur sonde psutil: {exc}"
 
     # Télémétrie NeuroVision intégrée
+    vision_error: Optional[str] = None
     try:
         from vision_engine import VisionEngine
         v_engine = VisionEngine.get_instance()
@@ -177,8 +198,35 @@ def get_hud_state() -> Dict[str, Any]:
                 state["pulse_speed"] = 0.8
         else:
             state["vision"] = {"active": False}
-    except Exception:
-        state["vision"] = {"active": False}
+    except Exception as v_exc:
+        vision_error = str(v_exc)
+        state["vision"] = {"active": False, "error": vision_error}
+
+    # Calcul dynamique de l'état global du HUD ("ONLINE", "DEGRADED", "OFFLINE")
+    degraded_reasons: list[str] = []
+    if not state["metrics_available"]:
+        degraded_reasons.append(state["metrics_error"] or "Métriques système indisponibles")
+    if state["cpu_percent"] is not None and state["cpu_percent"] >= 95.0:
+        degraded_reasons.append(f"Saturation CPU ({state['cpu_percent']}%)")
+    if state["ram_percent"] is not None and state["ram_percent"] >= 95.0:
+        degraded_reasons.append(f"Saturation RAM ({state['ram_percent']}%)")
+    if state.get("mood") == "alert":
+        degraded_reasons.append("Mode alerte système actif")
+
+    if _HUD_STATE.get("force_offline"):
+        global_status = "OFFLINE"
+        status_label = "HORS LIGNE"
+    elif degraded_reasons:
+        global_status = "DEGRADED"
+        status_label = "MODE DÉGRADÉ"
+    else:
+        global_status = "ONLINE"
+        status_label = "EN LIGNE"
+
+    state["status"] = global_status
+    state["hud_status"] = global_status
+    state["status_label"] = status_label
+    state["degraded_reasons"] = degraded_reasons
 
     return state
 

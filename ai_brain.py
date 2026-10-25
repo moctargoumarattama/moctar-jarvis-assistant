@@ -41,6 +41,17 @@ GENERATION_CONFIG = {
     "max_tokens": 350,
     "top_p": 0.8,
 }
+JARVIS_CORE_SYSTEM_PROMPT = """Tu es JARVIS, l'assistant d'ingénierie et d'exploitation système de Moctar.
+
+RÈGLES D'OR D'EXÉCUTION ET DE VÉRITÉ :
+1. ZÉRO FAUX POSITIF : N'affirme jamais qu'un serveur, un service, un déploiement ou un projet est "opérationnel", "nominal" ou "terminé" sans avoir reçu la preuve explicite d'un outil ou d'une vérification récente.
+2. TRANSPARENCE DES ÉTATS : Distingue toujours clairement dans tes réponses :
+   - [VÉRIFIÉ] : Donnée lue en direct via un outil ou un log.
+   - [PARTIEL] : Certaines métriques sont disponibles, d'autres n'ont pas répondu.
+   - [NON VÉRIFIÉ / INDISPONIBLE] : L'outil ou le service distant n'a pas pu être joint.
+3. CONCISION OPÉRATIONNELLE : Réponds de manière directe, technique et structurée. En mode vocal, privilégie des phrases courtes, naturelles et immédiatement exploitables, sans balises Markdown lourdes.
+4. MÉMOIRE & PRÉFÉRENCES : Respecte strictement le contexte récent de la conversation et tiens compte des négations explicites de l'utilisateur."""
+
 MOCTAR_SYSTEM_PROMPT = (
     "Tu es M.O.C.T.A.R, l'intelligence cybernétique et copilote d'ingénierie d'élite de Moctar. "
     "Ton style allie l'acuité technique d'un centre de commandement à la chaleur et la complicité d'un vrai ami et partenaire. "
@@ -49,12 +60,16 @@ MOCTAR_SYSTEM_PROMPT = (
     "Tes réponses orales sont naturelles, posées, vivantes et concises (1 à 2 phrases percutantes). "
     "Ne termine PAS toutes tes phrases par 'Moctar.' de façon mécanique : utilise son prénom avec fluidité et naturel. "
     "Quand Moctar te présente des amis ou invités, accueille-les chaleureusement comme un allié d'exception. "
-    "Pose spontanément une courte question de clarification dès qu'une intention est ouverte ou mérite d'être affinée."
+    "Pose spontanément une courte question de clarification dès qu'une intention est ouverte ou mérite d'être affinée.\n\n"
+    + JARVIS_CORE_SYSTEM_PROMPT
 )
 PROVIDER_FAILURE_TTL_SECONDS = 30.0
 GEMINI_BACKUP_MODEL = os.getenv("GEMINI_BACKUP_MODEL", "gemini-2.5-flash-lite")
 GEMINI_COURTESY_OFFLINE_REPLY = (
     "Je subis une micro-coupure de liaison avec le serveur neural, mais je reste en ligne Moctar."
+)
+DEGRADED_UNAVAILABLE_REPLY = (
+    "Mode dégradé : API primaire et secours injoignables (Timeout/Quota)."
 )
 logger = logging.getLogger("jarvis.ai")
 
@@ -99,23 +114,60 @@ def _ai_provider():
     return "gemini"
 
 
+def format_ai_health_state(status: str, reason: str = "") -> Dict[str, str]:
+    """Structure clairement l'état du cerveau IA : OK, PARTIEL, DEGRADE ou INDISPONIBLE."""
+    valid_states = {"OK", "PARTIEL", "DEGRADE", "INDISPONIBLE"}
+    norm_status = status.upper().strip() if status else "INDISPONIBLE"
+    if norm_status not in valid_states:
+        norm_status = "DEGRADE"
+    default_reasons = {
+        "OK": "Fournisseur primaire opérationnel.",
+        "PARTIEL": "Réponse assurée par le fournisseur de secours (Groq Llama 3.3 70B).",
+        "DEGRADE": DEGRADED_UNAVAILABLE_REPLY,
+        "INDISPONIBLE": "Mode indisponible : Aucun fournisseur IA joignable.",
+    }
+    clean_reason = (reason or default_reasons[norm_status]).strip()
+    return {
+        "status": norm_status,
+        "reason": clean_reason,
+        "message": f"[{norm_status}] {clean_reason}" if norm_status in {"DEGRADE", "INDISPONIBLE"} else clean_reason,
+    }
+
+
 def _with_inference_deadline(callback, timeout):
-    """Bound the whole request, including connect and response decoding."""
+    """Bound the whole request, including connect and response decoding.
+
+    Si l'appel expire (timeout), le résultat tardif du thread est explicitement
+    ignoré afin de ne déclencher aucune action ni synthèse vocale différée.
+    """
     completed = Event()
+    aborted = Event()
     outcome = {}
 
     def run():
         try:
-            outcome["result"] = callback()
+            res = callback()
+            if aborted.is_set():
+                logger.warning(
+                    "Résultat IA tardif ignoré après expiration du budget de temps (%.1fs).",
+                    float(timeout or 0.0),
+                )
+                return
+            outcome["result"] = res
         except Exception as exc:
-            outcome["error"] = exc
+            if not aborted.is_set():
+                outcome["error"] = exc
         finally:
             completed.set()
 
     # An unresponsive cloud call must not hold up process shutdown.
     Thread(target=run, daemon=True, name="jarvis-inference").start()
     if not completed.wait(timeout):
-        raise TimeoutError("AI request timed out")
+        aborted.set()
+        outcome.clear()
+        raise TimeoutError(f"AI request timed out after {timeout}s")
+    if aborted.is_set():
+        raise TimeoutError(f"AI request aborted after {timeout}s")
     if "error" in outcome:
         raise outcome["error"]
     return outcome["result"]
@@ -1518,23 +1570,44 @@ class AIBrain:
             )
         except Exception as exc:
             logger.warning("Échec appel Gemini: %s", exc, exc_info=True)
-            if _is_gemini_503_or_server_error(exc):
+            if _is_gemini_503_or_server_error(exc) or isinstance(exc, TimeoutError):
+                state_info = format_ai_health_state("DEGRADE", DEGRADED_UNAVAILABLE_REPLY)
                 result = {
-                    "content": GEMINI_COURTESY_OFFLINE_REPLY,
+                    "content": state_info["reason"],
                     "tool_calls": [],
                     "finish_reason": "stop",
                     "fallback_courtesy": True,
+                    "status": state_info["status"],
+                    "reason": state_info["reason"],
                 }
             else:
-                result = {"content": "Le moteur IA est indisponible pour le moment.",
-                          "tool_calls": [], "finish_reason": "error"}
+                state_info = format_ai_health_state(
+                    "INDISPONIBLE",
+                    "Mode indisponible : API primaire en erreur.",
+                )
+                result = {
+                    "content": "Le moteur IA est indisponible pour le moment.",
+                    "tool_calls": [],
+                    "finish_reason": "error",
+                    "status": state_info["status"],
+                    "reason": state_info["reason"],
+                }
         self._record_provider_result("gemini", result)
         return result
 
     def _chat_gemini(self, messages, tools=None, temperature=0.6):
         """Translate model/tool turns without letting the SDK execute local actions."""
-        error = {"content": "Le moteur IA est indisponible pour le moment.",
-                 "tool_calls": [], "finish_reason": "error"}
+        state_unavailable = format_ai_health_state(
+            "INDISPONIBLE",
+            "Mode indisponible : API primaire en erreur.",
+        )
+        error = {
+            "content": "Le moteur IA est indisponible pour le moment.",
+            "tool_calls": [],
+            "finish_reason": "error",
+            "status": state_unavailable["status"],
+            "reason": state_unavailable["reason"],
+        }
         try:
             if self.gemini_client is None or genai_types is None:
                 raise RuntimeError(
@@ -1595,6 +1668,7 @@ class AIBrain:
                 else:
                     contents.append({"role": gemini_role, "parts": parts})
 
+            system_instruction = "\n\n".join(instructions) if instructions else None
             generation_options = {
                 "temperature": temperature,
                 "max_output_tokens": GENERATION_CONFIG["max_tokens"],
@@ -1607,8 +1681,8 @@ class AIBrain:
             }
             if self.gemini_model.startswith("gemini-3"):
                 generation_options["thinking_config"] = genai_types.ThinkingConfig(thinking_level="minimal")
-            if instructions:
-                generation_options["system_instruction"] = "\n\n".join(instructions)
+            if system_instruction:
+                generation_options["system_instruction"] = system_instruction
             if tools:
                 declarations = []
                 for tool in tools:
@@ -1630,6 +1704,54 @@ class AIBrain:
                 return self.gemini_client.models.generate_content(
                     model=model_name, contents=contents, config=config_obj,
                 )
+
+            def _rescue_with_groq_level2() -> Dict[str, Any]:
+                """Cascade unidirectionnelle Niveau 2 (Groq Llama 3.3 70B) -> Niveau 3 (Arrêt propre dégradé)."""
+                try:
+                    last_u = ""
+                    for m in reversed(messages):
+                        if m.get("role") == "user" and m.get("content"):
+                            last_u = str(m["content"])
+                            break
+                    if last_u:
+                        groq_res = voice_fast_llm_reply(
+                            last_u,
+                            system_prompt=system_instruction,
+                            _allow_gemini_fallback=False,
+                            _failed_providers={"gemini"},
+                            _deadline=time.monotonic() + 4.5,
+                        )
+                        if (
+                            groq_res
+                            and groq_res != GEMINI_COURTESY_OFFLINE_REPLY
+                            and not groq_res.startswith("Mode dégradé")
+                            and not groq_res.startswith("[DEGRADE]")
+                            and not groq_res.startswith("[INDISPONIBLE]")
+                        ):
+                            logger.info("⚡ [GROQ LLM RESCUE (Niveau 2)]: Secours immédiat suite à panne Gemini")
+                            partial_state = format_ai_health_state(
+                                "PARTIEL",
+                                "Mode partiel : API primaire indisponible, réponse assurée par le secours Groq Llama 3.3 70B.",
+                            )
+                            return {
+                                "content": groq_res,
+                                "tool_calls": [],
+                                "finish_reason": "stop",
+                                "fallback_courtesy": False,
+                                "status": partial_state["status"],
+                                "reason": partial_state["reason"],
+                            }
+                except Exception as groq_exc:
+                    logger.warning("Échec du secours Niveau 2 Groq: %s", groq_exc)
+                degraded_state = format_ai_health_state("DEGRADE", DEGRADED_UNAVAILABLE_REPLY)
+                return {
+                    "content": degraded_state["reason"],
+                    "tool_calls": [],
+                    "finish_reason": "stop",
+                    "fallback_courtesy": True,
+                    "status": degraded_state["status"],
+                    "reason": degraded_state["reason"],
+                }
 
             try:
                 response = _call_gemini_generate(active_model, current_config)
@@ -1659,65 +1781,19 @@ class AIBrain:
                                 except Exception as backup_exc:
                                     if _is_gemini_503_or_server_error(backup_exc) or "404" in str(backup_exc) or "not_found" in str(backup_exc).lower():
                                         logger.warning(
-                                            "Échec du serveur Gemini (%s puis %s): %s. Tentative de secours Groq...",
+                                            "Échec du serveur Gemini (%s puis %s): %s. Bascule unidirectionnelle Niveau 2 Groq...",
                                             active_model,
                                             GEMINI_BACKUP_MODEL,
                                             backup_exc,
                                         )
-                                        try:
-                                            last_u = ""
-                                            for m in reversed(messages):
-                                                if m.get("role") == "user" and m.get("content"):
-                                                    last_u = str(m["content"])
-                                                    break
-                                            if last_u:
-                                                groq_res = voice_fast_llm_reply(last_u, system_prompt=system_instruction)
-                                                if groq_res and groq_res != GEMINI_COURTESY_OFFLINE_REPLY:
-                                                    logger.info("⚡ [GROQ LLM RESCUE (200ms)]: Secours immédiat suite à panne Gemini")
-                                                    return {
-                                                        "content": groq_res,
-                                                        "tool_calls": [],
-                                                        "finish_reason": "stop",
-                                                        "fallback_courtesy": False,
-                                                    }
-                                        except Exception:
-                                            pass
-                                        return {
-                                            "content": GEMINI_COURTESY_OFFLINE_REPLY,
-                                            "tool_calls": [],
-                                            "finish_reason": "stop",
-                                            "fallback_courtesy": True,
-                                        }
+                                        return _rescue_with_groq_level2()
                                     raise
                             else:
                                 logger.warning(
-                                    "Échec persistant Gemini 503 sur %s. Tentative de secours Groq...",
+                                    "Échec persistant Gemini 503 sur %s. Bascule unidirectionnelle Niveau 2 Groq...",
                                     active_model,
                                 )
-                                try:
-                                    last_u = ""
-                                    for m in reversed(messages):
-                                        if m.get("role") == "user" and m.get("content"):
-                                            last_u = str(m["content"])
-                                            break
-                                    if last_u:
-                                        groq_res = voice_fast_llm_reply(last_u, system_prompt=system_instruction)
-                                        if groq_res and groq_res != GEMINI_COURTESY_OFFLINE_REPLY:
-                                            logger.info("⚡ [GROQ LLM RESCUE (200ms)]: Secours immédiat suite à panne Gemini")
-                                            return {
-                                                "content": groq_res,
-                                                "tool_calls": [],
-                                                "finish_reason": "stop",
-                                                "fallback_courtesy": False,
-                                            }
-                                except Exception:
-                                    pass
-                                return {
-                                    "content": GEMINI_COURTESY_OFFLINE_REPLY,
-                                    "tool_calls": [],
-                                    "finish_reason": "stop",
-                                    "fallback_courtesy": True,
-                                }
+                                return _rescue_with_groq_level2()
                         else:
                             raise
                 else:
@@ -1758,8 +1834,14 @@ class AIBrain:
                 raise RuntimeError(f"Gemini returned no text or tool calls (finish_reason={candidates[0].finish_reason})")
             if not tool_calls and content:
                 tool_calls = self._extract_text_tool_calls(content)
-            result = {"content": content, "tool_calls": tool_calls,
-                      "finish_reason": "tool_calls" if tool_calls else "stop"}
+            ok_state = format_ai_health_state("OK", "Fournisseur primaire Gemini opérationnel.")
+            result = {
+                "content": content,
+                "tool_calls": tool_calls,
+                "finish_reason": "tool_calls" if tool_calls else "stop",
+                "status": ok_state["status"],
+                "reason": ok_state["reason"],
+            }
             if tool_calls:
                 # Preserve opaque Gemini 3 signatures exactly across tool observations.
                 parts = candidates[0].content.parts or []
@@ -1770,12 +1852,15 @@ class AIBrain:
             return result
         except Exception as exc:
             logger.warning("Échec appel Gemini: %s", exc, exc_info=True)
-            if _is_gemini_503_or_server_error(exc):
+            if _is_gemini_503_or_server_error(exc) or isinstance(exc, TimeoutError):
+                degraded_state = format_ai_health_state("DEGRADE", DEGRADED_UNAVAILABLE_REPLY)
                 return {
-                    "content": GEMINI_COURTESY_OFFLINE_REPLY,
+                    "content": degraded_state["reason"],
                     "tool_calls": [],
                     "finish_reason": "stop",
                     "fallback_courtesy": True,
+                    "status": degraded_state["status"],
+                    "reason": degraded_state["reason"],
                 }
             return error
 
@@ -2033,13 +2118,21 @@ def voice_fast_llm_reply(
     runtime: Any = None,
     session_id: str | None = None,
     history: list[dict[str, str]] | None = None,
+    *,
+    _allow_gemini_fallback: bool = False,
+    _failed_providers: set[str] | None = None,
+    _deadline: float | None = None,
 ) -> str:
-    """Cerveau vocal ultra-rapide (< 200 ms) via Groq LLM (ou Gemini en repli fluide).
+    """Cerveau vocal ultra-rapide (< 200 ms) via Groq Llama 3.3 70B (Niveau 2 de la cascade unidirectionnelle).
 
-    Injecte en temps réel le contexte vivant du Dell M4800, la mémoire multi-tours
-    (derniers échanges), les préférences permanentes et le savoir web factuel.
-    Bascule sur runtime.ai_brain.chat en fallback automatique si GROQ_API_KEY est absente ou en échec.
+    Chaîne de secours strictement unidirectionnelle :
+    - Niveau 1 : Fournisseur primaire (Gemini) -> appelle ce Niveau 2 en secours.
+    - Niveau 2 : Secours rapide (Groq Llama 3.3 70B).
+    - Niveau 3 : Arrêt propre et réponse dégradée explicite (sans reboucler ni réinstancier AIBrain).
     """
+    request_deadline = _deadline if _deadline is not None else (time.monotonic() + 6.5)
+    failed_providers: set[str] = set(_failed_providers or set())
+
     groq_api_key = (
         os.environ.get("GROQ_API_KEY", "")
         or os.environ.get("NOC_GROQ_API_KEY", "")
@@ -2083,22 +2176,26 @@ def voice_fast_llm_reply(
         except Exception:
             memory_facts = ""
 
-    # 3. Enrichissement Web en direct pour les questions factuelles / savoir
+    # 3. Enrichissement Web en direct pour les questions factuelles / savoir (si budget temps suffisant)
     web_context = ""
-    try:
-        import web_search_service
-        if web_search_service.is_live_web_query(prompt):
-            web_context = web_search_service.fetch_live_web_context(prompt)
-    except Exception:
-        web_context = ""
+    if (request_deadline - time.monotonic()) > 2.5:
+        try:
+            import web_search_service
+            if web_search_service.is_live_web_query(prompt):
+                web_context = web_search_service.fetch_live_web_context(prompt)
+        except Exception:
+            web_context = ""
 
     base_prompt = system_prompt or (
         "Tu es M.O.C.T.A.R, l'intelligence artificielle cybernétique et copilote d'ingénierie d'élite de Moctar. "
         "Ton style allie la précision d'un centre de commandement futuriste (NOC) à la chaleur, la bienveillance et la complicité d'un vrai ami. "
         "Tu t'adresses à lui avec un tutoiement naturel et respectueux. "
         "Tes réponses orales sont ultra-réactives, posées, vivantes et concises (1 à 3 phrases maximum). "
-        "Pas de jargon théâtral de bande dessinée, mais une prestance technologique moderne, directe et bienveillante."
+        "Pas de jargon théâtral de bande dessinée, mais une prestance technologique moderne, directe et bienveillante.\n\n"
+        + JARVIS_CORE_SYSTEM_PROMPT
     )
+    if JARVIS_CORE_SYSTEM_PROMPT not in base_prompt:
+        base_prompt = f"{base_prompt}\n\n{JARVIS_CORE_SYSTEM_PROMPT}"
 
     prompt_sections = [base_prompt]
     if memory_facts:
@@ -2120,18 +2217,21 @@ def voice_fast_llm_reply(
         _FAST_VOICE_SESSION_TURNS[sess_key].append({"role": "assistant", "content": assistant_reply})
         _FAST_VOICE_SESSION_TURNS[sess_key] = _FAST_VOICE_SESSION_TURNS[sess_key][-8:]
 
-    if groq_api_key:
+    if groq_api_key and "groq" not in failed_providers:
         discovered_models = get_available_groq_chat_models(groq_api_key)
         models_to_try = [m for m in discovered_models if m]
+        if "llama-3.3-70b-versatile" in models_to_try:
+            models_to_try.remove("llama-3.3-70b-versatile")
+        models_to_try.insert(0, "llama-3.3-70b-versatile")
         failed_404_models: set[str] = set()
         refreshed_on_404 = False
 
-        def _try_groq_candidate(cand: str) -> str | None:
+        def _try_groq_candidate(cand: str, call_timeout: float) -> str | None:
             # 1. SDK Groq officiel (si le package groq est installé)
             try:
                 from groq import Groq  # type: ignore[import-not-found]
 
-                client = Groq(api_key=groq_api_key, timeout=4.0, max_retries=0)
+                client = Groq(api_key=groq_api_key, timeout=call_timeout, max_retries=0)
                 start_t = time.perf_counter()
                 completion = client.chat.completions.create(
                     model=cand,
@@ -2169,7 +2269,7 @@ def voice_fast_llm_reply(
                     "temperature": 0.3,
                     "max_tokens": 250,
                 }
-                resp = requests.post(url, headers=headers, json=payload, timeout=4.0)
+                resp = requests.post(url, headers=headers, json=payload, timeout=call_timeout)
                 if resp.status_code == 200:
                     data = resp.json()
                     reply = str(data["choices"][0]["message"]["content"] or "").strip()
@@ -2187,18 +2287,33 @@ def voice_fast_llm_reply(
 
         idx = 0
         while idx < len(models_to_try):
+            remaining = request_deadline - time.monotonic()
+            if remaining <= 0.2:
+                logger.warning("Budget de temps global expiré avant l'appel Groq (%s). Abandon propre.", models_to_try[idx])
+                break
             cand = models_to_try[idx]
             idx += 1
             if cand in failed_404_models:
                 continue
-            rep = _try_groq_candidate(cand)
+            call_budget = min(3.5, max(0.5, remaining))
+            try:
+                rep = _with_inference_deadline(
+                    lambda c=cand, b=call_budget: _try_groq_candidate(c, b),
+                    timeout=call_budget,
+                )
+            except TimeoutError:
+                logger.warning("Timeout strict sur Groq (%s) après %.1fs — résultat tardif ignoré.", cand, call_budget)
+                break
             if rep:
+                if (request_deadline - time.monotonic()) < -0.1:
+                    logger.warning("Réponse Groq reçue hors délai ignorée pour éviter toute synthèse vocale différée.")
+                    break
                 final_rep = _ensure_moctar_ending(rep)
                 _save_session_turn(final_rep)
                 return final_rep
 
-            # Découverte dynamique sur premier échec 404
-            if failed_404_models and not refreshed_on_404:
+            # Découverte dynamique sur premier échec 404 (uniquement si le budget temps le permet)
+            if failed_404_models and not refreshed_on_404 and (request_deadline - time.monotonic()) > 1.5:
                 refreshed_on_404 = True
                 logger.info("⚡ [GROQ AUTO-DISCOVERY]: Échec 404 sur %s, interrogation dynamique de GET /v1/models...", cand)
                 new_discovered = get_available_groq_chat_models(groq_api_key, force_refresh=True)
@@ -2206,27 +2321,16 @@ def voice_fast_llm_reply(
                     if nm not in models_to_try and nm not in failed_404_models:
                         models_to_try.append(nm)
 
-    # Repli automatique sur ai_brain (Google Gemini gemini-3.5-flash-lite)
-    brain = getattr(runtime, "ai_brain", None)
-    if not brain:
-        try:
-            brain = AIBrain()
-        except Exception:
-            brain = None
+        failed_providers.add("groq")
 
-    if brain and hasattr(brain, "chat"):
-        try:
-            chat_res = brain.chat(prompt, system_prompt=full_system_prompt)
-            reply = str(chat_res.get("content") or "").strip()
-            if reply and not chat_res.get("fallback_courtesy"):
-                final_rep = _ensure_moctar_ending(reply)
-                _save_session_turn(final_rep)
-                return final_rep
-        except Exception as exc:
-            logger.warning("Repli ai_brain a échoué: %s", exc)
-
-    fallback_rep = "À vos ordres Moctar, je suis en ligne et tous les systèmes sont opérationnels."
-    final_rep = _ensure_moctar_ending(fallback_rep)
-    _save_session_turn(final_rep)
-    return final_rep
+    # Niveau 3 : Arrêt propre et réponse dégradée explicite.
+    # Interdiction absolue de réinstancier AIBrain() ou de reboucler sur un fournisseur ayant échoué.
+    degraded_state = format_ai_health_state("DEGRADE", DEGRADED_UNAVAILABLE_REPLY)
+    logger.error(
+        "Cascade IA interrompue au Niveau 3 [%s] (fournisseurs en échec=%s): %s",
+        degraded_state["status"],
+        sorted(failed_providers),
+        degraded_state["reason"],
+    )
+    return degraded_state["reason"]
 

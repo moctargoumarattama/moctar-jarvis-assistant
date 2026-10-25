@@ -28,8 +28,179 @@ import actions
 from actions import execute_tool
 import ai_brain
 from ai_brain import build_live_system_context
+from assistant_security import SecurityPolicyEngine
 
 LOGGER = logging.getLogger("moctar.voice_semantic_engine")
+
+_DEFAULT_SECURITY_ENGINE = SecurityPolicyEngine()
+
+# Outils vocaux courants d'assistance quotidienne, de lecture ou de navigation (exécutés sans friction si les arguments sont sains)
+_SAFE_ROUTINE_VOICE_TOOLS = {
+    "open_app",
+    "open_site",
+    "search_google",
+    "search_youtube",
+    "web_search",
+    "search_web",
+    "get_weather",
+    "control_music",
+    "get_project_context",
+    "optimize_system",
+    "add_todo",
+    "list_todos",
+    "schedule_reminder",
+    "close_active_window",
+    "snap_active_window",
+    "get_active_task",
+    "update_active_task",
+    "analyze_screen",
+    "store_memory_fact",
+    "search_memory_facts",
+    "switch_hud_view",
+    "set_hud_mood",
+    "git_status",
+    "prepare_commit",
+    "prepare_push",
+    "confirm_git_action",
+}
+
+# Commandes de tâches de fond autorisées sans friction (lecture, tests, diagnostic)
+_SAFE_BG_COMMAND_PREFIXES = (
+    "pytest",
+    "python -m pytest",
+    "python -m unittest",
+    "python -m py_compile",
+    "git status",
+    "git log",
+    "git diff",
+    "npm test",
+    "node --check",
+)
+
+
+def _resolve_security_engine(runtime: Any = None) -> SecurityPolicyEngine:
+    """Récupère l'instance SecurityPolicyEngine active du runtime ou le moteur par défaut."""
+    jarvis = getattr(runtime, "jarvis", None) if runtime else None
+    agent = getattr(jarvis, "agent", None) if jarvis else None
+    sec = getattr(agent, "security", None) if agent else None
+    if isinstance(sec, SecurityPolicyEngine):
+        return sec
+    return _DEFAULT_SECURITY_ENGINE
+
+
+def execute_voice_tool_securely(
+    func_name: str,
+    arguments: Optional[Dict[str, Any]] = None,
+    runtime: Any = None,
+) -> Dict[str, Any]:
+    """Point d'exécution sécurisé unifié pour le moteur sémantique vocal.
+
+    Interroge systématiquement SecurityPolicyEngine avant d'invoquer execute_tool() :
+    - Si les arguments violent la politique (injection, path traversal, commande destructrice), bloque et journalise.
+    - Si l'outil est courant/sûr (lecture, météo, statut, recherche, mémoire, navigation), exécute sans friction.
+    - Si l'outil comporte un risque élevé (Tier 3 / shell arbitraire / suppression / altération critique), bloque l'exécution directe,
+      journalise l'événement et retourne un statut explicite demandant confirmation.
+    """
+    tool_clean = str(func_name or "").strip()
+    tool_lower = tool_clean.lower()
+    args = dict(arguments or {})
+    security_engine = _resolve_security_engine(runtime)
+
+    # 1. Validation préventive des arguments (injections, null-bytes, path traversal, commandes destructrices)
+    is_valid, sec_err = security_engine.validate_arguments(tool_clean, args)
+    if not is_valid:
+        LOGGER.warning("[VOICE SECURITY BLOCKED] Exécution de '%s' refusée : %s", tool_clean, sec_err)
+        security_engine.audit_log(
+            tool_name=tool_clean,
+            arguments=args,
+            risk_level=3,
+            confirmed=False,
+            status="blocked",
+            details=sec_err,
+        )
+        return {
+            "success": False,
+            "status": "blocked",
+            "security_status": "blocked",
+            "requires_confirmation": False,
+            "action": tool_clean,
+            "error": "SecurityViolation",
+            "data": None,
+            "message": f"Action bloquée par la politique de sécurité : {sec_err}",
+        }
+
+    # 2. Évaluation du risque via SecurityPolicyEngine
+    risk_level = security_engine.get_risk_level(tool_clean, args)
+    needs_confirmation = security_engine.requires_confirmation(tool_clean, args)
+
+    # Autonomie fluide : les outils courants de lecture/statut/assistance vocale dont les arguments sont sains passent sans friction
+    if tool_lower in _SAFE_ROUTINE_VOICE_TOOLS and risk_level < 3:
+        needs_confirmation = False
+    elif tool_lower == "run_background_task":
+        raw_cmd = str(args.get("command") or "").strip().lower()
+        if raw_cmd and any(raw_cmd.startswith(pref) for pref in _SAFE_BG_COMMAND_PREFIXES) and not any(
+            sep in raw_cmd for sep in (";", "&&", "||", "|", "`", "$(")
+        ):
+            needs_confirmation = False
+            risk_level = 2
+        else:
+            needs_confirmation = True
+            risk_level = 3
+
+    if needs_confirmation or risk_level >= 3:
+        confirm_prompt = security_engine.confirmation_prompt(tool_clean, args)
+        LOGGER.warning(
+            "[VOICE SECURITY CONFIRMATION REQUIRED] Outil '%s' (risque=%d) bloqué en attente de validation : %s",
+            tool_clean,
+            risk_level,
+            confirm_prompt,
+        )
+        security_engine.audit_log(
+            tool_name=tool_clean,
+            arguments=args,
+            risk_level=risk_level,
+            confirmed=False,
+            status="pending_confirmation",
+            details=confirm_prompt,
+        )
+        return {
+            "success": False,
+            "status": "pending_confirmation",
+            "security_status": "pending_confirmation",
+            "requires_confirmation": True,
+            "action": tool_clean,
+            "data": {
+                "tool": tool_clean,
+                "arguments": args,
+                "risk_level": risk_level,
+            },
+            "message": confirm_prompt,
+        }
+
+    # 3. Exécution immédiate sans friction pour les outils sûrs/ordinaires (Tier 1 & Tier 2)
+    if tool_lower in ("web_search", "search_web"):
+        import web_search_service
+        q_str = str(args.get("query") or args.get("q") or args.get("target") or "").strip()
+        web_res = web_search_service.search_web_sourced(q_str, max_results=3)
+        tool_res = {
+            "success": bool(web_res.get("success", False)),
+            "action": tool_clean,
+            "data": web_res,
+            "message": web_res.get("formatted_context") or web_res.get("message") or "",
+        }
+    else:
+        tool_res = execute_tool(tool_clean, args)
+        if not isinstance(tool_res, dict):
+            tool_res = {"success": bool(tool_res), "action": tool_clean, "message": str(tool_res or "")}
+
+    security_engine.audit_log(
+        tool_name=tool_clean,
+        arguments=args,
+        risk_level=risk_level,
+        confirmed=False,
+        status="allowed" if tool_res.get("success", False) else "failed",
+    )
+    return tool_res
 
 VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
     {
@@ -478,6 +649,28 @@ VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": (
+                "Effectue une recherche web sourcée en direct (DuckDuckGo + Wikipédia) retournant les titres, URLs, "
+                "dates de publication et indicateurs d'ancienneté. À appeler obligatoirement pour toute question "
+                "d'actualité, information évolutive, cours, prix, résultat sportif, fonction politique actuelle, "
+                "version logicielle récente ou événement daté (aujourd'hui, maintenant, ce mois-ci, 2025, 2026, dernière nouvelle)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Requête factuelle ou d'actualité à vérifier en direct sur le web.",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
 ]
 
 VOICE_FAST_TEMPERATURE: float = 0.6
@@ -531,8 +724,12 @@ VOICE_SEMANTIC_SYSTEM_PROMPT = (
     "- Si Moctar demande de basculer la vue 3D, d'afficher le globe terrestre, sa position dans le monde, le réacteur plasma, le cœur quantique ou de retourner au NOC -> appelle 'switch_hud_view'.\n"
     "- Si Moctar demande de changer l'ambiance, la couleur ou le mode de l'orbe 3D (ex: 'mets l'orbe en vert', 'mode nuit', 'ambiance chaleureuse', 'orbe en or', 'mode victoire') -> appelle 'set_hud_mood'.\n"
     "- Si Moctar demande un statut Git, un git pull, un git commit ou un git push sur un projet (ex: Jarvis, Baba Market / Papa Market, Noor Express) -> appelle 'git_status', 'git_pull', 'prepare_commit' ou 'prepare_push'.\n"
-    "- Si Moctar pose une question factuelle, d'actualité, de culture, de sciences ou discute amicalement sans action requise -> "
-    "réponds directement avec rigueur, profondeur et perspicacité d'ingénieur, sans appeler d'outil inutilement."
+    "- Si Moctar pose une question d'actualité ou portant sur une information évolutive (actualités, cours, prix, résultats sportifs, "
+    "fonctions politiques actuelles, versions récentes, mots-clés comme aujourd'hui, maintenant, ce mois-ci, 2025, 2026, dernière nouvelle) -> "
+    "INTERDICTION ABSOLUE de répondre de mémoire : appelle l'outil 'web_search' (ou exploite les résultats fraîchement injectés dans [INFORMATIONS WEB ET ACTUALITÉS EN DIRECT]) "
+    "et cite explicitement la source ainsi que la date de publication (ou indique honnêtement si l'information n'a pas pu être vérifiée en ligne).\n"
+    "- Si Moctar pose une question purement théorique/intemporelle d'algorithmique ou discute amicalement sans donnée évolutive -> "
+    "réponds avec rigueur, profondeur et perspicacité d'ingénieur."
 )
 
 
@@ -798,6 +995,31 @@ def execute_voice_semantic_turn(
     except Exception:
         pass
 
+    # Détection automatique d'intention temporelle / actualité -> Recherche Web sourcée fraîche
+    is_temporal_intent = False
+    live_web_context = ""
+    try:
+        import web_search_service
+        if web_search_service.is_temporal_or_current_events_query(clean_text):
+            is_temporal_intent = True
+            live_web_context = web_search_service.fetch_live_web_context(clean_text, max_chars=1200)
+            if live_web_context:
+                prompt_sections.append(
+                    f"{live_web_context}\n"
+                    f"[CONSIGNE DE VÉRITÉ & SOURÇAGE WEB OBLIGATOIRE]\n"
+                    f"Pour cette question d'actualité ou de fait évolutif, appuie-toi exclusivement sur les extraits sourcés ci-dessus. "
+                    f"Cite explicitement la source et la date de publication (ou précise honnêtement si la date n'est pas spécifiée)."
+                )
+            else:
+                prompt_sections.append(
+                    "[ÉTAT DE LA RECHERCHE WEB EN DIRECT]\n"
+                    "Une recherche en ligne a été déclenchée automatiquement pour cette demande d'actualité/évolutive, "
+                    "mais aucune source web vérifiable n'a pu être récupérée à cet instant. "
+                    "Si aucun outil dédié (ex: get_weather) ne fournit la donnée, indique honnêtement que l'information n'a pas pu être vérifiée en ligne."
+                )
+    except Exception as web_exc:
+        LOGGER.debug("Avertissement recherche web automatique : %s", web_exc)
+
     if telemetry and isinstance(telemetry, str):
         prompt_sections.append(telemetry)
     full_system_prompt = "\n\n".join(str(s) for s in prompt_sections if s)
@@ -907,27 +1129,38 @@ def execute_voice_semantic_turn(
                 )
                 tool_res = {"success": True, "action": "update_active_task", "data": state, "message": "Mémoire de travail active mise à jour"}
             else:
-                tool_res = execute_tool(func_name, args)
+                tool_res = execute_voice_tool_securely(func_name, args, runtime=runtime)
             t_diff = int((time.perf_counter() - t_exec) * 1000)
 
-            # Enregistrement automatique dans la mémoire de travail active
-            try:
-                import active_task_tracker
-                if func_name == "open_app":
-                    active_task_tracker.record_task_action(f"Lancement de {args.get('target', 'application')}")
-                elif func_name == "optimize_system":
-                    active_task_tracker.record_task_action("Optimisation mémoire RAM et processus")
-                elif func_name == "get_project_context":
-                    active_task_tracker.record_task_action("Consultation avancement projet et Git")
-            except Exception:
-                pass
+            sec_state = tool_res.get("security_status") or ("allowed" if tool_res.get("success", False) else "failed")
+
+            # Enregistrement automatique dans la mémoire de travail active uniquement si autorisé et réussi
+            if tool_res.get("success", False):
+                try:
+                    import active_task_tracker
+                    if func_name == "open_app":
+                        active_task_tracker.record_task_action(f"Lancement de {args.get('target', 'application')}")
+                    elif func_name == "optimize_system":
+                        active_task_tracker.record_task_action("Optimisation mémoire RAM et processus")
+                    elif func_name == "get_project_context":
+                        active_task_tracker.record_task_action("Consultation avancement projet et Git")
+                except Exception:
+                    pass
 
             tools_used.append({
                 "tool": func_name,
                 "arguments": args,
                 "success": bool(tool_res.get("success", False)),
+                "security_status": sec_state,
+                "requires_confirmation": bool(tool_res.get("requires_confirmation", False)),
                 "duration_ms": t_diff,
             })
+
+            # Si l'action est bloquée ou requiert une confirmation de sécurité, ne pas exécuter l'effet de bord UI
+            if sec_state in ("blocked", "pending_confirmation"):
+                sec_msg = tool_res.get("message") or "Action soumise à la politique de sécurité."
+                tool_replies.append(sec_msg)
+                continue
 
             # Extraction spécifique selon l'outil
             if func_name == "open_app":
@@ -1013,14 +1246,24 @@ def execute_voice_semantic_turn(
                 msg = tool_res.get("message")
                 tool_replies.append(msg if msg else f"Opération {func_name} exécutée.")
 
+            elif func_name in ("web_search", "search_web"):
+                msg = tool_res.get("message")
+                tool_replies.append(msg if msg else "Aucune source web vérifiable n'a pu être récupérée.")
+
             else:
                 msg = tool_res.get("message")
                 if msg:
                     tool_replies.append(msg)
 
-        # Synthèse vocale intelligente par le LLM (Two-Step ReAct Loop)
+        has_security_block = any(t.get("security_status") == "blocked" for t in tools_used)
+        has_security_confirm = any(t.get("security_status") == "pending_confirmation" for t in tools_used)
+        has_web_search_tool = any(t.get("tool") in ("web_search", "search_web") for t in tools_used)
+
+        # Synthèse vocale intelligente par le LLM (Two-Step ReAct Loop) uniquement si pas d'interception sécurité
         final_reply: str | None = None
-        if brain and hasattr(brain, "chat"):
+        if has_security_block or has_security_confirm:
+            final_reply = _format_reply_ending(" ".join(r for r in tool_replies if r))
+        elif brain and hasattr(brain, "chat"):
             try:
                 synthesis_messages = list(chat_messages)
                 synthesis_messages.append({
@@ -1039,15 +1282,23 @@ def execute_voice_semantic_turn(
                         "content": json.dumps({"status": "success", "result": matching_reply}, ensure_ascii=False),
                     })
                 all_tools_ok = all(t.get("success", False) for t in tools_used)
+                sourcing_rule = (
+                    "\nOBLIGATION DE SOURÇAGE : Si la réponse s'appuie sur une recherche web ou une donnée d'actualité, "
+                    "cite obligatoirement la source et la date (ou indique honnêtement si l'information n'a pas pu être vérifiée en ligne)."
+                    if (has_web_search_tool or is_temporal_intent)
+                    else ""
+                )
                 if all_tools_ok:
                     status_instruction = (
                         "Les outils système ont été exécutés avec succès. Formule une réponse orale concise, limpide, vivante et proactive en 1 ou 2 phrases percutantes pour Moctar.\n"
                         "Valide les faits essentiels avec naturel et suggère la prochaine étape logique, sans jargon inutile."
+                        + sourcing_rule
                     )
                 else:
                     status_instruction = (
                         "Certaines actions ou commandes ont rencontré une erreur ou un échec. Formule une réponse orale directe, limpide et honnête en 1 ou 2 phrases pour Moctar.\n"
                         "Explique brièvement ce qui a coincé et ce qu'il convient de faire, sans prétendre que l'opération a réussi."
+                        + sourcing_rule
                     )
                 synthesis_prompt = (
                     f"{full_system_prompt}\n\n"
@@ -1088,8 +1339,15 @@ def execute_voice_semantic_turn(
             except Exception:
                 pass
 
+        turn_status = (
+            "blocked"
+            if has_security_block
+            else ("pending_confirmation" if has_security_confirm else "success")
+        )
         return {
-            "status": "success",
+            "status": turn_status,
+            "security_status": turn_status if (has_security_block or has_security_confirm) else "allowed",
+            "requires_confirmation": has_security_confirm,
             "reply": final_reply,
             "action": action_name,
             "url": action_url,
@@ -1153,15 +1411,33 @@ def execute_voice_semantic_turn(
             "semantic_tool_calling": False,
         }
 
-    # 6. Réponse par défaut ultime
+    # 6. Réponse de secours honnête (avec contexte web sourcé si disponible, sinon état dégradé explicite)
+    if is_temporal_intent and live_web_context:
+        return {
+            "status": "success",
+            "reply": live_web_context,
+            "action": None,
+            "url": None,
+            "title": None,
+            "tools_used": [{"tool": "web_search", "arguments": {"query": clean_text}, "success": True}],
+            "thought_chain": ["Contexte web sourcé retourné en mode dégradé sans LLM"],
+            "fast_path": True,
+            "semantic_tool_calling": True,
+        }
+
     return {
-        "status": "success",
-        "reply": "À vos ordres Moctar, je suis en ligne et tous les systèmes sont opérationnels.",
+        "status": "degraded",
+        "reply": (
+            "Mode dégradé actif : les moteurs IA (Groq/Gemini) n'ont pas pu répondre à cette requête "
+            "et l'information n'a pas pu être vérifiée en ligne."
+            if is_temporal_intent
+            else "Mode dégradé actif : les moteurs IA distants sont temporairement indisponibles. Les commandes locales restent opérationnelles."
+        ),
         "action": None,
         "url": None,
         "title": None,
         "tools_used": [],
-        "thought_chain": ["Réponse nominale par défaut"],
+        "thought_chain": ["Réponse dégradée honnête (fournisseurs IA indisponibles)"],
         "fast_path": True,
         "semantic_tool_calling": False,
     }

@@ -178,6 +178,15 @@
       color: var(--green);
       font-weight: 700;
       font-size: 10px;
+      transition: color 0.25s ease;
+    }
+
+    .status-online[data-status="DEGRADED"] {
+      color: var(--gold);
+    }
+
+    .status-online[data-status="OFFLINE"] {
+      color: var(--red);
     }
 
     .pulse-dot {
@@ -187,6 +196,24 @@
       background: var(--green);
       box-shadow: 0 0 8px var(--green);
       animation: pulse-ring 1.8s infinite;
+    }
+
+    .status-online[data-status="DEGRADED"] .pulse-dot {
+      background: var(--gold);
+      box-shadow: 0 0 8px var(--gold);
+    }
+
+    .status-online[data-status="OFFLINE"] .pulse-dot {
+      background: var(--red);
+      box-shadow: 0 0 8px var(--red);
+      animation: none;
+    }
+
+    .status-last-check {
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 500;
+      margin-left: 2px;
     }
 
     @keyframes pulse-ring {
@@ -291,31 +318,77 @@
       box-shadow: 0 0 14px rgba(255, 59, 48, 0.4);
     }
 
-    /* --- Ruban Inférieur Flottant Compact --- */
+    /* --- Ruban Inférieur Flottant Extensible & Sélectionnable --- */
     .hud-bottom-ribbon {
       display: flex;
       flex-direction: column;
       gap: 5px;
-      max-width: 800px;
+      max-width: 840px;
       margin: 0 auto;
       width: 100%;
     }
 
     .transcript-box {
-      background: rgba(3, 10, 22, 0.65);
+      background: rgba(3, 10, 22, 0.78);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
       border: 1px solid var(--chip-border);
       border-radius: 12px;
-      padding: 6px 14px;
+      padding: 8px 14px;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
       display: flex;
       flex-direction: column;
-      gap: 3px;
-      min-height: 36px;
-      max-height: 56px;
+      gap: 6px;
+      min-height: 44px;
+      max-height: 42vh;
       overflow-y: auto;
+      pointer-events: auto;
+      user-select: text;
+      -webkit-user-select: text;
       transition: all 0.3s ease;
+    }
+
+    .transcript-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid rgba(0, 243, 255, 0.14);
+    }
+
+    .transcript-toolbar-title {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .transcript-toolbar-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-transcript-tool {
+      padding: 2px 9px;
+      background: rgba(0, 243, 255, 0.1);
+      border: 1px solid rgba(0, 243, 255, 0.28);
+      border-radius: 10px;
+      color: var(--cyan);
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      font-weight: 600;
+      cursor: pointer;
+      pointer-events: auto;
+      transition: all 0.2s ease;
+    }
+
+    .btn-transcript-tool:hover {
+      background: var(--cyan);
+      color: var(--bg-deep);
+      box-shadow: 0 0 10px var(--cyan-glow);
     }
 
     .transcript-user {
@@ -323,14 +396,67 @@
       font-size: 11px;
       color: var(--gold);
       font-weight: 600;
+      user-select: text;
+      -webkit-user-select: text;
+      pointer-events: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
 
     .transcript-assistant {
       font-family: var(--font-mono);
       font-size: 12px;
       color: var(--cyan);
-      line-height: 1.4;
+      line-height: 1.48;
       text-shadow: 0 0 8px rgba(0, 243, 255, 0.3);
+      user-select: text;
+      -webkit-user-select: text;
+      pointer-events: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      cursor: text;
+    }
+
+    .hud-history-panel {
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px dashed rgba(0, 243, 255, 0.22);
+      max-height: 22vh;
+      overflow-y: auto;
+      user-select: text;
+      -webkit-user-select: text;
+      pointer-events: auto;
+    }
+
+    .hud-history-panel.open {
+      display: flex;
+    }
+
+    .hud-history-item {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.4;
+      padding: 4px 8px;
+      border-radius: 6px;
+      background: rgba(6, 20, 38, 0.65);
+      border-left: 2px solid var(--cyan);
+      user-select: text;
+      -webkit-user-select: text;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .hud-history-item.role-user {
+      border-left-color: var(--gold);
+      color: var(--gold);
+    }
+
+    .hud-history-item.role-assistant {
+      border-left-color: var(--cyan);
+      color: var(--text);
     }
 
     /* Ligne de Commande Hybride Compacte */
@@ -353,6 +479,8 @@
       font-size: 11px;
       outline: none;
       transition: all 0.25s ease;
+      user-select: text;
+      -webkit-user-select: text;
     }
 
     .hud-cmd-input:focus {
@@ -469,7 +597,8 @@
       color: #fff;
       box-shadow: 0 0 14px rgba(255, 59, 48, 0.6);
     }
-      /* Modal Holographique NeuroVision */
+
+    /* Modal Holographique NeuroVision */
     .hud-modal-overlay {
       position: fixed;
       top: 0;
@@ -523,7 +652,7 @@
           <div class="clock-date" id="hud-clock-date">SYSTEM CONNECTED</div>
         </div>
 
-        <div class="telemetry-badge">
+        <div class="telemetry-badge interactive" id="hud-telemetry-badge">
           <div class="telemetry-item">
             HOST: <strong id="hud-host-val">moctar-Precision-M4800</strong>
           </div>
@@ -533,8 +662,10 @@
           <div class="telemetry-item">
             RAM: <strong id="hud-ram-val">--%</strong>
           </div>
-          <div class="status-online">
-            <span class="pulse-dot"></span> EN LIGNE
+          <div class="status-online" id="hud-status-badge" data-status="ONLINE" title="État réel des sous-systèmes HUD">
+            <span class="pulse-dot" id="hud-status-dot"></span>
+            <span id="hud-status-label">EN LIGNE</span>
+            <span class="status-last-check" id="hud-last-check-label">--:--:--</span>
           </div>
         </div>
       </div>
@@ -566,9 +697,21 @@
 
     <!-- 3. Ruban Inférieur Flottant -->
     <div class="hud-bottom-ribbon">
-      <div class="transcript-box" id="hud-dialogue-box">
+      <div class="transcript-box interactive" id="hud-dialogue-box">
+        <div class="transcript-toolbar">
+          <span class="transcript-toolbar-title">CANAL DE RÉPONSE &amp; TRANSCRIPTION</span>
+          <div class="transcript-toolbar-actions">
+            <button type="button" class="btn-transcript-tool" id="hud-copy-reply-btn" title="Copier la réponse dans le presse-papiers">
+              📋 Copier la réponse
+            </button>
+            <button type="button" class="btn-transcript-tool" id="hud-history-toggle-btn" title="Afficher / masquer l'historique récent de la conversation">
+              📜 Historique
+            </button>
+          </div>
+        </div>
         <div class="transcript-user" id="hud-user-transcript">« M.O.C.T.A.R en veille. Cliquez sur le micro pour parler... »</div>
         <div class="transcript-assistant" id="hud-assistant-reply">Prêt et à votre disposition, Moctar.</div>
+        <div class="hud-history-panel" id="hud-history-panel" aria-label="Historique récent de la conversation"></div>
       </div>
 
       <!-- Ligne de Commande Hybride Compacte (Voix / Texte) -->
@@ -604,19 +747,16 @@
   </div>
 
   <!-- Moteur Three.js Local (Offline) -->
-  <script src="/static/js/three.min.js?v=5.6"></script>
+  <script src="/static/js/three.min.js?v=5.7"></script>
   <!-- Moteur Vocal Audio Réel & Wake-Word -->
-  <script src="/static/voice.js?v=5.6"></script>
+  <script src="/static/voice.js?v=5.7"></script>
   <!-- Moteur Graphique HUD 3D Unifié (Source Unique de Vérité) -->
-  <script src="/static/js/hud_3d.js?v=5.6"></script>
+  <script src="/static/js/hud_3d.js?v=5.7"></script>
 
-  <!-- ========================================================================= -->
-  <!-- MODAL HOLOGRAPHIQUE NEUROVISION POUR LE HUD 3D                           -->
-  <!-- ========================================================================= -->
   <!-- ========================================================================= -->
   <!-- MODAL HOLOGRAPHIQUE NEUROVISION POUR LE HUD 3D (3D ULTRA-CINÉMATIQUE)     -->
   <!-- ========================================================================= -->
-    <div id="hud-neurovision-overlay" class="hud-modal-overlay">
+  <div id="hud-neurovision-overlay" class="hud-modal-overlay">
     <div class="hud-modal-card" style="max-width: 1520px; width: min(1520px, calc(100vw - 32px)); max-height: 94vh; overflow: hidden; padding: 0; background: transparent; border: none; box-shadow: none;">
       <div id="neurovision-dialog" style="display:block; position:relative; width:100%; border-radius:18px; margin:0;">
         <div class="nv-header">

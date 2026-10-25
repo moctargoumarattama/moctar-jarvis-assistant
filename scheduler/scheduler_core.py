@@ -20,6 +20,10 @@ from scheduler import scheduler_store as store
 logger = logging.getLogger("jarvis.scheduler")
 
 _lock = threading.Lock()
+_dispatch_lock = threading.Lock()
+_in_flight_tasks: set[int] = set()
+_recent_dispatches: dict[int, tuple[float, str]] = {}
+_IDEMPOTENCY_TTL_SECONDS = 30.0
 _stop_event = threading.Event()
 _thread: threading.Thread | None = None
 
@@ -56,10 +60,14 @@ def _configured_poll_seconds() -> int:
 
 
 def _check_and_queue(now: datetime | None = None) -> None:
-    """Mark due tasks as pending confirmation."""
+    """Mark due tasks as pending confirmation with atomic reservation."""
     due_tasks = store.get_due_tasks(now=now)
     current_time = now or datetime.now()
     for task in due_tasks:
+        tid = int(task["id"])
+        with _dispatch_lock:
+            if tid in _in_flight_tasks:
+                continue
         last_sent = task.get("last_sent")
         if last_sent:
             try:
@@ -68,8 +76,91 @@ def _check_and_queue(now: datetime | None = None) -> None:
                     continue
             except Exception:
                 pass
-        logger.info("Task due: [%s] %s -> %s", task["id"], task["title"], task["platform"])
-        store.update_task(task["id"], status="pending_confirmation")
+        logger.info("Task due: [%s] %s -> %s", tid, task["title"], task["platform"])
+        store.update_task(tid, status="pending_confirmation")
+
+
+def is_task_in_flight(task_id: int) -> bool:
+    """Return True if task_id is currently being confirmed or dispatched."""
+    with _dispatch_lock:
+        return int(task_id) in _in_flight_tasks
+
+
+def _reserve_task_atomically(task_id: int) -> tuple[bool, dict | None, str]:
+    """ Atomically claim a task for execution via Lock + SQLite conditional UPDATE.
+
+    Returns:
+        (claimed, task_dict, idempotent_or_error_message)
+    """
+    tid = int(task_id)
+    now_mono = time.monotonic()
+
+    with _dispatch_lock:
+        # 1. Vérification du verrou en vol (in-flight)
+        if tid in _in_flight_tasks:
+            return False, store.get_task(tid), f"Tache {tid} deja en cours de traitement (processing)."
+
+        # 2. Vérification du registre d'idempotence récent (anti double-clic / rejeu)
+        recent = _recent_dispatches.get(tid)
+        if recent is not None:
+            sent_mono, prev_detail = recent
+            if (now_mono - sent_mono) < _IDEMPOTENCY_TTL_SECONDS:
+                current_t = store.get_task(tid)
+                if current_t and str(current_t.get("status") or "").lower() not in (
+                    "pending_confirmation",
+                    "awaiting_confirmation",
+                    "pending",
+                    "scheduled",
+                ):
+                    return False, current_t, f"Doublon ignore (idempotent) : {prev_detail}"
+
+        task = store.get_task(tid)
+        if task is None:
+            return False, None, f"Tache {tid} introuvable."
+
+        current_status = str(task.get("status") or "").strip().lower()
+        if current_status == "processing":
+            return False, task, f"Tache {tid} deja en cours de traitement (processing)."
+        if current_status in ("completed", "sent", "confirmed"):
+            return False, task, f"Tache {tid} deja executee ({current_status})."
+
+        # 3. Transition atomique SQLite : UPDATE ... SET status = 'processing' WHERE id = ? AND status IN (...)
+        if hasattr(store, "_conn_scope"):
+            try:
+                with store._conn_scope() as conn:
+                    cur = conn.execute(
+                        """UPDATE scheduled_tasks
+                           SET status = 'processing'
+                           WHERE id = ?
+                             AND status IN (
+                                 'pending',
+                                 'awaiting_confirmation',
+                                 'pending_confirmation',
+                                 'scheduled',
+                                 'active',
+                                 'failed',
+                                 'error'
+                             )""",
+                        (tid,),
+                    )
+                    if cur.rowcount == 0:
+                        existing_row = conn.execute(
+                            "SELECT status FROM scheduled_tasks WHERE id = ?",
+                            (tid,),
+                        ).fetchone()
+                        if existing_row is not None:
+                            db_status = str(existing_row[0] or "").strip().lower()
+                            return (
+                                False,
+                                task,
+                                f"Tache {tid} deja reservee ou traitee (statut={db_status}).",
+                            )
+            except Exception as db_exc:
+                logger.debug("Transition SQLite directe ignoree (fallback store.update_task): %s", db_exc)
+
+        store.update_task(tid, status="processing")
+        _in_flight_tasks.add(tid)
+        return True, task, ""
 
 
 def run_once(now: datetime | None = None) -> None:
@@ -129,50 +220,71 @@ def stop(join_timeout: float = 2) -> None:
 
 def confirm_and_send(task_id: int) -> tuple[bool, str]:
     """
-    Try to execute a task immediately and update its status.
+    Atomically reserve and execute a scheduled task once, preventing duplicate dispatches.
     """
-    task = store.get_task(task_id)
-    if task is None:
-        return False, f"Tache {task_id} introuvable."
+    tid = int(task_id)
+    claimed, task, reservation_msg = _reserve_task_atomically(tid)
+    if not claimed:
+        if task is None:
+            return False, reservation_msg
+        logger.info("confirm_and_send(%s) idempotent skip: %s", tid, reservation_msg)
+        return True, reservation_msg
 
-    message = task["message"]
-    if task.get("ai_enhanced"):
-        message = enhance_message_with_ai(
-            message,
+    try:
+        message = task["message"]
+        if task.get("ai_enhanced"):
+            message = enhance_message_with_ai(
+                message,
+                task["platform"],
+                task["title"],
+                task.get("media_paths", []),
+            )
+
+        result = platforms.dispatch(
             task["platform"],
-            task["title"],
+            task["target"],
+            message,
             task.get("media_paths", []),
         )
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        if result.is_final:
+            store.update_task(tid, status="active", last_sent=now_iso)
+            with _dispatch_lock:
+                _recent_dispatches[tid] = (time.monotonic(), result.detail)
+            return True, result.detail
 
-    result = platforms.dispatch(
-        task["platform"],
-        task["target"],
-        message,
-        task.get("media_paths", []),
-    )
-    now_iso = datetime.now().isoformat(timespec="seconds")
-    if result.is_final:
-        store.update_task(task_id, status="active", last_sent=now_iso)
-        return True, result.detail
+        if result.requires_manual_action:
+            store.update_task(tid, status="awaiting_manual_action")
+            with _dispatch_lock:
+                _recent_dispatches[tid] = (time.monotonic(), result.detail)
+            return True, result.detail
 
-    if result.requires_manual_action:
-        store.update_task(task_id, status="awaiting_manual_action")
-        return True, result.detail
-
-    store.update_task(task_id, status="error")
-    return False, result.detail
+        fail_reason = str(result.detail or "Erreur d'envoi inconnue").strip()
+        logger.error("Echec d'envoi de la tache planifiee [%s]: %s", tid, fail_reason)
+        store.update_task(tid, status="failed")
+        return False, fail_reason
+    except Exception as exc:
+        fail_reason = f"Erreur d'execution de la tache {tid}: {exc}"
+        logger.error("Exception dans confirm_and_send(%s): %s", tid, exc, exc_info=True)
+        store.update_task(tid, status="failed")
+        return False, fail_reason
+    finally:
+        with _dispatch_lock:
+            _in_flight_tasks.discard(tid)
 
 
 def mark_task_sent(task_id: int) -> tuple[bool, str]:
     """
-    Mark a manually finalized task as sent.
+    Mark a manually finalized task as sent with atomic lock protection.
     """
-    task = store.get_task(task_id)
-    if task is None:
-        return False, f"Tache {task_id} introuvable."
-
-    now_iso = datetime.now().isoformat(timespec="seconds")
-    store.update_task(task_id, status="active", last_sent=now_iso)
+    tid = int(task_id)
+    with _dispatch_lock:
+        task = store.get_task(tid)
+        if task is None:
+            return False, f"Tache {tid} introuvable."
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        store.update_task(tid, status="active", last_sent=now_iso)
+        _recent_dispatches[tid] = (time.monotonic(), "Tache marquee comme envoyee.")
     return True, "Tache marquee comme envoyee."
 
 

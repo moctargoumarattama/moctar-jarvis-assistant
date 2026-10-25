@@ -103,11 +103,18 @@
   const cpuValEl = $('hud-cpu-val');
   const ramValEl = $('hud-ram-val');
   const hostValEl = $('hud-host-val');
+  const statusBadgeEl = $('hud-status-badge');
+  const statusLabelEl = $('hud-status-label');
+  const lastCheckLabelEl = $('hud-last-check-label');
+  const btnCopyReply = $('hud-copy-reply-btn');
+  const btnHistoryToggle = $('hud-history-toggle-btn');
+  const historyPanelEl = $('hud-history-panel');
   const clockTimeEl = $('hud-clock-time');
   const clockDateEl = $('hud-clock-date');
   const cmdForm = $('hud-cmd-form');
   const cmdInput = $('hud-cmd-input');
   const vumeterEl = $('hud-vumeter');
+  const recentHistoryTurns = [];
 
   let renderer, scene, camera;
   let textureLoader;
@@ -956,6 +963,10 @@
       assistantTextEl.textContent = reply;
     }
 
+    if ((rawUser && !isHallucination) || reply) {
+      recordHudConversationTurn(rawUser && !isHallucination ? rawUser : '', reply);
+    }
+
     // Ouverture d'URL externe si demandée (ex: YouTube, Google)
     let targetUrl = data.url;
     if (!targetUrl && Array.isArray(data.tools_used)) {
@@ -1247,10 +1258,120 @@
     }
   }
 
+  function recordHudConversationTurn(userText, assistantText) {
+    const u = String(userText || '').trim();
+    const a = String(assistantText || '').trim();
+    if (!u && !a) return;
+    const nowTime = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    if (u) {
+      recentHistoryTurns.push({ role: 'user', content: u, time: nowTime });
+    }
+    if (a) {
+      recentHistoryTurns.push({ role: 'assistant', content: a, time: nowTime });
+    }
+    while (recentHistoryTurns.length > 20) {
+      recentHistoryTurns.shift();
+    }
+    if (historyPanelEl && historyPanelEl.classList.contains('open')) {
+      renderHudHistoryPanel(recentHistoryTurns);
+    }
+  }
+
+  function renderHudHistoryPanel(items) {
+    if (!historyPanelEl) return;
+    historyPanelEl.innerHTML = '';
+    const list = Array.isArray(items) && items.length > 0 ? items : recentHistoryTurns;
+    if (!list || list.length === 0) {
+      const emptyEl = document.createElement('div');
+      emptyEl.className = 'hud-history-item role-assistant';
+      emptyEl.textContent = "Aucun échange enregistré dans cette session.";
+      historyPanelEl.appendChild(emptyEl);
+      return;
+    }
+    list.slice(-12).forEach((entry) => {
+      const row = document.createElement('div');
+      const role = entry.role === 'user' ? 'user' : 'assistant';
+      row.className = `hud-history-item role-${role}`;
+      const prefix = role === 'user' ? 'VOUS' : 'M.O.C.T.A.R';
+      const ts = entry.time ? ` [${entry.time}]` : '';
+      row.textContent = `${prefix}${ts} : ${entry.content || ''}`;
+      historyPanelEl.appendChild(row);
+    });
+    historyPanelEl.scrollTop = historyPanelEl.scrollHeight;
+  }
+
+  async function toggleHudHistoryPanel() {
+    if (!historyPanelEl) return;
+    const isOpen = historyPanelEl.classList.toggle('open');
+    if (btnHistoryToggle) {
+      btnHistoryToggle.textContent = isOpen ? '🔼 Masquer' : '📜 Historique';
+    }
+    if (!isOpen) return;
+
+    try {
+      const res = await fetch('/api/jarvis/history?limit=12', { credentials: 'include', cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const serverMsgs = Array.isArray(data.messages) ? data.messages : (Array.isArray(data.history) ? data.history : []);
+        if (serverMsgs.length > 0) {
+          renderHudHistoryPanel(serverMsgs);
+          return;
+        }
+      }
+    } catch (_) {}
+    renderHudHistoryPanel(recentHistoryTurns);
+  }
+
+  async function copyAssistantReply() {
+    const text = assistantTextEl ? String(assistantTextEl.textContent || '').trim() : '';
+    if (!text) return;
+    let copied = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      }
+    } catch (_) {}
+
+    if (!copied) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        copied = true;
+      } catch (_) {}
+    }
+
+    if (btnCopyReply) {
+      const prev = btnCopyReply.textContent;
+      btnCopyReply.textContent = copied ? '✅ Copié !' : '⚠️ Échec copie';
+      setTimeout(() => {
+        btnCopyReply.textContent = prev || '📋 Copier la réponse';
+      }, 1600);
+    }
+  }
+
   // =========================================================================
   // 4. ÉCOUTEURS D'ÉVÉNEMENTS, HORLOGE & TÉLÉMÉTRIE TEMPS RÉEL (NOC UNIFIÉ)
   // =========================================================================
   function setupUIEventListeners() {
+    if (btnCopyReply) {
+      btnCopyReply.addEventListener('click', (e) => {
+        e.preventDefault();
+        copyAssistantReply();
+      });
+    }
+    if (btnHistoryToggle) {
+      btnHistoryToggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleHudHistoryPanel();
+      });
+    }
     if (btnPlasmaView) {
       btnPlasmaView.addEventListener('click', (e) => {
         e.preventDefault();
@@ -1340,15 +1461,53 @@
   }
 
   function startTelemetrySync() {
-    function applyMetrics(cpu, ram, host) {
-      if (cpuValEl && cpu !== undefined && cpu !== null) {
-        cpuValEl.textContent = `${Number(cpu).toFixed(1)}%`;
+    function applyMetrics(cpu, ram, host, metricsAvailable = true, metricsError = null) {
+      const cpuValid = metricsAvailable !== false && cpu !== undefined && cpu !== null && !Number.isNaN(Number(cpu));
+      const ramValid = metricsAvailable !== false && ram !== undefined && ram !== null && !Number.isNaN(Number(ram));
+
+      if (cpuValEl) {
+        cpuValEl.textContent = cpuValid ? `${Number(cpu).toFixed(1)}%` : 'INDISPONIBLE';
+        cpuValEl.title = cpuValid ? `Charge CPU : ${Number(cpu).toFixed(1)}%` : (metricsError || 'Métrique CPU indisponible');
       }
-      if (ramValEl && ram !== undefined && ram !== null) {
-        ramValEl.textContent = `${Number(ram).toFixed(1)}%`;
+      if (ramValEl) {
+        ramValEl.textContent = ramValid ? `${Number(ram).toFixed(1)}%` : 'INDISPONIBLE';
+        ramValEl.title = ramValid ? `Charge RAM : ${Number(ram).toFixed(1)}%` : (metricsError || 'Métrique RAM indisponible');
       }
       if (hostValEl && host) {
         hostValEl.textContent = host;
+      }
+    }
+
+    function applyHudStatus(statusCode, statusLabel, lastCheckIso, degradedReasons) {
+      const normStatus = String(statusCode || 'ONLINE').toUpperCase();
+      if (statusBadgeEl) {
+        statusBadgeEl.setAttribute('data-status', normStatus);
+        if (Array.isArray(degradedReasons) && degradedReasons.length > 0) {
+          statusBadgeEl.title = `${statusLabel || normStatus} — ${degradedReasons.join(' | ')}`;
+        } else {
+          statusBadgeEl.title = `État HUD : ${statusLabel || normStatus}`;
+        }
+      }
+      if (statusLabelEl) {
+        statusLabelEl.textContent = statusLabel || (
+          normStatus === 'OFFLINE' ? 'HORS LIGNE' : (normStatus === 'DEGRADED' ? 'MODE DÉGRADÉ' : 'EN LIGNE')
+        );
+      }
+      if (lastCheckLabelEl) {
+        let timeLabel = '--:--:--';
+        if (lastCheckIso) {
+          const m = String(lastCheckIso).match(/(\d{2}:\d{2}:\d{2})/);
+          if (m) {
+            timeLabel = m[1];
+          } else {
+            try {
+              timeLabel = new Date(lastCheckIso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            } catch (_) {}
+          }
+        } else {
+          timeLabel = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+        lastCheckLabelEl.textContent = `(${timeLabel})`;
       }
     }
 
@@ -1367,6 +1526,7 @@
           const pData = await pRes.json();
           if (pData && pData.has_event && pData.message) {
             if (assistantTextEl) assistantTextEl.textContent = pData.message;
+            recordHudConversationTurn('', pData.message);
             if (pData.event && pData.event.mood) {
               applyMood(pData.event.mood);
             }
@@ -1382,29 +1542,46 @@
 
     async function sync() {
       let metricsApplied = false;
+      let anyEndpointReachable = false;
+
       // 1. Endpoint NOC /api/snapshot (prioritaire et identique au Dashboard NOC)
       try {
         const snapRes = await fetch('/api/snapshot', { cache: 'no-store', credentials: 'same-origin' });
         if (snapRes.ok) {
+          anyEndpointReachable = true;
           const snap = await snapRes.json();
-          const cpu = snap.cpu?.total ?? snap.cpu_percent;
-          const ram = snap.memory?.percent ?? snap.ram_percent;
+          const cpu = snap.cpu?.total ?? snap.cpu_percent ?? null;
+          const ram = snap.memory?.percent ?? snap.ram_percent ?? null;
           const host = snap.host?.hostname ?? snap.hostname;
-          if (cpu !== undefined || ram !== undefined) {
-            applyMetrics(cpu, ram, host);
+          if (cpu !== null || ram !== null) {
+            applyMetrics(cpu, ram, host, true, null);
             metricsApplied = true;
           }
         }
       } catch (_) {}
 
-      // 2. Endpoint /api/hud/state (synchronise aussi la vue 3D, le verrouillage GPS et les sous-titres commandés à distance)
+      // 2. Endpoint /api/hud/state (synchronise l'état réel, les métriques, la vue 3D, le verrouillage GPS et les sous-titres)
       try {
         const res = await fetch('/api/hud/state', { cache: 'no-store', credentials: 'same-origin' });
         if (res.ok) {
+          anyEndpointReachable = true;
           const data = await res.json();
           if (!metricsApplied) {
-            applyMetrics(data.cpu_percent, data.ram_percent, data.hostname);
+            applyMetrics(
+              data.cpu_percent,
+              data.ram_percent,
+              data.hostname,
+              data.metrics_available,
+              data.metrics_error
+            );
           }
+          applyHudStatus(
+            data.hud_status || data.status || (data.metrics_available === false ? 'DEGRADED' : 'ONLINE'),
+            data.status_label,
+            data.last_check_iso,
+            data.degraded_reasons
+          );
+
           const remoteTs = Number(data.last_updated || 0);
           if (data.mood || data.mood_color) {
             applyMood(data.mood, data.mood_color, data.pulse_speed);
@@ -1416,6 +1593,9 @@
             }
             if (data.assistant_reply && assistantTextEl) {
               assistantTextEl.textContent = data.assistant_reply;
+            }
+            if (data.user_transcript || data.assistant_reply) {
+              recordHudConversationTurn(data.user_transcript || '', data.assistant_reply || '');
             }
             if (data.locate === true) {
               lockOnMoctarPosition(Boolean(data.assistant_reply));
@@ -1429,6 +1609,11 @@
           }
         }
       } catch (_) {}
+
+      if (!anyEndpointReachable) {
+        applyMetrics(null, null, null, false, 'Serveur injoignable');
+        applyHudStatus('OFFLINE', 'HORS LIGNE', new Date().toISOString(), ['Serveur injoignable']);
+      }
 
       // 3. Vérification des initiatives proactives vocales (bienveillance, santé, rythme circadien)
       await checkProactiveEvent();

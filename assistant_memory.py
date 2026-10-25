@@ -545,7 +545,34 @@ class AssistantMemory:
             recent.insert(0, topic)
             profile["recent_topics"] = recent[:5]
 
-        # 2. Détection de préférences ou clubs sportifs mentionnés
+        # 2. Détection de négation et vérification de marqueur explicite à la 1re personne
+        negation_pattern = re.compile(
+            r"\b(?:ne|n['’]|pas|plus|jamais|aucun|aucune|sans|d[ée]teste|[ée]vite)\b",
+            re.IGNORECASE,
+        )
+        first_person_pattern = re.compile(
+            r"(?:\bje\s+suis\b|\bj['’]\s*habite\b|\bj['’]\s*utilise\b|\bmon\s+projet\b|\bma\s+pr[ée]f[ée]rence\b|\bmon\s+club\b|\bmon\s+[ée]quipe\b|\bje\s+supporte\b|\bj['’]\s*aime\b|\bje\s+pr[ée]f[èe]re\b)",
+            re.IGNORECASE,
+        )
+        has_negation = bool(negation_pattern.search(low_user))
+        has_first_person = bool(first_person_pattern.search(low_user))
+        is_question = "?" in user_text or bool(
+            re.match(r"^\s*(?:quel|quelle|quels|quelles|ou|où|comment|pourquoi|qui|est-ce\s+que)\b", low_user)
+        )
+        can_extract_positive_fact = has_first_person and not has_negation and not is_question
+        statement_ts = datetime.now().isoformat()
+        provenance_map = profile.get("fact_provenance", {})
+        if not isinstance(provenance_map, dict):
+            provenance_map = {}
+
+        def _record_provenance(fact_key: str, fact_val: Any) -> None:
+            provenance_map[fact_key] = {
+                "value": fact_val,
+                "source": "explicit_user_statement",
+                "timestamp": statement_ts,
+            }
+
+        # 2b. Détection de préférences ou clubs sportifs mentionnés (uniquement affirmatif 1re personne)
         fav_teams = set(profile.get("favorite_sports_teams", ["Real Madrid"]))
         team_patterns = {
             "real madrid": "Real Madrid",
@@ -560,28 +587,37 @@ class AssistantMemory:
             "liverpool": "Liverpool",
             "bayern": "Bayern Munich",
         }
-        for pat, canonical in team_patterns.items():
-            if re.search(rf"\b(?:mon\s+club|mon\s+[ée]quipe|je\s+supporte|j['’]aime|fan\s+du)\s+.*{pat}\b", low_user) or (
-                pat in low_user and any(w in low_user for w in ("préféré", "prefere", "supporte"))
-            ):
-                fav_teams.add(canonical)
+        if can_extract_positive_fact:
+            for pat, canonical in team_patterns.items():
+                if re.search(rf"\b(?:mon\s+club|mon\s+[ée]quipe|je\s+supporte|j['’]aime|fan\s+du)\s+.*{pat}\b", low_user) or (
+                    pat in low_user and any(w in low_user for w in ("préféré", "prefere", "supporte"))
+                ):
+                    fav_teams.add(canonical)
+                    _record_provenance(f"favorite_sports_team:{canonical}", canonical)
         profile["favorite_sports_teams"] = list(fav_teams)
 
-        # 3. Préférences d'outils, nationalité et villes
+        # 3. Préférences d'outils, nationalité et villes (protégées contre les négations et questions générales)
         known_prefs = profile.get("known_preferences", {})
-        if "vscode" in low_user or "visual studio code" in low_user:
-            known_prefs["editor"] = "VS Code"
-        if "chrome" in low_user:
-            known_prefs["browser"] = "Chrome"
-        if re.search(r"\b(?:nig[ée]rien(?:ne)?|niger)\b", low_user):
-            profile["nationality"] = "Nigérien"
-            profile["country"] = "Niger"
-            known_prefs["nationality"] = "Nigérien"
-            known_prefs["origin"] = "Niger"
-            known_prefs["primary_city"] = "Niamey"
-        elif any(w in low_user for w in ("casablanca", "casa", "maroc")):
-            known_prefs["secondary_city"] = "Casablanca"
+        if can_extract_positive_fact:
+            if "vscode" in low_user or "visual studio code" in low_user:
+                known_prefs["editor"] = "VS Code"
+                _record_provenance("editor", "VS Code")
+            if "chrome" in low_user:
+                known_prefs["browser"] = "Chrome"
+                _record_provenance("browser", "Chrome")
+            if re.search(r"\b(?:nig[ée]rien(?:ne)?|niger)\b", low_user):
+                profile["nationality"] = "Nigérien"
+                profile["country"] = "Niger"
+                known_prefs["nationality"] = "Nigérien"
+                known_prefs["origin"] = "Niger"
+                known_prefs["primary_city"] = "Niamey"
+                _record_provenance("nationality", "Nigérien")
+                _record_provenance("country", "Niger")
+            elif any(w in low_user for w in ("casablanca", "casa", "maroc")):
+                known_prefs["secondary_city"] = "Casablanca"
+                _record_provenance("secondary_city", "Casablanca")
         profile["known_preferences"] = known_prefs
+        profile["fact_provenance"] = provenance_map
 
         # Enregistrement persistant autonome
         self.update_moctar_profile(profile)
@@ -908,12 +944,10 @@ class AssistantMemory:
         if not rows:
             return []
 
-        # Remise dans l'ordre chronologique
+        # Remise dans l'ordre chronologique (du plus ancien au plus récent)
         rows.reverse()
 
-        messages: List[Dict[str, Any]] = []
-        total_chars = 0
-
+        all_messages: List[Dict[str, Any]] = []
         for role, content, tool_calls_raw, tool_call_id in rows:
             msg: Dict[str, Any] = {"role": role, "content": content or ""}
             if tool_calls_raw:
@@ -923,36 +957,71 @@ class AssistantMemory:
                     pass
             if tool_call_id:
                 msg["tool_call_id"] = tool_call_id
-
-            msg_len = len(content or "") + len(tool_calls_raw or "")
-            if total_chars + msg_len > max_chars and len(messages) >= 2:
-                # Éviter de couper au milieu si le message suivant est un tool
-                break
-
-            total_chars += msg_len
-            messages.append(msg)
-
-        # Nettoyage de tête : ne jamais commencer la liste de contexte par un message 'tool'
-        while messages and messages[0].get("role") == "tool":
-            messages.pop(0)
+            msg["_char_len"] = len(content or "") + len(tool_calls_raw or "")
+            all_messages.append(msg)
 
         # Déduplication de sécurité : élimine les doublons consécutifs résiduels (même rôle et même contenu)
         deduped: List[Dict[str, Any]] = []
-        for m in messages:
+        for m in all_messages:
             if (
                 deduped
                 and deduped[-1].get("role") == m.get("role")
                 and (deduped[-1].get("content") or "").strip() == (m.get("content") or "").strip()
+                and not m.get("tool_calls")
+                and not m.get("tool_call_id")
             ):
                 continue
             deduped.append(m)
-        messages = deduped
 
-        # Tronquer aux max_turns derniers messages si nécessaire
-        if len(messages) > max_turns * 2:
-            messages = messages[-(max_turns * 2):]
-            while messages and messages[0].get("role") == "tool":
-                messages.pop(0)
+        # Séparation des instructions système initiales et de l'historique conversationnel
+        system_messages: List[Dict[str, Any]] = []
+        conv_messages: List[Dict[str, Any]] = []
+        for idx, m in enumerate(deduped):
+            if m.get("role") == "system" and not conv_messages:
+                system_messages.append(m)
+            else:
+                conv_messages.append(m)
+
+        # Regroupement en tours / échanges complets (user + assistant/tool associés)
+        turn_groups: List[List[Dict[str, Any]]] = []
+        current_group: List[Dict[str, Any]] = []
+        for m in conv_messages:
+            if m.get("role") == "user" and current_group:
+                turn_groups.append(current_group)
+                current_group = [m]
+            else:
+                current_group.append(m)
+        if current_group:
+            turn_groups.append(current_group)
+
+        # Troncature par la fin : priorité absolue aux échanges les plus récents
+        total_chars = sum(int(sm.get("_char_len", 0)) for sm in system_messages)
+        selected_groups_reversed: List[List[Dict[str, Any]]] = []
+
+        for group in reversed(turn_groups):
+            if len(selected_groups_reversed) >= max_turns:
+                break
+            group_chars = sum(int(gm.get("_char_len", 0)) for gm in group)
+            if total_chars + group_chars > max_chars and selected_groups_reversed:
+                # Budget atteint : on conserve les tours les plus récents déjà sélectionnés
+                break
+            total_chars += group_chars
+            selected_groups_reversed.append(group)
+
+        selected_groups_reversed.reverse()
+        messages: List[Dict[str, Any]] = []
+        for sm in system_messages:
+            clean_sm = {k: v for k, v in sm.items() if k != "_char_len"}
+            messages.append(clean_sm)
+        for group in selected_groups_reversed:
+            for gm in group:
+                clean_gm = {k: v for k, v in gm.items() if k != "_char_len"}
+                messages.append(clean_gm)
+
+        # Nettoyage de tête hors système : ne jamais commencer la séquence non-système par un message 'tool'
+        first_non_sys = len(system_messages)
+        while len(messages) > first_non_sys and messages[first_non_sys].get("role") == "tool":
+            messages.pop(first_non_sys)
 
         return messages
 

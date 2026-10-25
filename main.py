@@ -1630,12 +1630,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(BASE_DIR / "static" / "index.html", media_type="text/html")
 
     @application.get("/hud")
+    @application.get("/static/hud.html", include_in_schema=False)
     async def hud_dashboard(request: Request):
         if not is_external_unlocked(request, settings):
             return HTMLResponse(_EXTERNAL_LOCK_HTML, status_code=200)
+        # Source unique de vérité : templates/hud.html
         hud_path = BASE_DIR / "templates" / "hud.html"
-        if not hud_path.is_file():
-            hud_path = BASE_DIR / "static" / "hud.html"
         return FileResponse(
             hud_path,
             media_type="text/html",
@@ -2885,10 +2885,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not is_devops_service:
             try:
                 db_path = getattr(getattr(runtime, "jarvis", None), "db_path", None)
-                auto_res = autonomous_library.execute_autonomous_task(
+                auto_res = await asyncio.to_thread(
+                    autonomous_library.execute_autonomous_task,
                     effective_prompt,
-                    session_id=session_id,
-                    db_path=db_path,
+                    session_id,
+                    db_path,
                 )
             except Exception as auto_exc:
                 LOGGER.warning("Erreur autonomous_library dans jarvis_query : %s", auto_exc)
@@ -3036,13 +3037,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse({"status": "error", "message": str(exc), "ok": False}, status_code=500)
 
     # --------------------------------------------------------------------------
-    # API PLANIFICATEUR D'AUTOMATISATIONS & TÂCHES
+    # API PLANIFICATEUR D'AUTOMATISATIONS & TÂCHES (ISOLATION ASYNC & IDEMPOTENCE)
     # --------------------------------------------------------------------------
+    _http_confirm_in_flight: set[int] = set()
+
     @application.get("/api/scheduler/tasks")
     async def scheduler_list_tasks(status: str | None = None) -> JSONResponse:
         try:
             from scheduler import scheduler_store
-            tasks = scheduler_store.list_tasks(status=status)
+            tasks = await asyncio.to_thread(scheduler_store.list_tasks, status)
             return JSONResponse({"tasks": tasks, "total": len(tasks), "ok": True})
         except Exception as exc:
             return JSONResponse({"error": str(exc), "tasks": [], "total": 0, "ok": False}, status_code=500)
@@ -3065,16 +3068,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ai_enhanced = bool(data.get("ai_enhanced", False))
             media_paths = data.get("media_paths") or []
 
-            task = scheduler_store.create_task(
-                title=title,
-                platform=platform,
-                target=target,
-                message=message,
-                media_paths=media_paths,
-                frequency=frequency,
-                weekday=int(weekday) if weekday is not None else None,
-                send_time=send_time,
-                ai_enhanced=ai_enhanced,
+            task = await asyncio.to_thread(
+                lambda: scheduler_store.create_task(
+                    title=title,
+                    platform=platform,
+                    target=target,
+                    message=message,
+                    media_paths=media_paths,
+                    frequency=frequency,
+                    weekday=int(weekday) if weekday is not None else None,
+                    send_time=send_time,
+                    ai_enhanced=ai_enhanced,
+                )
             )
             return JSONResponse({"task": task, "ok": True}, status_code=201)
         except HTTPException:
@@ -3087,11 +3092,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_local_or_admin(request, settings)
         try:
             from scheduler import scheduler_store
-            task = scheduler_store.get_task(task_id)
+            task = await asyncio.to_thread(scheduler_store.get_task, task_id)
             if not task:
                 raise HTTPException(404, "Tâche introuvable")
             new_status = "paused" if task.get("status") == "active" else "active"
-            updated = scheduler_store.update_task(task_id, status=new_status)
+            updated = await asyncio.to_thread(
+                lambda: scheduler_store.update_task(task_id, status=new_status)
+            )
             return JSONResponse({"task": updated, "status": new_status, "ok": True})
         except HTTPException:
             raise
@@ -3103,11 +3110,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_local_or_admin(request, settings)
         try:
             from scheduler import scheduler_core, scheduler_store
-            task = scheduler_store.get_task(task_id)
+            tid = int(task_id)
+            task = await asyncio.to_thread(scheduler_store.get_task, tid)
             if not task:
                 raise HTTPException(404, "Tâche introuvable")
-            success, detail = scheduler_core.confirm_and_send(task_id)
-            return JSONResponse({"ok": success, "detail": detail, "task": scheduler_store.get_task(task_id)})
+
+            # Garde d'idempotence HTTP contre les doubles-clics et appels concurrents
+            already_running = (
+                tid in _http_confirm_in_flight
+                or (hasattr(scheduler_core, "is_task_in_flight") and scheduler_core.is_task_in_flight(tid))
+                or str(task.get("status") or "").strip().lower() == "processing"
+            )
+            if already_running:
+                return JSONResponse(
+                    {
+                        "ok": True,
+                        "idempotent": True,
+                        "status": "processing",
+                        "detail": f"Tâche {tid} déjà en cours d'exécution (idempotent).",
+                        "task": task,
+                    },
+                    status_code=200,
+                )
+
+            _http_confirm_in_flight.add(tid)
+            try:
+                # Déport hors de l'event loop principal (Playwright synchrone / dispatch bloquant)
+                success, detail = await asyncio.to_thread(scheduler_core.confirm_and_send, tid)
+                updated_task = await asyncio.to_thread(scheduler_store.get_task, tid)
+            finally:
+                _http_confirm_in_flight.discard(tid)
+
+            return JSONResponse({"ok": success, "detail": detail, "task": updated_task})
         except HTTPException:
             raise
         except Exception as exc:
@@ -3118,7 +3152,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_local_or_admin(request, settings)
         try:
             from scheduler import scheduler_store
-            deleted = scheduler_store.delete_task(task_id)
+            deleted = await asyncio.to_thread(scheduler_store.delete_task, task_id)
             return JSONResponse({"deleted": deleted, "ok": True})
         except Exception as exc:
             return JSONResponse({"error": str(exc), "ok": False}, status_code=500)
