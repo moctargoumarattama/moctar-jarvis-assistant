@@ -128,9 +128,10 @@ class VisionEngine:
         self.last_yawn_time = time.time()
         self.last_update = time.time()
         self.frame_count = 0
-        self.measured_fps = 25.0
+        self.measured_fps = 0.0
         self._fps_counter = 0
         self._fps_timer = time.time()
+        self.FRAME_TTL_SECONDS = 15.0
 
         # Historiques glissants pour lissage statistique
         self.blink_history: deque[float] = deque(maxlen=30)
@@ -147,8 +148,11 @@ class VisionEngine:
         self.consec_frames_blink = 0
         self.consec_frames_yawn = 0
 
-        # Cache d'images thread-safe pour le streaming MJPEG et l'analyse Gemini Vision
+        # Cache d'images thread-safe pour le streaming MJPEG et l'analyse Gemini Vision (TTL strict 15s)
         self._latest_jpeg_frame: Optional[bytes] = None
+        self.last_frame: Optional[Any] = None
+        self.last_client_jpeg: Optional[bytes] = None
+        self.last_portrait: Optional[bytes] = None
         self._new_frame_event = threading.Event()
 
         # Initialisation sécurisée des classificateurs Haar
@@ -230,19 +234,43 @@ class VisionEngine:
                 self._thread.start()
             return True
 
-    def stop(self) -> None:
-        """Arrête la session de vision et libère les ressources matérielles."""
+    def purge_memory_and_state(self) -> None:
+        """Purge immédiatement en RAM toutes les images (last_frame, last_client_jpeg, last_portrait) et réinitialise la télémétrie."""
         with self._state_lock:
-            if not self._running:
-                return
-            LOGGER.info("🛑 Arrêt de la session NeuroVision...")
             self._running = False
+            self._latest_jpeg_frame = None
+            self.last_frame = None
+            self.last_client_jpeg = None
+            self.last_portrait = None
+            self.face_detected = False
+            self.last_face_seen_time = 0.0
+            self.last_client_telemetry_time = 0.0
+            self.last_client_frame_time = 0.0
+            self.client_session_duration = None
+            self.measured_fps = 0.0
+            self.fatigue_score = 0
+            self.fatigue_level = "INACTIF / EXPIRÉ"
+            self.head_tilt = 0.0
+            self.head_roll = 0.0
+            self.blink_history.clear()
+            self.eye_aspect_ratio_history.clear()
+            self.mouth_aspect_ratio_history.clear()
+            self.head_position_history.clear()
+
+    def stop(self) -> None:
+        """Arrête la session de vision, libère les ressources matérielles et purge les images en RAM."""
+        with self._state_lock:
+            was_running = self._running
+            self._running = False
+            if was_running:
+                LOGGER.info("🛑 Arrêt de la session NeuroVision et purge mémoire...")
 
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.5)
             self._thread = None
 
         self._release_camera()
+        self.purge_memory_and_state()
 
     def toggle(self) -> bool:
         """Bascule l'état marche/arrêt de la session."""
@@ -257,27 +285,43 @@ class VisionEngine:
         """Indique si la vision est activement en cours de capture."""
         return self._running
 
-    def is_user_present(self, timeout_seconds: float = 45.0) -> bool:
-        """Indique si l'utilisateur a été détecté devant l'écran récemment (avec hystérésis de 45s pour les échanges vocaux)."""
+    def is_user_present(self, timeout_seconds: float = 15.0) -> bool:
+        """Indique si l'utilisateur a été détecté devant l'écran dans la fenêtre de validité (TTL 15s)."""
+        if self.last_face_seen_time <= 0.0:
+            return False
         if not self._running and (time.time() - self.last_face_seen_time) >= timeout_seconds:
             return False
-        return (time.time() - self.last_face_seen_time < timeout_seconds)
+        return bool(self.face_detected and (time.time() - self.last_face_seen_time < timeout_seconds))
 
     def update_client_telemetry(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Met à jour directement la télémétrie et le snapshot JPEG reçus du navigateur client (PC de Moctar).
 
-        Garantit que le serveur Linux ne consomme AUCUN CPU pour la capture vidéo,
-        tout en maintenant l'état cognitif ET l'image de la webcam de Moctar parfaitement à jour dans JARVIS.
+        Garantit qu'un payload vide `{}` ou sans booléen explicite `face_detected: true` / `present: true`
+        n'active jamais artificiellement la présence ni les FPS.
         """
+        if not isinstance(data, dict) or not data:
+            return self.get_metrics()
+
+        if data.get("purge") is True or data.get("active") is False:
+            self.purge_memory_and_state()
+            return self.get_metrics()
+
         now_ts = time.time()
         with self._state_lock:
             self._running = True
             self.last_update = now_ts
             self.last_client_telemetry_time = now_ts
-            is_present = bool(data.get("user_present", data.get("face_detected", True)))
-            self.face_detected = bool(data.get("face_detected", is_present))
-            if is_present or self.face_detected:
+
+            explicit_present = (
+                data.get("face_detected") is True
+                or data.get("user_present") is True
+                or data.get("present") is True
+            )
+            self.face_detected = bool(explicit_present)
+            if explicit_present:
                 self.last_face_seen_time = now_ts
+            elif "face_detected" in data or "user_present" in data or "present" in data:
+                self.last_face_seen_time = 0.0
 
             if "blink_count" in data:
                 self.blink_count = int(data["blink_count"])
@@ -295,23 +339,25 @@ class VisionEngine:
                 self._update_metrics(self.face_detected)
             if "measured_fps" in data:
                 try:
-                    self.measured_fps = max(15.0, float(data["measured_fps"]))
+                    self.measured_fps = max(0.0, float(data["measured_fps"] or 0.0))
                 except Exception:
-                    pass
+                    self.measured_fps = 0.0
             if "session_duration_seconds" in data:
                 try:
                     self.client_session_duration = int(data["session_duration_seconds"])
                 except Exception:
                     pass
 
-            # Snapshot JPEG encodé en base64 depuis la webcam locale du PC de Moctar
+            # Snapshot JPEG encodé en base64 depuis la webcam locale du PC de Moctar (TTL 15s)
             raw_b64 = data.get("image_b64")
             if isinstance(raw_b64, str) and len(raw_b64) > 64:
                 try:
                     b64_payload = raw_b64.split(",", 1)[-1] if "," in raw_b64 else raw_b64
                     jpg_bytes = base64.b64decode(b64_payload)
-                    if len(jpg_bytes) > 100:
+                    if 100 < len(jpg_bytes) <= (2 * 1024 * 1024):
                         self._latest_jpeg_frame = jpg_bytes
+                        self.last_client_jpeg = jpg_bytes
+                        self.last_portrait = jpg_bytes
                         self.last_client_frame_time = now_ts
                         self._new_frame_event.set()
                 except Exception:
@@ -721,7 +767,16 @@ class VisionEngine:
             pass
 
     def get_latest_jpeg_frame(self) -> Optional[bytes]:
-        """Renvoie la dernière frame encodée en JPEG."""
+        """Renvoie la dernière frame encodée en JPEG si son TTL (15 secondes max) n'est pas expiré."""
+        now_ts = time.time()
+        if self._latest_jpeg_frame is not None:
+            frame_age = now_ts - self.last_client_frame_time if self.last_client_frame_time > 0 else (now_ts - self.last_update)
+            if not self._running or frame_age > self.FRAME_TTL_SECONDS:
+                self._latest_jpeg_frame = None
+                self.last_frame = None
+                self.last_client_jpeg = None
+                self.last_portrait = None
+                return None
         return self._latest_jpeg_frame
 
     def stream_generator(self) -> Generator[bytes, None, None]:
@@ -730,7 +785,7 @@ class VisionEngine:
             # Attend une nouvelle frame ou timeout
             self._new_frame_event.wait(timeout=0.2)
             self._new_frame_event.clear()
-            frame = self._latest_jpeg_frame
+            frame = self.get_latest_jpeg_frame()
             if frame is None:
                 frame = get_standby_jpeg_bytes()
 
@@ -742,37 +797,56 @@ class VisionEngine:
                 time.sleep(0.5)
 
     def get_metrics(self) -> Dict[str, Any]:
-        """Télémétrie complète au format JSON pour l'API Jarvis et le HUD."""
-        sess_sec = (
-            self.client_session_duration
-            if self.client_session_duration is not None and (time.time() - self.last_client_telemetry_time) < 45.0
-            else int(time.time() - self.start_time)
-        )
-        duration_minutes = max(sess_sec / 60.0, 0.1)
-        blink_rate = round(self.blink_count / duration_minutes, 1)
+        """Télémétrie complète au format JSON pour l'API Jarvis et le HUD (avec application du TTL strict de 15s)."""
+        now_ts = time.time()
         is_cam_open = (
             CV2_AVAILABLE
             and not self.simulation
             and self.cap is not None
             and getattr(self.cap, "isOpened", lambda: False)()
         )
-        client_active = (time.time() - self.last_client_telemetry_time) < 45.0
+        client_active = self.last_client_telemetry_time > 0.0 and (now_ts - self.last_client_telemetry_time) <= self.FRAME_TTL_SECONDS
+
+        # Purge automatique de l'image en RAM si le TTL de 15s est dépassé
+        if self._latest_jpeg_frame is not None and self.last_client_frame_time > 0.0 and (now_ts - self.last_client_frame_time) > self.FRAME_TTL_SECONDS:
+            self._latest_jpeg_frame = None
+            self.last_frame = None
+            self.last_client_jpeg = None
+            self.last_portrait = None
+
+        # Si la session client a expiré (> 15s sans télémétrie) et qu'aucune caméra serveur n'est ouverte
+        if self.last_client_telemetry_time > 0.0 and not client_active and not is_cam_open:
+            self._running = False
+            self.face_detected = False
+            self.measured_fps = 0.0
+            self.fatigue_score = 0
+            self.fatigue_level = "INACTIF / EXPIRÉ"
+
+        sess_sec = (
+            self.client_session_duration
+            if self.client_session_duration is not None and client_active
+            else (int(now_ts - self.start_time) if (self._running or is_cam_open) else 0)
+        )
+        duration_minutes = max(sess_sec / 60.0, 0.1)
+        blink_rate = round(self.blink_count / duration_minutes, 1) if (self._running or client_active) else 0.0
+        fps_val = round(self.measured_fps, 1) if (self._running or client_active) and self.measured_fps > 0 else 0.0
 
         return {
             "active": bool(self._running or client_active),
             "cv2_available": CV2_AVAILABLE,
             "camera_connected": bool(is_cam_open or client_active),
-            "user_present": self.is_user_present(),
-            "face_detected": self.face_detected,
+            "user_present": self.is_user_present(timeout_seconds=self.FRAME_TTL_SECONDS),
+            "face_detected": bool(self.face_detected and (self._running or client_active)),
             "blink_count": self.blink_count,
             "blink_rate_per_min": blink_rate,
             "yawn_count": self.yawn_count,
-            "head_tilt_yaw": self.head_tilt,
-            "head_roll": self.head_roll,
-            "fatigue_score": self.fatigue_score,
-            "fatigue_level": self.fatigue_level,
+            "head_tilt_yaw": self.head_tilt if (self._running or client_active) else 0.0,
+            "head_roll": self.head_roll if (self._running or client_active) else 0.0,
+            "fatigue_score": self.fatigue_score if (self._running or client_active) else 0,
+            "fatigue_level": self.fatigue_level if (self._running or client_active) else ("INACTIF / EXPIRÉ" if self.last_client_telemetry_time > 0 else "Normal"),
             "session_duration_seconds": sess_sec,
-            "measured_fps": round(self.measured_fps, 1),
+            "measured_fps": fps_val,
+            "fps_label": f"{fps_val} FPS" if fps_val > 0 else "INDISPONIBLE",
             "source": "client_webcam" if client_active else "server",
             "timestamp": datetime.now().strftime("%H:%M:%S"),
             "status": "nominal" if (CV2_AVAILABLE or client_active) else "cv2_missing",

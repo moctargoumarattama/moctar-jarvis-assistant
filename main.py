@@ -1253,22 +1253,49 @@ _EXTERNAL_LOCK_HTML = """<!DOCTYPE html>
 </html>"""
 
 
-def is_local_request(request: Request) -> bool:
-    """Retourne True si la requête provient du poste local (loopback), du réseau privé local (LAN/Wi-Fi) ou de Tailscale."""
-    peer = (request.client.host if request.client else "").strip().lower()
-    if peer in _LOOPBACK_HOSTS or peer.startswith("127.") or peer.startswith("::ffff:127."):
+def _is_trusted_local_ip_str(ip_str: str) -> bool:
+    """Vérifie si une chaîne IP appartient au loopback, au réseau privé LAN ou à Tailscale."""
+    cand = (ip_str or "").strip().lower()
+    if not cand:
+        return False
+    if cand in _LOOPBACK_HOSTS or cand.startswith("127.") or cand.startswith("::ffff:127."):
         return True
     try:
         import ipaddress
-        ip = ipaddress.ip_address(peer)
+        ip = ipaddress.ip_address(cand)
         if ip.is_loopback or ip.is_private or ip.is_link_local:
             return True
-        # Réseau Tailscale / Carrier Grade NAT (100.64.0.0/10)
         if ip in ipaddress.ip_network("100.64.0.0/10"):
             return True
     except ValueError:
         pass
     return False
+
+
+def _has_external_proxy_headers(request: Request) -> bool:
+    """Détecte si une requête arrivant sur loopback provient en réalité d'un tunnel/proxy externe (Cloudflare, Nginx, etc.)."""
+    headers = getattr(request, "headers", None) or {}
+    if (headers.get("cf-ray") or "").strip():
+        return True
+    for h_name in ("cf-connecting-ip", "x-forwarded-for", "x-real-ip"):
+        raw_val = (headers.get(h_name) or "").strip()
+        if not raw_val:
+            continue
+        for hop in raw_val.split(","):
+            hop_ip = hop.strip()
+            if hop_ip and not _is_trusted_local_ip_str(hop_ip):
+                return True
+        if h_name == "cf-connecting-ip":
+            return True
+    return False
+
+
+def is_local_request(request: Request) -> bool:
+    """Retourne True si la requête provient directement du poste local (loopback), du LAN ou de Tailscale sans proxy externe."""
+    if _has_external_proxy_headers(request):
+        return False
+    peer = (request.client.host if request.client else "").strip().lower()
+    return _is_trusted_local_ip_str(peer)
 
 
 def verify_external_password(candidate: str | None) -> bool:
@@ -1279,8 +1306,15 @@ def verify_external_password(candidate: str | None) -> bool:
     return hmac.compare_digest(derived, _EXT_AUTH_HASH)
 
 
+def is_vps_ingest_authorized(request: Request, settings: Settings | None = None) -> bool:
+    """Vérificateur strictement dédié à l'ingestion de télémétrie VPS (ne donne aucun privilège admin/caméra/outils)."""
+    if not settings or not settings.vps_token:
+        return False
+    return token_matches(request.headers.get("x-vps-token"), settings.vps_token)
+
+
 def is_external_unlocked(request: Request, settings: Settings | None = None) -> bool:
-    """Vérifie si une connexion externe a été déverrouillée par le mot de passe caché ou un cookie de session."""
+    """Vérifie si une connexion externe a été déverrouillée par le mot de passe caché, le cookie de session ou un jeton admin."""
     if is_local_request(request):
         return True
     cookies = getattr(request, "cookies", None) or {}
@@ -1298,8 +1332,6 @@ def is_external_unlocked(request: Request, settings: Settings | None = None) -> 
     if settings and settings.admin_token and token_matches(admin_tok, settings.admin_token):
         return True
     if settings and settings.gateway_secret and token_matches(request.headers.get("x-gateway-secret"), settings.gateway_secret):
-        return True
-    if settings and settings.vps_token and token_matches(request.headers.get("x-vps-token"), settings.vps_token):
         return True
     return False
 
@@ -1719,13 +1751,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # =========================================================================
     # ENDPOINTS COGNITIFS NEUROVISION UNIFIÉS (Flux MJPEG & Télémétrie)
     # =========================================================================
+    _MAX_VISION_IMAGE_BYTES = 2 * 1024 * 1024
+    _vision_decode_in_flight: set[str] = set()
 
     @application.get("/api/vision/metrics")
-    async def get_vision_metrics_endpoint():
+    async def get_vision_metrics_endpoint(request: Request):
         """Télémétrie cognitive temps réel (clignements, bâillements, fatigue, présence)."""
+        if not is_external_unlocked(request, settings):
+            raise HTTPException(403, "Accès externe verrouillé : authentification M.O.C.T.A.R requise")
         try:
             from vision_engine import VisionEngine
-            return JSONResponse(VisionEngine.get_instance().get_metrics())
+            metrics = await asyncio.to_thread(VisionEngine.get_instance().get_metrics)
+            return JSONResponse(metrics)
         except Exception as exc:
             LOGGER.warning("Avertissement récupération métriques vision: %s", exc)
             return JSONResponse({
@@ -1734,7 +1771,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "camera_connected": False,
                 "user_present": False,
                 "fatigue_score": 0,
-                "fatigue_level": "Normal",
+                "fatigue_level": "INACTIF / EXPIRÉ",
                 "blink_count": 0,
                 "yawn_count": 0,
                 "status": "degraded",
@@ -1742,8 +1779,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             })
 
     @application.get("/api/vision/stream")
-    async def get_vision_stream_endpoint():
+    async def get_vision_stream_endpoint(request: Request):
         """Flux vidéo MJPEG passif (ne sollicite pas la webcam physique du serveur)."""
+        if not is_external_unlocked(request, settings):
+            raise HTTPException(403, "Accès externe verrouillé : authentification M.O.C.T.A.R requise")
         try:
             from vision_engine import VisionEngine
             engine = VisionEngine.get_instance()
@@ -1763,14 +1802,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/api/vision/telemetry")
     async def update_vision_telemetry_endpoint(request: Request):
         """Reçoit la télémétrie directe calculée par le navigateur client (PC de Moctar)."""
+        if not is_external_unlocked(request, settings):
+            raise HTTPException(403, "Accès externe verrouillé : authentification M.O.C.T.A.R requise")
+        cl_header = request.headers.get("content-length")
+        if cl_header and int(cl_header) > _MAX_VISION_IMAGE_BYTES:
+            raise HTTPException(413, "Payload télémétrie/image trop volumineux (max 2 Mo)")
+        body = await request.body()
+        if len(body) > _MAX_VISION_IMAGE_BYTES:
+            raise HTTPException(413, "Payload télémétrie/image trop volumineux (max 2 Mo)")
+        sess_key = (request.client.host if request.client else "local") + ":telemetry"
         try:
-            data = await request.json()
-            from vision_engine import VisionEngine
-            metrics = VisionEngine.get_instance().update_client_telemetry(data)
-            return JSONResponse(metrics)
+            data = json.loads(body.decode("utf-8")) if body else {}
+            has_img = isinstance(data, dict) and bool(data.get("image_b64"))
+            if has_img and sess_key in _vision_decode_in_flight:
+                data = dict(data)
+                data.pop("image_b64", None)
+            if has_img:
+                _vision_decode_in_flight.add(sess_key)
+            try:
+                from vision_engine import VisionEngine
+                metrics = await asyncio.to_thread(VisionEngine.get_instance().update_client_telemetry, data)
+                return JSONResponse(metrics)
+            finally:
+                _vision_decode_in_flight.discard(sess_key)
+        except HTTPException:
+            raise
         except Exception as exc:
             LOGGER.warning("Avertissement réception télémétrie client: %s", exc)
             return JSONResponse({"status": "error", "message": str(exc)}, status_code=200)
+
+    @application.post("/api/vision/purge")
+    async def purge_vision_endpoint(request: Request):
+        """Arrêt strict et purge immédiate en mémoire/disque des frames et métriques NeuroVision."""
+        if not is_external_unlocked(request, settings):
+            raise HTTPException(403, "Accès externe verrouillé : authentification M.O.C.T.A.R requise")
+        try:
+            from vision_engine import VisionEngine
+            engine = VisionEngine.get_instance()
+            await asyncio.to_thread(engine.stop)
+            await asyncio.to_thread(engine.purge_memory_and_state)
+            return JSONResponse({"status": "purged", "active": False, "metrics": engine.get_metrics()})
+        except Exception as exc:
+            LOGGER.warning("Avertissement purge vision: %s", exc)
+            return JSONResponse({"status": "error", "active": False, "message": str(exc)}, status_code=200)
 
     @application.post("/api/vision/toggle")
     async def toggle_vision_endpoint(request: Request):
@@ -1779,7 +1853,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             from vision_engine import VisionEngine
             engine = VisionEngine.get_instance()
-            active = engine.toggle()
+            active = await asyncio.to_thread(engine.toggle)
             return JSONResponse({"active": active, "metrics": engine.get_metrics()})
         except Exception as exc:
             LOGGER.warning("Avertissement toggle vision: %s", exc)
@@ -1791,7 +1865,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_local_or_admin(request, settings)
         try:
             from vision_engine import VisionEngine
-            VisionEngine.get_instance().reset_counters()
+            await asyncio.to_thread(VisionEngine.get_instance().reset_counters)
             return JSONResponse({"status": "ok", "message": "Compteurs NeuroVision réinitialisés"})
         except Exception as exc:
             LOGGER.warning("Avertissement reset vision: %s", exc)
@@ -1800,28 +1874,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/api/vision/frame")
     async def process_client_vision_frame(request: Request):
         """Reçoit et analyse une frame vidéo transmise en direct par le navigateur client (PC de Moctar)."""
+        if not is_external_unlocked(request, settings):
+            raise HTTPException(403, "Accès externe verrouillé : authentification M.O.C.T.A.R requise")
+        cl_header = request.headers.get("content-length")
+        if cl_header and int(cl_header) > _MAX_VISION_IMAGE_BYTES:
+            raise HTTPException(413, "Image trop volumineuse (max 2 Mo)")
+        sess_key = (request.client.host if request.client else "local") + ":frame"
+        if sess_key in _vision_decode_in_flight:
+            return JSONResponse({"status": "skipped_in_flight", "active": True}, status_code=200)
+        _vision_decode_in_flight.add(sess_key)
         try:
             body = await request.body()
             if not body:
                 return JSONResponse({"status": "empty_frame"}, status_code=400)
+            if len(body) > _MAX_VISION_IMAGE_BYTES:
+                raise HTTPException(413, "Image trop volumineuse (max 2 Mo)")
 
             content_type = request.headers.get("content-type", "")
-            if "application/json" in content_type:
-                data = await request.json()
-                raw_b64 = data.get("image", "")
-                if "," in raw_b64:
-                    raw_b64 = raw_b64.split(",", 1)[1]
-                import base64
-                frame_bytes = base64.b64decode(raw_b64)
-            else:
-                frame_bytes = body
 
-            from vision_engine import VisionEngine
-            metrics = VisionEngine.get_instance().analyze_client_frame(frame_bytes)
+            def _decode_and_analyze(raw_body: bytes, ctype: str) -> dict[str, Any]:
+                if "application/json" in ctype:
+                    payload_json = json.loads(raw_body.decode("utf-8"))
+                    raw_b64 = payload_json.get("image", "")
+                    if "," in raw_b64:
+                        raw_b64 = raw_b64.split(",", 1)[1]
+                    import base64
+                    f_bytes = base64.b64decode(raw_b64)
+                else:
+                    f_bytes = raw_body
+                if len(f_bytes) > _MAX_VISION_IMAGE_BYTES:
+                    raise ValueError("Image décodée supérieure à 2 Mo")
+                from vision_engine import VisionEngine
+                return VisionEngine.get_instance().analyze_client_frame(f_bytes)
+
+            metrics = await asyncio.to_thread(_decode_and_analyze, body, content_type)
             return JSONResponse(metrics)
+        except HTTPException:
+            raise
         except Exception as exc:
             LOGGER.warning("Avertissement réception frame vision client: %s", exc)
-            return JSONResponse({"error": str(exc), "active": True}, status_code=200)
+            return JSONResponse({"error": str(exc), "active": False}, status_code=200)
+        finally:
+            _vision_decode_in_flight.discard(sess_key)
 
     _NO_CACHE_STATIC_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
 
@@ -1992,7 +2086,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def vps_report(request: Request):
         if not settings.vps_token:
             raise HTTPException(503, "Rapports VPS désactivés : jeton non configuré")
-        if not token_matches(request.headers.get("x-vps-token"), settings.vps_token):
+        if not is_vps_ingest_authorized(request, settings):
             raise HTTPException(401, "Jeton VPS incorrect")
         report: VPSReport = validate_payload(VPSReport, await limited_json(request, 32768))
         runtime: Runtime = application.state.runtime
@@ -2857,7 +2951,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def sentinel_incident(request: Request):
         if not settings.vps_token:
             raise HTTPException(503, "Sentinel désactivé : jeton VPS non configuré")
-        if not token_matches(request.headers.get("x-vps-token"), settings.vps_token):
+        if not is_vps_ingest_authorized(request, settings):
             raise HTTPException(401, "Jeton VPS incorrect")
         return await application.state.runtime.sentinel.accept(await limited_json(request, 16384))
 
@@ -3064,7 +3158,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(status, status_code=500 if status["status"] == "error" else 200)
 
     @application.get("/api/jarvis/history")
-    async def jarvis_history(limit: int = 20) -> JSONResponse:
+    async def jarvis_history(request: Request, limit: int = 20) -> JSONResponse:
+        if not is_external_unlocked(request, settings):
+            raise HTTPException(403, "Accès externe verrouillé : authentification M.O.C.T.A.R requise")
         runtime: Runtime = application.state.runtime
         if not runtime.jarvis:
             return JSONResponse({"history": [], "messages": []})
@@ -3093,13 +3189,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _http_confirm_in_flight: set[int] = set()
 
     @application.get("/api/scheduler/tasks")
-    async def scheduler_list_tasks(status: str | None = None) -> JSONResponse:
+    async def scheduler_list_tasks(request: Request, status: str | None = None) -> JSONResponse:
+        if not is_external_unlocked(request, settings):
+            raise HTTPException(403, "Accès externe verrouillé : authentification M.O.C.T.A.R requise")
         try:
             from scheduler import scheduler_store
             tasks = await asyncio.to_thread(scheduler_store.list_tasks, status)
             return JSONResponse({"tasks": tasks, "total": len(tasks), "ok": True})
         except Exception as exc:
             return JSONResponse({"error": str(exc), "tasks": [], "total": 0, "ok": False}, status_code=500)
+
+    @application.get("/api/scheduler/tasks/{task_id}")
+    async def scheduler_get_task_detail(task_id: int, request: Request) -> JSONResponse:
+        if not is_external_unlocked(request, settings):
+            raise HTTPException(403, "Accès externe verrouillé : authentification M.O.C.T.A.R requise")
+        try:
+            from scheduler import scheduler_store
+            task = await asyncio.to_thread(scheduler_store.get_task, int(task_id))
+            if not task:
+                raise HTTPException(404, "Tâche introuvable")
+            return JSONResponse({"task": task, "ok": True})
+        except HTTPException:
+            raise
+        except Exception as exc:
+            return JSONResponse({"error": str(exc), "ok": False}, status_code=500)
 
     @application.post("/api/scheduler/tasks")
     async def scheduler_create_task(request: Request) -> JSONResponse:

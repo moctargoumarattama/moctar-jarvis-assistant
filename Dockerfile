@@ -29,7 +29,12 @@ RUN grep -Ev '^(PyQt5|pyaudio|pyautogui|pvporcupine)' /app/requirements.txt > /t
 
 COPY . /app
 
-RUN mkdir -p /app/data /app/logs /app/notes /app/screenshots /app/certs
+RUN groupadd --system appuser \
+    && useradd --system --gid appuser --create-home --home-dir /home/appuser appuser \
+    && mkdir -p /app/data /app/logs /app/notes /app/screenshots /app/certs \
+    && chown -R appuser:appuser /app /home/appuser
+
+USER appuser
 
 EXPOSE 5050
 

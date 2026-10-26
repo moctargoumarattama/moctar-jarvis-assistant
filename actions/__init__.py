@@ -185,7 +185,7 @@ def get_vision_telemetry(question: str = "") -> Dict[str, Any]:
         yawns = int(metrics.get("yawn_count", 0))
         yaw = metrics.get("head_tilt_yaw", 0.0)
         roll = metrics.get("head_roll", 0.0)
-        fps = metrics.get("measured_fps", 25.0)
+        fps = metrics.get("measured_fps", 0.0)
 
         q_norm = (question or "").lower()
         is_pure_biometric_query = bool(q_norm) and any(
@@ -193,6 +193,7 @@ def get_vision_telemetry(question: str = "") -> Dict[str, Any]:
         ) and not any(kw in q_norm for kw in ("visage", "vois", "regarde", "caméra", "camera", "analyse"))
 
         visual_desc = ""
+        snap_path: Optional[Path] = None
         jpg_bytes = v.get_latest_jpeg_frame() if not is_pure_biometric_query else None
         if jpg_bytes and len(jpg_bytes) > 200:
             try:
@@ -221,6 +222,17 @@ def get_vision_telemetry(question: str = "") -> Dict[str, Any]:
                 visual_desc = str((reply_obj or {}).get("content") or "").strip()
             except Exception:
                 visual_desc = ""
+            finally:
+                if snap_path is not None:
+                    try:
+                        snap_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                try:
+                    for old_snap in config.SCREENSHOTS_DIR.glob("neurovision_live_*.jpg"):
+                        old_snap.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
         if visual_desc and not visual_desc.lower().startswith("erreur"):
             msg = visual_desc

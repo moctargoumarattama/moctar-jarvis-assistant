@@ -1,0 +1,28 @@
+# Secrets & fichiers d'environnement
+.env
+.env.*
+!.env.example
+
+# Bases de données SQLite & journaux WAL/SHM
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+
+# Répertoires de données et d'état runtime (montés par volume)
+data/
+logs/
+screenshots/
+notes/
+certs/
+
+# Environnements virtuels, dépendances et caches
+*venv*/
+.git/
+.gitignore
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+

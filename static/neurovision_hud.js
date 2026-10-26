@@ -33,12 +33,23 @@
   let clientStream = null;
   let isClientMode = true; // true = Webcam PC Moctar, false = Serveur Linux
   let isCameraActive = false;
+  let cameraSessionToken = 0;
+  let isTelemetryUploadInFlight = false;
+  let raf3DId = null;
+  let rafWaveId = null;
   let pollInterval = null;
   let syncInterval = null;
   let trackerInterval = null;
   let lastFrameTime = performance.now();
-  let smoothedFps = 25;
+  let smoothedFps = 0;
   let audioCtx = null;
+
+  function isNeuroVisionModalOpen() {
+    if (dialog && dialog.open) return true;
+    const ov = document.getElementById('hud-neurovision-overlay');
+    if (ov && ov.classList.contains('active')) return true;
+    return false;
+  }
 
   // Compteurs & Métriques Biométriques Locales
   let trackingStartTime = Date.now();
@@ -109,7 +120,8 @@
     const snapCtx = snapCanvas.getContext('2d');
 
     function pushTelemetryToServer(includeSnapshot) {
-      if (!isCameraActive || !isClientMode) return;
+      if (!isCameraActive || !isClientMode || isTelemetryUploadInFlight) return;
+      const myToken = cameraSessionToken;
       const payload = Object.assign({}, currentMetrics, {
         measured_fps: smoothedFps
       });
@@ -119,11 +131,17 @@
           payload.image_b64 = snapCanvas.toDataURL('image/jpeg', 0.62);
         } catch (e) {}
       }
+      if (myToken !== cameraSessionToken || !isCameraActive) return;
+      isTelemetryUploadInFlight = true;
       fetch('/api/vision/telemetry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      }).catch(() => {});
+      })
+        .catch(() => {})
+        .finally(() => {
+          isTelemetryUploadInFlight = false;
+        });
     }
 
     trackerInterval = setInterval(() => {
@@ -426,7 +444,8 @@
 
   async function startClientCamera() {
     try {
-      if (clientStream) stopClientCamera();
+      if (clientStream) stopClientCamera(false);
+      const mySessionToken = ++cameraSessionToken;
 
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         const isRemoteHttp = location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
@@ -452,6 +471,15 @@
       };
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // Garde-fou strict : si la modale a été fermée ou si un autre cycle a démarré pendant l'invite de permission
+      if (mySessionToken !== cameraSessionToken || !isNeuroVisionModalOpen()) {
+        try {
+          stream.getTracks().forEach(t => t.stop());
+        } catch (e) {}
+        return;
+      }
+
       clientStream = stream;
 
       if (clientVideo) {
@@ -459,9 +487,14 @@
         clientVideo.style.display = 'block';
         await clientVideo.play();
       }
+      if (mySessionToken !== cameraSessionToken || !isNeuroVisionModalOpen()) {
+        stopClientCamera(true);
+        return;
+      }
       if (serverImg) {
         serverImg.style.display = 'none';
         serverImg.src = '';
+        serverImg.removeAttribute('src');
       }
 
       isClientMode = true;
@@ -515,14 +548,24 @@
     }, 100);
   }
 
-  function stopClientCamera() {
+  function stopClientCamera(purgeServer = true) {
+    cameraSessionToken++;
+    isTelemetryUploadInFlight = false;
     if (clientStream) {
-      clientStream.getTracks().forEach(t => t.stop());
+      try {
+        clientStream.getTracks().forEach(t => t.stop());
+      } catch (e) {}
       clientStream = null;
     }
     if (clientVideo) {
+      try { clientVideo.pause(); } catch (e) {}
       clientVideo.srcObject = null;
       clientVideo.style.display = 'none';
+    }
+    if (serverImg) {
+      serverImg.src = '';
+      serverImg.removeAttribute('src');
+      serverImg.style.display = 'none';
     }
     if (trackerInterval) {
       clearInterval(trackerInterval);
@@ -532,13 +575,36 @@
       clearInterval(syncInterval);
       syncInterval = null;
     }
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+    if (raf3DId !== null) {
+      cancelAnimationFrame(raf3DId);
+      raf3DId = null;
+      is3DInitialized = false;
+    }
+    if (rafWaveId !== null) {
+      cancelAnimationFrame(rafWaveId);
+      rafWaveId = null;
+      isWaveInitialized = false;
+    }
     isCameraActive = false;
+    smoothedFps = 0;
+    if (fpsTag) fpsTag.textContent = '0 FPS';
     updateStatusUI('○ VEILLE NEUROVISION', '#8c9eb9');
     updateToggleButtonUI(false);
+    if (purgeServer) {
+      fetch('/api/vision/purge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: false, purge: true })
+      }).catch(() => {});
+    }
   }
 
   function fallbackToServerCamera() {
-    stopClientCamera();
+    stopClientCamera(false);
     isClientMode = false;
     if (serverImg) {
       serverImg.src = '/api/vision/stream?t=' + Date.now();
@@ -864,7 +930,7 @@
         ctx.fill();
       });
 
-      requestAnimationFrame(render3D);
+      raf3DId = requestAnimationFrame(render3D);
     }
 
     function drawGimbalRing(c, cx, cy, radius, rot, color) {
@@ -946,7 +1012,7 @@
       ctx.stroke();
       ctx.shadowBlur = 0;
 
-      requestAnimationFrame(renderWave);
+      rafWaveId = requestAnimationFrame(renderWave);
     }
 
     renderWave();
@@ -1056,7 +1122,7 @@
   initWaveOscilloscope();
 
   // =========================================================================
-  // 8. BANDEAU D'ÉTAT VOCAL & COGNITIF TEMPS RÉEL (DANS NEUROVISION & GLOBAL)
+  // 8. BANDEAU D'ÉTAT VOCAL & COGNITIF TEMPS RÉEL (DANS NEUROVISION & NOC)
   // =========================================================================
   function initVoiceFeedbackUI() {
     let nvBar = document.getElementById('nv-voice-live-bar');
@@ -1075,13 +1141,31 @@
       nvGrid.parentNode.insertBefore(nvBar, nvGrid);
     }
 
-    let globalToast = document.getElementById('moctar-global-voice-toast');
-    if (!globalToast && document.body) {
-      globalToast = document.createElement('div');
-      globalToast.id = 'moctar-global-voice-toast';
-      globalToast.setAttribute('data-vstate', 'idle');
-      globalToast.innerHTML = '<span id="moctar-gvt-badge">🎙️</span><span id="moctar-gvt-text"></span>';
-      document.body.appendChild(globalToast);
+    // Sur le NOC, on déplace la pilule lumineuse verte directement à côté du bouton
+    // "Activer le micro / Couper le micro" (#home-voice-status) sans doublon en haut d'écran
+    const nocVoicePill = document.getElementById('home-voice-status');
+    let globalToast = null;
+    if (nocVoicePill) {
+      const strayToast = document.getElementById('moctar-global-voice-toast');
+      if (strayToast && strayToast !== nocVoicePill) strayToast.remove();
+      nocVoicePill.classList.add('moctar-noc-voice-pill');
+      if (!nocVoicePill.querySelector('#moctar-gvt-badge')) {
+        const currentTxt = nocVoicePill.textContent || 'Mains libres sur cet appareil';
+        nocVoicePill.setAttribute('data-vstate', 'off');
+        nocVoicePill.innerHTML = '<span id="moctar-gvt-badge">🎙️ MICRO</span><span id="moctar-gvt-text"></span>';
+        const txtSpan = nocVoicePill.querySelector('#moctar-gvt-text');
+        if (txtSpan) txtSpan.textContent = currentTxt;
+      }
+      globalToast = nocVoicePill;
+    } else if (document.body) {
+      globalToast = document.getElementById('moctar-global-voice-toast');
+      if (!globalToast) {
+        globalToast = document.createElement('div');
+        globalToast.id = 'moctar-global-voice-toast';
+        globalToast.setAttribute('data-vstate', 'idle');
+        globalToast.innerHTML = '<span id="moctar-gvt-badge">🎙️</span><span id="moctar-gvt-text"></span>';
+        document.body.appendChild(globalToast);
+      }
     }
 
     let lastHeardAck = '';
@@ -1094,16 +1178,26 @@
       const liveMsg = document.getElementById('nv-voice-live-msg');
       const gvtBadge = document.getElementById('moctar-gvt-badge');
       const gvtText = document.getElementById('moctar-gvt-text');
+      const isNoc = Boolean(nocVoicePill);
+      const micActive = Boolean(
+        window.jarvisVoice && (window.jarvisVoice.listeningDesired || window.jarvisVoice.enabled)
+      );
 
       if (hideToastTimer) {
         clearTimeout(hideToastTimer);
         hideToastTimer = null;
       }
 
-      if (st === 'listening' && d.isSpeaking) {
+      if (st === 'listening' && (d.isSpeaking || isNoc)) {
         if (nvBar) nvBar.setAttribute('data-vstate', 'listening');
         if (badgeLbl) badgeLbl.textContent = '🎙️ ÉCOUTE EN DIRECT';
         if (liveMsg) liveMsg.textContent = 'Vous parlez — M.O.C.T.A.R vous écoute attentivement...';
+        if (globalToast) {
+          globalToast.setAttribute('data-vstate', 'listening');
+          if (gvtBadge) gvtBadge.textContent = '🎙️ ÉCOUTE';
+          if (gvtText) gvtText.textContent = 'Parlez, je vous écoute...';
+        }
+      } else if (isNoc && (st === 'wake' || st === 'starting')) {
         if (globalToast) {
           globalToast.setAttribute('data-vstate', 'listening');
           if (gvtBadge) gvtBadge.textContent = '🎙️ ÉCOUTE';
@@ -1145,8 +1239,24 @@
           if (gvtBadge) gvtBadge.textContent = '🔊 M.O.C.T.A.R';
           if (gvtText) gvtText.textContent = rep.slice(0, 110) + (rep.length > 110 ? '…' : '');
           hideToastTimer = setTimeout(() => {
-            if (globalToast) globalToast.setAttribute('data-vstate', 'idle');
+            if (!globalToast) return;
+            if (isNoc) {
+              const stillActive = Boolean(
+                window.jarvisVoice && (window.jarvisVoice.listeningDesired || window.jarvisVoice.enabled)
+              );
+              globalToast.setAttribute('data-vstate', stillActive ? 'listening' : 'off');
+              if (gvtBadge) gvtBadge.textContent = stillActive ? '🎙️ ÉCOUTE' : '🎙️ MICRO';
+              if (gvtText) gvtText.textContent = stillActive ? 'Parlez, je vous écoute...' : 'Mains libres sur cet appareil';
+            } else {
+              globalToast.setAttribute('data-vstate', 'idle');
+            }
           }, 5500);
+        }
+      } else if (isNoc && (st === 'error' || st === 'unsupported')) {
+        if (globalToast) {
+          globalToast.setAttribute('data-vstate', 'error');
+          if (gvtBadge) gvtBadge.textContent = '⚠️ MICRO';
+          if (gvtText) gvtText.textContent = d.message || 'Écoute interrompue. Réactivez le micro.';
         }
       } else {
         if (nvBar && nvBar.getAttribute('data-vstate') !== 'speaking') {
@@ -1154,7 +1264,19 @@
           if (badgeLbl) badgeLbl.textContent = '● CANAL VOCAL ACTIF';
         }
         if (globalToast) {
-          globalToast.setAttribute('data-vstate', 'idle');
+          if (isNoc) {
+            if (micActive && st !== 'off' && st !== 'paused') {
+              globalToast.setAttribute('data-vstate', 'listening');
+              if (gvtBadge) gvtBadge.textContent = '🎙️ ÉCOUTE';
+              if (gvtText) gvtText.textContent = 'Parlez, je vous écoute...';
+            } else {
+              globalToast.setAttribute('data-vstate', 'off');
+              if (gvtBadge) gvtBadge.textContent = '🎙️ MICRO';
+              if (gvtText) gvtText.textContent = 'Mains libres sur cet appareil';
+            }
+          } else {
+            globalToast.setAttribute('data-vstate', 'idle');
+          }
         }
       }
     });
