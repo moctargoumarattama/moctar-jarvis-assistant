@@ -1424,6 +1424,7 @@ def execute_voice_semantic_turn(
     )
     if not is_error and llm_res and llm_res.get("content"):
         final_reply = _format_reply_ending(llm_res["content"])
+        LOGGER.info("⚡ [VOICE DIRECT REPLY]: '%s'", final_reply)
         if runtime and getattr(runtime, "jarvis", None) and getattr(runtime.jarvis, "memory", None):
             try:
                 runtime.jarvis.memory.add_message(session_id=sess_key, role="user", content=clean_text)

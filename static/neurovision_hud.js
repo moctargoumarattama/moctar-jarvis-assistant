@@ -192,19 +192,19 @@
           const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
           const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
 
-          const isYCbCrSkin = (lum > 18 && lum < 230 && cr >= 127 && cr <= 182 && cb >= 74 && cb <= 136);
-          const isWarmTone = (lum > 20 && lum < 215 && r >= g - 3 && g >= b - 8 && (r - b) >= 6);
-          // Silhouette centrale contrastant avec le mur d'arrière-plan
-          const inCenterZone = (x >= 28 && x <= 132 && y >= 14 && y <= 110);
-          const isForegroundContrast = inCenterZone && (Math.abs(bgLum - lum) > 26 && lum < 165);
+          const isYCbCrSkin = (lum > 14 && lum < 235 && cr >= 122 && cr <= 186 && cb >= 70 && cb <= 142);
+          const isWarmTone = (lum > 16 && lum < 225 && r >= g - 6 && g >= b - 12 && (r - b) >= 4);
+          // Silhouette centrale contrastant avec le mur d'arrière-plan (y compris en contre-jour)
+          const inCenterZone = (x >= 22 && x <= 138 && y >= 10 && y <= 114);
+          const isForegroundContrast = inCenterZone && (Math.abs(bgLum - lum) > 16 && lum < 185);
 
           let w = 0;
           if (isYCbCrSkin) w += 2.2;
-          if (isWarmTone) w += 1.4;
-          if (isForegroundContrast) w += 1.2;
-          if (inCenterZone && diffL > 4.0) w += 1.5;
+          if (isWarmTone) w += 1.5;
+          if (isForegroundContrast) w += 1.6;
+          if (inCenterZone && diffL > 3.5) w += 1.5;
 
-          if (w >= 2.0) {
+          if (w >= 1.5) {
             weightedX += x * w;
             weightedY += y * w;
             totalWeight += w;
@@ -224,7 +224,7 @@
       }
 
       let faceBox = null;
-      if (totalWeight >= 95) {
+      if (totalWeight >= 42) {
         const cx = weightedX / totalWeight;
         const cy = weightedY / totalWeight;
         const rawW = Math.max(44, Math.min(115, (maxX - minX) * 0.85));

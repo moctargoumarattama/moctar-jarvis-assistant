@@ -278,6 +278,39 @@ SHORT_CONFIRMATION_PHRASES = {
     "confirme",
     "vas-y",
     "vas y",
+    "merci",
+    "merci.",
+    "merci !",
+    "au revoir",
+    "au revoir.",
+}
+
+SINGLE_TOKEN_NOISE_PHRASES = {
+    "m",
+    "b",
+    "c",
+    "d",
+    "f",
+    "g",
+    "h",
+    "j",
+    "k",
+    "l",
+    "n",
+    "p",
+    "q",
+    "r",
+    "s",
+    "t",
+    "v",
+    "w",
+    "x",
+    "z",
+    "hm",
+    "mhm",
+    "hmm",
+    "uh",
+    "um",
 }
 
 HALLUCINATION_EXACT_PHRASES = {
@@ -369,8 +402,8 @@ def filter_whisper_hallucinations(text: str, *, allow_short_confirmations: bool 
     if has_repetitive_hallucination(cleaned):
         cleaned = deduplicate_repetitive_text(cleaned)
 
-    lowered = cleaned.lower().strip(" .,!?:;\"'()-[]{}")
-    if not lowered:
+    lowered = cleaned.lower().strip(" .,!?:;\"'()-[]{}…")
+    if not lowered or lowered in SINGLE_TOKEN_NOISE_PHRASES:
         return ""
     if lowered in HALLUCINATION_EXACT_PHRASES:
         if allow_short_confirmations and lowered in SHORT_CONFIRMATION_PHRASES:

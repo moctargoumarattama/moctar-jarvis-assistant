@@ -494,7 +494,7 @@ class VisionEngine:
         if not face_found and CV2_AVAILABLE and cv2 is not None and NUMPY_AVAILABLE and np is not None:
             try:
                 ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
-                skin_mask = cv2.inRange(ycrcb, np.array([0, 130, 75], dtype=np.uint8), np.array([255, 175, 130], dtype=np.uint8))
+                skin_mask = cv2.inRange(ycrcb, np.array([0, 122, 70], dtype=np.uint8), np.array([255, 185, 142], dtype=np.uint8))
                 kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
                 skin_mask = cv2.morphologyEx(skin_mask, cv2.MORPH_OPEN, kernel)
                 contours, _ = cv2.findContours(skin_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -502,12 +502,22 @@ class VisionEngine:
                     max_c = max(contours, key=cv2.contourArea)
                     area = cv2.contourArea(max_c)
                     total_area = self.frame_width * self.frame_height
-                    if area > (total_area * 0.03):
+                    if area > (total_area * 0.02):
                         fx, fy, fw, fh = cv2.boundingRect(max_c)
-                        if 0.55 <= (fh / max(fw, 1)) <= 2.5:
+                        if 0.45 <= (fh / max(fw, 1)) <= 2.8:
                             face_found = True
                             self.last_face_seen_time = time.time()
                             face_x, face_y, face_w, face_h = fx, fy, fw, fh
+                if not face_found:
+                    # Fallback silhouette centrale en contre-jour
+                    h, w = gray.shape[:2]
+                    border_mean = float(np.mean(gray[0:max(10, h // 8), :]))
+                    roi = gray[h // 8 : (7 * h) // 8, w // 6 : (5 * w) // 6]
+                    roi_mean = float(np.mean(roi))
+                    if abs(border_mean - roi_mean) > 12.0:
+                        face_found = True
+                        self.last_face_seen_time = time.time()
+                        face_x, face_y, face_w, face_h = w // 4, h // 6, w // 2, (2 * h) // 3
             except Exception:
                 pass
 

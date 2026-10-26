@@ -524,10 +524,11 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
         if norm_clean in (
             "oui", "non", "ok", "go", "si", "d'accord", "d accord",
             "valide", "confirme", "vas-y", "vas y", "envoie", "annule",
+            "merci", "super", "parfait", "salut", "bonjour",
         ):
             return True, clean_text, False
         if session_active:
-            if not clean_text or _is_pure_filler_or_wake(clean_text):
+            if not clean_text or len(norm_clean) < 3 or _is_pure_filler_or_wake(clean_text):
                 return False, "", False
             return True, clean_text, False
 
@@ -631,11 +632,21 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
     if re.search(r"\b(?:dis\s+bonjour|salue|passe\s+le\s+bonjour)\s+(?:[aà]\s+)?(?:mes\s+(?:amis|potes|invit[ée]s|coll[èe]gues)|tout\s+le\s+monde|la\s+famille|l['’][ée]quipe)\b", normalized):
         return "Bonjour à tous et bienvenue ! Je suis M.O.C.T.A.R, l'intelligence cybernétique et copilote d'ingénierie de Moctar. Ravi de faire votre connaissance !"
 
-    # 0a2b. Présentation personnalisée ou salutation d'un ami ("je te présente Karim", "voici mon ami Youssef", "dis bonjour à Moussa", "salue Karim")
-    match_intro = re.search(r"\b(?:je\s+te\s+pr[ée]sente|voici(?:\s+mon\s+(?:ami|pote|coll[èe]gue))?|(?:dis\s+bonjour|salue|passe\s+le\s+bonjour)\s+[aà]|je\s+suis\s+avec|accueil(?:le)?)\s+([A-ZÀ-ÿa-z-]{2,20})\b", cleaned, re.IGNORECASE)
+    # 0a2b. Présentation personnalisée ou salutation d'un ami ("je te présente mon ami Omar", "je te présente mon ami Arafat", "voici mon ami Youssef", "dis bonjour à Moussa")
+    match_intro = re.search(
+        r"\b(?:je\s+te\s+pr[ée]sente|voici|c['’]est|(?:dis\s+bonjour|salue|passe\s+le\s+bonjour)\s+[aà]|je\s+suis\s+avec|accueil(?:le)?)"
+        r"(?:\s+(?:mon|notre|un|une)\s+(?:tr[èe]s\s+bon\s+|meilleur\s+|cher\s+)?(?:ami|amie|pote|coll[èe]gue|fr[èe]re|fr[ée]rot|cousin|cousine|camarade|invit[ée]|invit[ée]e|associ[ée]))?"
+        r"\s+([A-ZÀ-ÿa-z-]{2,20})\b",
+        cleaned,
+        re.IGNORECASE,
+    )
     if match_intro:
         friend_name = match_intro.group(1).capitalize()
-        if friend_name.lower() not in ("moctar", "moktar", "un", "une", "mon", "ce", "cette", "le", "la", "mes", "tout"):
+        if friend_name.lower() not in (
+            "moctar", "moktar", "jarvis", "un", "une", "mon", "ma", "mes",
+            "notre", "ce", "cet", "cette", "le", "la", "les", "tout", "tous",
+            "ami", "amie", "pote", "collegue", "collègue", "frere", "frère",
+        ):
             is_known = False
             if memory and hasattr(memory, "get_known_friend"):
                 try:
@@ -653,17 +664,17 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
                     pass
 
             if is_known:
-                return f"Ravi de te revoir {friend_name} ! Toujours un plaisir de t'accueillir sur le système de Moctar. Comment vas-tu ?"
+                return f"Ravi de te revoir {friend_name} ! Toujours un plaisir de t'accueillir aux côtés de Moctar sur le centre de commandement. Comment vas-tu aujourd'hui ?"
             else:
                 if memory and hasattr(memory, "record_friend"):
                     try:
                         memory.record_friend(friend_name)
                     except Exception:
                         pass
-                return f"Enchanté {friend_name} ! Bienvenue sur le poste de travail et centre de commandement de Moctar. Ravi de faire ta connaissance !"
+                return f"Enchanté {friend_name} ! Bienvenue dans le centre de commandement de Moctar. Je suis M.O.C.T.A.R, son copilote d'ingénierie, et je garde ton prénom en mémoire. Ravi de faire ta connaissance !"
 
-    # 0a2c. Liste des amis connus de Moctar ("qui sont mes amis", "tu connais qui", "liste mes amis")
-    if re.search(r"\b(?:qui\s+sont\s+mes\s+amis|tu\s+connais\s+qui|liste\s+(?:de\s+)?mes\s+amis|qui\s+est\s+avec\s+nous)\b", normalized):
+    # 0a2c. Liste des amis connus de Moctar ("qui sont mes amis", "tu connais qui", "liste mes amis", "tu te souviens de mes amis")
+    if re.search(r"\b(?:qui\s+sont\s+mes\s+amis|tu\s+connais\s+qui(?:\s+comme\s+ami)?|liste\s+(?:de\s+)?mes\s+amis|qui\s+est\s+avec\s+nous|tu\s+te\s+souviens\s+de\s+mes\s+amis|quels?\s+amis\s+je\s+t['’]ai\s+pr[ée]sent[ée]s?)\b", normalized):
         if memory and hasattr(memory, "get_all_known_friends"):
             try:
                 friends_list = memory.get_all_known_friends()
@@ -1812,29 +1823,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             LOGGER.warning("Avertissement réception frame vision client: %s", exc)
             return JSONResponse({"error": str(exc), "active": True}, status_code=200)
 
+    _NO_CACHE_STATIC_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+
     @application.get("/static/live_metrics.js")
     async def live_metrics_script():
-        return FileResponse(BASE_DIR / "static" / "live_metrics.js", media_type="application/javascript")
+        return FileResponse(BASE_DIR / "static" / "live_metrics.js", media_type="application/javascript", headers=_NO_CACHE_STATIC_HEADERS)
 
     @application.get("/static/live_metrics.css")
     async def live_metrics_styles():
-        return FileResponse(BASE_DIR / "static" / "live_metrics.css", media_type="text/css")
+        return FileResponse(BASE_DIR / "static" / "live_metrics.css", media_type="text/css", headers=_NO_CACHE_STATIC_HEADERS)
 
     @application.get("/static/neurovision_hud.js")
     async def neurovision_hud_script():
-        return FileResponse(BASE_DIR / "static" / "neurovision_hud.js", media_type="application/javascript")
+        return FileResponse(BASE_DIR / "static" / "neurovision_hud.js", media_type="application/javascript", headers=_NO_CACHE_STATIC_HEADERS)
 
     @application.get("/static/neurovision_hud.css")
     async def neurovision_hud_styles():
-        return FileResponse(BASE_DIR / "static" / "neurovision_hud.css", media_type="text/css")
+        return FileResponse(BASE_DIR / "static" / "neurovision_hud.css", media_type="text/css", headers=_NO_CACHE_STATIC_HEADERS)
 
     @application.get("/static/cosmos.js")
     async def cosmos_script():
-        return FileResponse(BASE_DIR / "static" / "cosmos.js", media_type="application/javascript")
+        return FileResponse(BASE_DIR / "static" / "cosmos.js", media_type="application/javascript", headers=_NO_CACHE_STATIC_HEADERS)
 
     @application.get("/static/voice.js", include_in_schema=False)
     async def browser_voice_script():
-        return FileResponse(BASE_DIR / "static" / "voice.js", media_type="application/javascript")
+        return FileResponse(BASE_DIR / "static" / "voice.js", media_type="application/javascript", headers=_NO_CACHE_STATIC_HEADERS)
 
     @application.get("/static/cosmos.css")
     async def cosmos_styles():

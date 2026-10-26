@@ -635,6 +635,33 @@ class AssistantMemory:
                 profile["country"] = "Niger"
                 known_prefs["current_location"] = "Niger (Niamey)"
                 _record_provenance("current_location", "Niger (Niamey)")
+        # 3b. Extraction automatique des amis et invités présentés par Moctar ("je te présente mon ami Omar", "voici mon ami Arafat")
+        friend_intro_match = re.search(
+            r"\b(?:je\s+te\s+pr[ée]sente|voici|c['’]est|(?:dis\s+bonjour|salue|passe\s+le\s+bonjour)\s+[aà]|je\s+suis\s+avec|accueil(?:le)?)"
+            r"(?:\s+(?:mon|notre|un|une)\s+(?:tr[èe]s\s+bon\s+|meilleur\s+|cher\s+)?(?:ami|amie|pote|coll[èe]gue|fr[èe]re|fr[ée]rot|cousin|cousine|camarade|invit[ée]|invit[ée]e|associ[ée]))?"
+            r"\s+([A-ZÀ-ÿa-z-]{2,20})\b",
+            clean_user,
+            re.IGNORECASE,
+        )
+        if friend_intro_match and not has_negation and not is_question:
+            cand_friend = friend_intro_match.group(1).strip().capitalize()
+            if cand_friend.lower() not in (
+                "moctar", "moktar", "jarvis", "un", "une", "mon", "ma", "mes",
+                "notre", "ce", "cet", "cette", "le", "la", "les", "tout", "tous",
+                "ami", "amie", "pote", "collegue", "collègue", "frere", "frère",
+            ):
+                try:
+                    self.record_friend(cand_friend)
+                except Exception:
+                    pass
+                known_friends_list = profile.get("friends", [])
+                if not isinstance(known_friends_list, list):
+                    known_friends_list = []
+                if cand_friend not in known_friends_list:
+                    known_friends_list.append(cand_friend)
+                profile["friends"] = known_friends_list
+                _record_provenance(f"friend:{cand_friend.lower()}", cand_friend)
+
         profile["known_preferences"] = known_prefs
         profile["fact_provenance"] = provenance_map
 
@@ -650,12 +677,25 @@ class AssistantMemory:
         turn_count = profile.get("total_turns", 0)
         nationality = profile.get("nationality", "Nigérien")
         current_loc = profile.get("current_location", "Maroc (Rabat)")
+        friends_names: List[str] = []
+        try:
+            for f in self.get_all_known_friends():
+                fname = f.get("name")
+                if fname and fname not in friends_names:
+                    friends_names.append(fname)
+        except Exception:
+            pass
+        for pf in profile.get("friends", []) or []:
+            if isinstance(pf, str) and pf not in friends_names:
+                friends_names.append(pf)
+        friends_str = ", ".join(friends_names) if friends_names else "Aucun ami enregistré pour l'instant"
 
         lines = [
             "[PROFIL CONTINU DE MOCTAR (PERSONNALISATION VIVANTE & AMICALE)]",
             f"- Utilisateur : {profile.get('name', 'Moctar')} (Ingénieur & Architecte sur {profile.get('hardware', 'Dell Precision M4800')})",
             f"- Nationalité & Origine : {nationality} (Originaire du Niger)",
             f"- Localisation actuelle : {current_loc} (Moctar réside actuellement au Maroc ; ne confonds jamais son pays d'origine le Niger avec sa position actuelle au Maroc)",
+            f"- Amis & proches connus de Moctar : {friends_str}",
             f"- Ton souhaité : {profile.get('tone_preference', 'Humain, chaleureux, direct et complice (comme un ami)')}",
             f"- Équipes & Sports suivis : {teams}",
             f"- Sujets récents abordés : {topics_str}",

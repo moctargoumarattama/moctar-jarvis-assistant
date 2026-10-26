@@ -176,6 +176,14 @@ class ActiveTaskTracker:
                 phrases.append(f"Il reste à vérifier : {', '.join(pending[:2])}.")
 
             if not phrases:
+                try:
+                    import project_context_service
+                    ctx = project_context_service.get_project_context()
+                    last_commit = ctx.get("last_commit") or ""
+                    if last_commit:
+                        return f"Infrastructure nominale Moctar. Dernier jalon Git validé : {last_commit}. Aucune tâche bloquante en attente, sur quel module veux-tu qu'on avance ?"
+                except Exception:
+                    pass
                 return "Nous sommes en veille opérationnelle sur l'infrastructure. Aucune tâche bloquante en attente, Moctar."
 
             joined = " ".join(phrases)
