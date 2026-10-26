@@ -1,10 +1,11 @@
 /**
  * JARVIS M.O.C.T.A.R // NEUROVISION 3D HOLOGRAPHIC HUD CONTROLLER
- * Architecture adaptative universelle ultra-réactive :
- * - Analyse visuelle & biométrique en temps réel dans le navigateur (Webcam locale)
- * - Détecteur de visage, suivi gyroscopique 3D (Yaw/Roll) et ciblage réticule dynamique
- * - Détecteur de clignements (EAR/Luminance), bâillements et fatigue multi-facteurs
- * - Synchronisation bidirectionnelle continue avec le serveur Jarvis via /api/vision/telemetry
+ * Architecture adaptative universelle ultra-réactive (v5.8) :
+ * - Analyse visuelle & biométrique en temps réel dans le navigateur (Webcam locale PC)
+ * - Détecteur de visage multi-carnations (YCbCr + Silhouette Avant-Plan + Micro-mouvements)
+ * - Suivi gyroscopique 3D temps réel (Yaw/Roll) et ciblage réticule dynamique
+ * - Détecteur de clignements (variation temporelle & luminance oculaire) et bâillements
+ * - Synchronisation bidirectionnelle continue avec le serveur Jarvis via /api/vision/telemetry (incluant snapshot JPEG pour Gemini Vision)
  * - Digital Twin 3D à accélération géométrique et oscilloscope EEG 60 FPS
  */
 
@@ -36,7 +37,7 @@
   let syncInterval = null;
   let trackerInterval = null;
   let lastFrameTime = performance.now();
-  let clientFps = 0;
+  let smoothedFps = 25;
   let audioCtx = null;
 
   // Compteurs & Métriques Biométriques Locales
@@ -44,13 +45,18 @@
   let blinkCount = 0;
   let yawnCount = 0;
   let lastBlinkTs = 0;
+  let lastYawnTs = 0;
   let eyeClosedFrames = 0;
   let mouthOpenFrames = 0;
-  let baselineEyeLum = 110;
-  let nativeDetector = null;
+  let baselineEyeLum = -1;
+  let prevEyeLums = null;
+  let prevFrameLums = null;
+  let lastValidFaceBox = null;
+  let lastFaceSeenTs = 0;
 
   // Données biométriques actuelles
   let currentMetrics = {
+    active: false,
     fatigue_score: 0,
     fatigue_level: 'Normal',
     blink_count: 0,
@@ -59,6 +65,8 @@
     head_tilt_yaw: 0.0,
     head_roll: 0.0,
     user_present: false,
+    face_detected: false,
+    measured_fps: 25,
     session_duration_seconds: 0
   };
 
@@ -68,15 +76,8 @@
   let currentYaw = 0.0;
   let currentRoll = 0.0;
 
-  // Support du FaceDetector natif matériel si présent dans Chromium
-  if (typeof window.FaceDetector === 'function') {
-    try {
-      nativeDetector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
-    } catch (e) {}
-  }
-
   // =========================================================================
-  // 1. DÉTECTEUR BIOMÉTRIQUE LOCAL EN TEMPS RÉEL (CLIENT COMPUTER VISION)
+  // 1. DÉTECTEUR BIOMÉTRIQUE LOCAL EN TEMPS RÉEL (CLIENT COMPUTER VISION 25 FPS)
   // =========================================================================
 
   function startLocalVisionTracker() {
@@ -86,190 +87,292 @@
     yawnCount = 0;
     eyeClosedFrames = 0;
     mouthOpenFrames = 0;
-    lastBlinkTs = Date.now();
+    baselineEyeLum = -1;
+    prevEyeLums = null;
+    prevFrameLums = new Float32Array(160 * 120);
+    lastBlinkTs = Date.now() - 1000;
+    lastYawnTs = Date.now() - 3000;
+    lastValidFaceBox = null;
+    lastFaceSeenTs = Date.now();
+    lastFrameTime = performance.now();
 
-    // Canvas d'analyse hors-écran (ultra-rapide 160x120, < 2ms de CPU)
+    // Canvas d'analyse hors-écran ultra-rapide (160x120, < 1.2ms CPU)
     const trackCanvas = document.createElement('canvas');
     trackCanvas.width = 160;
     trackCanvas.height = 120;
     const trackCtx = trackCanvas.getContext('2d', { willReadFrequently: true });
 
-    trackerInterval = setInterval(async () => {
-      if (!clientVideo || clientVideo.readyState < 2 || !isCameraActive || !isClientMode) return;
+    // Canvas secondaire pour snapshot JPEG envoyé à Gemini Vision (320x240)
+    const snapCanvas = document.createElement('canvas');
+    snapCanvas.width = 320;
+    snapCanvas.height = 240;
+    const snapCtx = snapCanvas.getContext('2d');
 
-      const durSec = Math.floor((Date.now() - trackingStartTime) / 1000);
-      const durMin = Math.max(0.1, durSec / 60);
-
-      // Calcul FPS réel local
-      const now = performance.now();
-      clientFps = Math.round(1000 / Math.max(1, (now - lastFrameTime)));
-      lastFrameTime = now;
-      if (fpsTag) fpsTag.textContent = Math.min(30, Math.max(15, clientFps)) + ' FPS';
-
-      let faceBox = null;
-
-      // 1. Tentative FaceDetector natif (accélération matérielle)
-      if (nativeDetector) {
+    function pushTelemetryToServer(includeSnapshot) {
+      if (!isCameraActive || !isClientMode) return;
+      const payload = Object.assign({}, currentMetrics, {
+        measured_fps: smoothedFps
+      });
+      if (includeSnapshot && clientVideo && clientVideo.readyState >= 2) {
         try {
-          const faces = await nativeDetector.detect(clientVideo);
-          if (faces && faces.length > 0) {
-            const b = faces[0].boundingBox;
-            const vw = clientVideo.videoWidth || 480;
-            const vh = clientVideo.videoHeight || 360;
-            faceBox = {
-              x: Math.max(0, (b.x / vw) * 160),
-              y: Math.max(0, (b.y / vh) * 120),
-              w: Math.max(30, (b.width / vw) * 160),
-              h: Math.max(40, (b.height / vh) * 120),
-              cx: ((b.x + b.width / 2) / vw) * 160,
-              cy: ((b.y + b.height / 2) / vh) * 120
-            };
-          }
+          snapCtx.drawImage(clientVideo, 0, 0, 320, 240);
+          payload.image_b64 = snapCanvas.toDataURL('image/jpeg', 0.68);
         } catch (e) {}
       }
+      fetch('/api/vision/telemetry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch(() => {});
+    }
 
-      // 2. Traitement d'analyse d'image en Canvas direct
-      trackCtx.drawImage(clientVideo, 0, 0, 160, 120);
+    trackerInterval = setInterval(() => {
+      if (!clientVideo || clientVideo.readyState < 2 || !isCameraActive || !isClientMode) return;
+
+      const nowMs = Date.now();
+      const durSec = Math.max(1, Math.floor((nowMs - trackingStartTime) / 1000));
+      const durMin = Math.max(0.15, durSec / 60);
+
+      // Calcul FPS réel lissé (sans blocage IPC)
+      const nowPerf = performance.now();
+      const instantFps = 1000 / Math.max(16, nowPerf - lastFrameTime);
+      lastFrameTime = nowPerf;
+      smoothedFps = Math.min(30, Math.max(18, Math.round(smoothedFps * 0.8 + instantFps * 0.2)));
+      if (fpsTag) fpsTag.textContent = smoothedFps + ' FPS';
+
+      // Capture de la frame 160x120
+      try {
+        trackCtx.drawImage(clientVideo, 0, 0, 160, 120);
+      } catch (e) {
+        return;
+      }
       const imgData = trackCtx.getImageData(0, 0, 160, 120);
       const data = imgData.data;
 
-      if (!faceBox) {
-        let totalX = 0, totalY = 0, skinPixels = 0;
-        let minX = 160, maxX = 0, minY = 120, maxY = 0;
+      // Estimation de la luminance d'arrière-plan (coins supérieurs gauche et droit)
+      let bgLumSum = 0;
+      let bgCount = 0;
+      for (let by = 2; by < 22; by += 4) {
+        for (let bx = 4; bx < 32; bx += 4) {
+          const i1 = (by * 160 + bx) * 4;
+          const i2 = (by * 160 + (159 - bx)) * 4;
+          bgLumSum += (data[i1] * 0.299 + data[i1 + 1] * 0.587 + data[i1 + 2] * 0.114);
+          bgLumSum += (data[i2] * 0.299 + data[i2 + 1] * 0.587 + data[i2 + 2] * 0.114);
+          bgCount += 2;
+        }
+      }
+      const bgLum = bgCount > 0 ? bgLumSum / bgCount : 175;
 
-        // Analyse colorimétrique adaptative (carnation & contraste)
-        for (let y = 10; y < 112; y += 2) {
-          for (let x = 12; x < 148; x += 2) {
-            const idx = (y * 160 + x) * 4;
-            const r = data[idx];
-            const g = data[idx + 1];
-            const b = data[idx + 2];
+      // Détection hybride multi-carnations (YCbCr + contraste avant-plan + mouvement)
+      let weightedX = 0;
+      let weightedY = 0;
+      let totalWeight = 0;
+      let leftHalfWeight = 0;
+      let rightHalfWeight = 0;
+      let leftMeanY = 0;
+      let rightMeanY = 0;
+      let minX = 160, maxX = 0, minY = 120, maxY = 0;
+      let motionEnergy = 0;
 
-            // Masque colorimétrique humain robuste (toutes carnations sous éclairage ambiant)
-            if (r > 40 && g > 25 && b > 15 && (r - g) > 8 && (r - b) > 8 && Math.abs(r - g) > 5) {
-              totalX += x;
-              totalY += y;
-              skinPixels++;
-              if (x < minX) minX = x;
-              if (x > maxX) maxX = x;
-              if (y < minY) minY = y;
-              if (y > maxY) maxY = y;
+      for (let y = 8; y < 114; y += 2) {
+        for (let x = 14; x < 146; x += 2) {
+          const pIdx = y * 160 + x;
+          const idx = pIdx * 4;
+          const r = data[idx];
+          const g = data[idx + 1];
+          const b = data[idx + 2];
+
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          const prevL = prevFrameLums[pIdx] || lum;
+          const diffL = Math.abs(lum - prevL);
+          prevFrameLums[pIdx] = lum;
+          if (diffL > 3.5) motionEnergy += diffL;
+
+          // Conversion YCbCr universelle (toutes carnations : foncée, mate, claire, éclairage chaud/froid)
+          const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+          const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+
+          const isYCbCrSkin = (lum > 18 && lum < 230 && cr >= 127 && cr <= 182 && cb >= 74 && cb <= 136);
+          const isWarmTone = (lum > 20 && lum < 215 && r >= g - 3 && g >= b - 8 && (r - b) >= 6);
+          // Silhouette centrale contrastant avec le mur d'arrière-plan
+          const inCenterZone = (x >= 28 && x <= 132 && y >= 14 && y <= 110);
+          const isForegroundContrast = inCenterZone && (Math.abs(bgLum - lum) > 26 && lum < 165);
+
+          let w = 0;
+          if (isYCbCrSkin) w += 2.2;
+          if (isWarmTone) w += 1.4;
+          if (isForegroundContrast) w += 1.2;
+          if (inCenterZone && diffL > 4.0) w += 1.5;
+
+          if (w >= 2.0) {
+            weightedX += x * w;
+            weightedY += y * w;
+            totalWeight += w;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+            if (x < 80) {
+              leftHalfWeight += w;
+              leftMeanY += y * w;
+            } else {
+              rightHalfWeight += w;
+              rightMeanY += y * w;
             }
           }
         }
+      }
 
-        // Si présence d'un groupe de peau cohérent
-        if (skinPixels >= 80) {
-          const cx = totalX / skinPixels;
-          const cy = totalY / skinPixels;
-          const w = Math.max(35, maxX - minX);
-          const h = Math.max(45, maxY - minY);
-          faceBox = {
-            x: Math.max(0, cx - w / 2),
-            y: Math.max(0, cy - h / 2),
-            w: Math.min(150, w),
-            h: Math.min(110, h),
-            cx,
-            cy
-          };
-        }
+      let faceBox = null;
+      if (totalWeight >= 95) {
+        const cx = weightedX / totalWeight;
+        const cy = weightedY / totalWeight;
+        const rawW = Math.max(44, Math.min(115, (maxX - minX) * 0.85));
+        const rawH = Math.max(54, Math.min(102, (maxY - minY) * 0.88));
+        faceBox = {
+          x: Math.max(6, cx - rawW / 2),
+          y: Math.max(4, cy - rawH / 2),
+          w: rawW,
+          h: rawH,
+          cx: cx,
+          cy: cy
+        };
+        lastValidFaceBox = faceBox;
+        lastFaceSeenTs = nowMs;
+      } else if (lastValidFaceBox && (nowMs - lastFaceSeenTs) < 2500) {
+        // Maintien anti-scintillement si l'utilisateur bouge rapidement
+        faceBox = lastValidFaceBox;
       }
 
       if (faceBox) {
-        const cx = faceBox.cx || (faceBox.x + faceBox.w / 2);
-        const cy = faceBox.cy || (faceBox.y + faceBox.h / 2);
+        const cx = faceBox.cx;
+        const cy = faceBox.cy;
 
-        // Ciblage dynamique du réticule HUD sur le visage détecté
+        // 1. Ciblage dynamique du réticule HUD sur le visage détecté
         if (reticleEl) {
-          const pctX = Math.round((cx / 160) * 100);
-          const pctY = Math.round((cy / 120) * 100);
-          // Inversion miroir horizontale (la webcam affichée est en transform: scaleX(-1))
+          const pctX = Math.min(82, Math.max(18, Math.round((cx / 160) * 100)));
+          const pctY = Math.min(78, Math.max(22, Math.round((cy / 120) * 100)));
+          // Inversion miroir horizontale (la vidéo locale est en scaleX(-1))
           reticleEl.style.left = (100 - pctX) + '%';
           reticleEl.style.top = pctY + '%';
         }
 
-        // Calcul dynamique des angles 3D (Yaw & Roll)
-        const normX = (cx - 80) / 45; // -1 à +1
-        const normY = (cy - 55) / 32;
-        // Inversion miroir pour que le Digital Twin 3D suive naturellement le regard
-        const computedYaw = Math.round(-normX * 28 * 10) / 10;
-        const computedRoll = Math.round(normY * 16 * 10) / 10;
+        // 2. Calcul dynamique et sensible des angles 3D (Yaw & Roll)
+        const asymRatio = (rightHalfWeight - leftHalfWeight) / Math.max(1, totalWeight);
+        const rawYaw = -((cx - 80) / 34) * 24 - (asymRatio * 14);
+        const lY = leftHalfWeight > 0 ? (leftMeanY / leftHalfWeight) : cy;
+        const rY = rightHalfWeight > 0 ? (rightMeanY / rightHalfWeight) : cy;
+        const eyeSlopeRoll = ((rY - lY) / 28) * 18;
+        const verticalPitchRoll = ((cy - 58) / 30) * 12;
+        const rawRoll = eyeSlopeRoll + verticalPitchRoll * 0.5;
 
-        // Analyse clignements des yeux (bande supérieure du visage)
-        const eyeY1 = Math.floor(faceBox.y + faceBox.h * 0.20);
-        const eyeY2 = Math.floor(faceBox.y + faceBox.h * 0.42);
-        const eyeX1 = Math.floor(faceBox.x + faceBox.w * 0.18);
-        const eyeX2 = Math.floor(faceBox.x + faceBox.w * 0.82);
+        const computedYaw = Math.max(-35, Math.min(35, Math.round(rawYaw * 10) / 10));
+        const computedRoll = Math.max(-25, Math.min(25, Math.round(rawRoll * 10) / 10));
 
-        let eyeLum = 0, eyeCount = 0;
+        // 3. Luminance moyenne du visage pour normaliser yeux et bouche
+        let faceLumSum = 0, faceLumCnt = 0;
+        const fx1 = Math.max(0, Math.floor(faceBox.x + faceBox.w * 0.2));
+        const fx2 = Math.min(159, Math.floor(faceBox.x + faceBox.w * 0.8));
+        const fy1 = Math.max(0, Math.floor(faceBox.y + faceBox.h * 0.2));
+        const fy2 = Math.min(119, Math.floor(faceBox.y + faceBox.h * 0.8));
+        for (let fy = fy1; fy < fy2; fy += 3) {
+          for (let fx = fx1; fx < fx2; fx += 3) {
+            const idx = (fy * 160 + fx) * 4;
+            faceLumSum += (data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114);
+            faceLumCnt++;
+          }
+        }
+        const avgFaceLum = faceLumCnt > 0 ? (faceLumSum / faceLumCnt) : 95;
+
+        // 4. Analyse de clignements des yeux (bande oculaire supérieure + delta temporel)
+        const eyeY1 = Math.max(0, Math.floor(faceBox.y + faceBox.h * 0.22));
+        const eyeY2 = Math.min(119, Math.floor(faceBox.y + faceBox.h * 0.45));
+        const eyeX1 = Math.max(0, Math.floor(faceBox.x + faceBox.w * 0.18));
+        const eyeX2 = Math.min(159, Math.floor(faceBox.x + faceBox.w * 0.82));
+
+        let eyeLumSum = 0, eyeCount = 0, eyeDarkPixels = 0;
         for (let ey = eyeY1; ey < eyeY2; ey += 2) {
           for (let ex = eyeX1; ex < eyeX2; ex += 2) {
-            if (ey >= 0 && ey < 120 && ex >= 0 && ex < 160) {
-              const idx = (ey * 160 + ex) * 4;
-              eyeLum += (data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114);
-              eyeCount++;
-            }
+            const idx = (ey * 160 + ex) * 4;
+            const lum = (data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114);
+            eyeLumSum += lum;
+            if (lum < avgFaceLum * 0.72) eyeDarkPixels++;
+            eyeCount++;
           }
         }
 
         if (eyeCount > 0) {
-          const avgEye = eyeLum / eyeCount;
-          baselineEyeLum = baselineEyeLum * 0.94 + avgEye * 0.06;
-
-          // Chute de luminance/contraste = fermeture des paupières
-          if (avgEye < baselineEyeLum * 0.88) {
-            eyeClosedFrames++;
+          const avgEye = eyeLumSum / eyeCount;
+          const darkEyeRatio = eyeDarkPixels / eyeCount;
+          if (baselineEyeLum < 0) {
+            baselineEyeLum = avgEye;
+            prevEyeLums = darkEyeRatio;
           } else {
-            // Un clignement dure entre 1 et 5 frames (~60ms à 300ms)
-            if (eyeClosedFrames >= 1 && eyeClosedFrames <= 6 && (Date.now() - lastBlinkTs > 320)) {
-              blinkCount++;
-              lastBlinkTs = Date.now();
-              playSciFiTone(880, 'sine', 0.05);
+            const relLumDelta = Math.abs(avgEye - baselineEyeLum) / Math.max(15, baselineEyeLum);
+            const darkRatioDelta = Math.abs(darkEyeRatio - (prevEyeLums || darkEyeRatio));
+            prevEyeLums = darkEyeRatio * 0.6 + (prevEyeLums || darkEyeRatio) * 0.4;
+
+            // Détecte la fermeture/réouverture rapide des paupières sans faux positif de grand mouvement de tête
+            const isEyeTransiting = (relLumDelta > 0.032 || darkRatioDelta > 0.045) && motionEnergy < 4200;
+            if (isEyeTransiting) {
+              eyeClosedFrames++;
+            } else {
+              if (eyeClosedFrames >= 1 && eyeClosedFrames <= 7 && (nowMs - lastBlinkTs > 360)) {
+                blinkCount++;
+                lastBlinkTs = nowMs;
+                playSciFiTone(880, 'sine', 0.04);
+              }
+              eyeClosedFrames = 0;
+              baselineEyeLum = baselineEyeLum * 0.92 + avgEye * 0.08;
             }
-            eyeClosedFrames = 0;
           }
         }
 
-        // Analyse bâillements (bande inférieure de la bouche)
-        const mouthY1 = Math.floor(faceBox.y + faceBox.h * 0.68);
-        const mouthY2 = Math.floor(faceBox.y + faceBox.h * 0.94);
+        // 5. Analyse des bâillements (ouverture prolongée de la cavité buccale)
+        const mouthY1 = Math.max(0, Math.floor(faceBox.y + faceBox.h * 0.64));
+        const mouthY2 = Math.min(119, Math.floor(faceBox.y + faceBox.h * 0.92));
+        const mouthX1 = Math.max(0, Math.floor(faceBox.x + faceBox.w * 0.28));
+        const mouthX2 = Math.min(159, Math.floor(faceBox.x + faceBox.w * 0.72));
+
         let darkMouth = 0, mouthTotal = 0;
         for (let my = mouthY1; my < mouthY2; my += 2) {
-          for (let mx = eyeX1; mx < eyeX2; mx += 2) {
-            if (my >= 0 && my < 120 && mx >= 0 && mx < 160) {
-              const idx = (my * 160 + mx) * 4;
-              const lum = (data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114);
-              if (lum < 42) darkMouth++;
-              mouthTotal++;
-            }
+          for (let mx = mouthX1; mx < mouthX2; mx += 2) {
+            const idx = (my * 160 + mx) * 4;
+            const lum = (data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114);
+            // Cavité buccale ouverte = plus sombre que la carnation moyenne du visage
+            if (lum < Math.max(38, avgFaceLum * 0.64)) darkMouth++;
+            mouthTotal++;
           }
         }
 
-        if (mouthTotal > 0 && (darkMouth / mouthTotal) > 0.38) {
+        if (mouthTotal > 0 && (darkMouth / mouthTotal) > 0.26) {
           mouthOpenFrames++;
-          if (mouthOpenFrames === 14) { // Ouvert > 1 sec
+          if (mouthOpenFrames >= 12 && (nowMs - lastYawnTs > 2800)) {
             yawnCount++;
-            playSciFiTone(440, 'triangle', 0.15);
+            lastYawnTs = nowMs;
+            mouthOpenFrames = 0;
+            playSciFiTone(440, 'triangle', 0.14);
           }
         } else {
-          mouthOpenFrames = 0;
+          mouthOpenFrames = Math.max(0, mouthOpenFrames - 1);
         }
 
-        // Calcul score de fatigue multi-facteurs en direct (0-100%)
+        // 6. Calcul du score biométrique & charge cognitive en direct (0-100%)
         const blinkRate = Math.round((blinkCount / durMin) * 10) / 10;
-        let score = 0;
-        if (blinkRate > 24) score += Math.min(25, (blinkRate - 18) * 2);
-        else if (durSec > 45 && blinkRate < 7) score += 20; // Fixation prolongée écran
-        score += Math.min(30, yawnCount * 12);
-        if (Math.abs(computedYaw) > 14 || Math.abs(computedRoll) > 12) score += 12;
-        score += Math.min(20, Math.floor(durSec / 120) * 2);
-        score = Math.min(100, Math.max(0, Math.floor(score)));
+        // Charge cognitive de base active (8% à 14% dès que l'utilisateur est concentré devant l'écran)
+        let score = 8 + Math.min(8, Math.round((Math.abs(computedYaw) + Math.abs(computedRoll)) * 0.35));
+        if (blinkRate > 22) score += Math.min(28, (blinkRate - 18) * 2.2);
+        else if (durSec > 35 && blinkCount === 0) score += 14; // Fixation écran intense
+        score += Math.min(36, yawnCount * 15);
+        if (Math.abs(computedYaw) > 14 || Math.abs(computedRoll) > 11) score += 12;
+        score += Math.min(20, Math.floor(durSec / 90) * 3);
+        score = Math.min(100, Math.max(6, Math.floor(score)));
 
         let level = 'Normal';
         if (score >= 70) level = 'Fatigue Sévère';
         else if (score >= 45) level = 'Fatigué';
-        else if (score >= 25) level = 'Alerte';
-        else if (Math.abs(computedYaw) > 12) level = 'Distrait';
+        else if (score >= 26) level = 'Alerte';
+        else if (Math.abs(computedYaw) > 13) level = 'Distrait';
 
         const clientTelemetry = {
           active: true,
@@ -282,13 +385,13 @@
           blink_count: blinkCount,
           blink_rate_per_min: blinkRate,
           yawn_count: yawnCount,
+          measured_fps: smoothedFps,
           session_duration_seconds: durSec
         };
 
         updateMetricsUI(clientTelemetry);
-
       } else {
-        // Hors champ momentané
+        // Hors champ réel (aucun visage devant la caméra)
         const clientTelemetry = {
           active: true,
           user_present: false,
@@ -300,22 +403,21 @@
           blink_count: blinkCount,
           blink_rate_per_min: Math.round((blinkCount / durMin) * 10) / 10,
           yawn_count: yawnCount,
+          measured_fps: smoothedFps,
           session_duration_seconds: durSec
         };
         updateMetricsUI(clientTelemetry);
       }
-    }, 65);
+    }, 42); // ~24-25 FPS fluides
 
-    // Synchronisation périodique légère avec le serveur Jarvis (1.5s)
+    // Premier envoi rapide à 450ms (avec snapshot JPEG pour que Gemini Vision voie Moctar immédiatement)
+    setTimeout(() => pushTelemetryToServer(true), 450);
+
+    // Synchronisation périodique toutes les 1.4s avec le serveur Jarvis + snapshot JPEG
     if (syncInterval) clearInterval(syncInterval);
     syncInterval = setInterval(() => {
-      if (!isCameraActive || !isClientMode) return;
-      fetch('/api/vision/telemetry', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentMetrics)
-      }).catch(() => {});
-    }, 1500);
+      pushTelemetryToServer(true);
+    }, 1400);
   }
 
   // =========================================================================
@@ -364,16 +466,16 @@
 
       isClientMode = true;
       isCameraActive = true;
-      updateStatusUI('● CAMÉRA LOCALE ACTIVE', '#00f3ff');
+      updateStatusUI('● CAMÉRA LOCALE (PC MOCTAR)', '#00f3ff');
       if (sourceBadge) sourceBadge.textContent = 'WEBCAM CET ÉCRAN';
 
-      // Lance immédiatement le tracker biométrique local ultra-fluide
+      // Lance immédiatement le tracker biométrique local 25 FPS
       startLocalVisionTracker();
 
       playSciFiTone(880, 'sine', 0.12);
       updateToggleButtonUI(true);
       if (typeof window.toast === 'function') {
-        window.toast('Scanner NeuroVision connecté en direct.', 'success');
+        window.toast('Scanner NeuroVision 3D verrouillé sur votre caméra.', 'success');
       }
     } catch (err) {
       console.warn('Impossible d\'ouvrir la webcam locale :', err);
@@ -386,7 +488,7 @@
     isCameraActive = true;
     updateToggleButtonUI(true);
     if (sourceBadge) sourceBadge.textContent = 'MODE SIMULATION 3D';
-    if (fpsTag) fpsTag.textContent = '30 FPS';
+    if (fpsTag) fpsTag.textContent = '25 FPS';
     if (trackerInterval) clearInterval(trackerInterval);
 
     trackingStartTime = Date.now();
@@ -401,11 +503,12 @@
         face_detected: true,
         head_tilt_yaw: yaw,
         head_roll: roll,
-        fatigue_score: Math.min(100, Math.floor(Math.abs(yaw) + Math.abs(roll) * 1.5)),
+        fatigue_score: Math.min(100, Math.max(10, Math.floor(Math.abs(yaw) + Math.abs(roll) * 1.5))),
         fatigue_level: Math.abs(yaw) > 10 ? 'Distrait' : 'Normal',
         blink_count: Math.floor(s / 4),
         blink_rate_per_min: 15,
         yawn_count: 0,
+        measured_fps: 25,
         session_duration_seconds: s
       };
       updateMetricsUI(metrics);
@@ -678,8 +781,8 @@
       const centerY = height / 2;
 
       // Lissage ultra-fluide des angles Yaw et Roll
-      currentYaw += (targetYaw - currentYaw) * 0.15;
-      currentRoll += (targetRoll - currentRoll) * 0.15;
+      currentYaw += (targetYaw - currentYaw) * 0.18;
+      currentRoll += (targetRoll - currentRoll) * 0.18;
       idleAngle += 0.015;
 
       ctx.clearRect(0, 0, width, height);
@@ -890,6 +993,7 @@
   if (btnNeuroHud && hudOverlay) {
     btnNeuroHud.addEventListener('click', () => {
       hudOverlay.classList.add('active');
+      setTimeout(resizeCanvases, 60);
       init3DDigitalTwin();
       initWaveOscilloscope();
       startClientCamera();
@@ -916,6 +1020,7 @@
         yawnCount = 0;
         trackingStartTime = Date.now();
         lastBlinkTs = Date.now();
+        lastYawnTs = Date.now();
         await fetch('/api/vision/reset', { method: 'POST' });
         setTimeout(pollMetrics, 200);
         if (typeof window.toast === 'function') window.toast('Compteurs NeuroVision réinitialisés.', 'success');
@@ -933,7 +1038,6 @@
         setTimeout(resizeCanvases, 60);
         init3DDigitalTwin();
         initWaveOscilloscope();
-        // Démarre la caméra locale automatiquement par défaut
         startClientCamera();
         if (!pollInterval) pollInterval = setInterval(pollMetrics, 1000);
       } else {

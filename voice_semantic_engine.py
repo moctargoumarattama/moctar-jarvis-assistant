@@ -54,6 +54,9 @@ _SAFE_ROUTINE_VOICE_TOOLS = {
     "get_active_task",
     "update_active_task",
     "analyze_screen",
+    "get_vision_telemetry",
+    "control_vision",
+    "analyze_neurovision_camera",
     "store_memory_fact",
     "search_memory_facts",
     "switch_hud_view",
@@ -188,6 +191,10 @@ def execute_voice_tool_securely(
             "data": web_res,
             "message": web_res.get("formatted_context") or web_res.get("message") or "",
         }
+    elif tool_lower in ("analyze_neurovision_camera", "get_vision_telemetry"):
+        tool_res = execute_tool("get_vision_telemetry", args)
+        if not isinstance(tool_res, dict):
+            tool_res = {"success": bool(tool_res), "action": "get_vision_telemetry", "message": str(tool_res or "")}
     else:
         tool_res = execute_tool(tool_clean, args)
         if not isinstance(tool_res, dict):
@@ -470,6 +477,28 @@ VOICE_FAST_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_vision_telemetry",
+            "description": (
+                "Analyse en direct le scanner biométrique et la caméra NeuroVision 3D de Moctar "
+                "(présence devant l'écran, score de fatigue %, clignements des yeux, bâillements, "
+                "inclinaison de la tête Yaw/Roll, et analyse visuelle de l'image webcam). "
+                "À appeler OBLIGATOIREMENT quand Moctar demande 'est-ce que tu me vois ?', "
+                "'comment je suis dans la caméra ?', 'est-ce que je suis fatigué ?', 'que vois-tu dans NeuroVision 3D ?'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "Question spécifique de Moctar sur son état visuel, sa caméra ou sa fatigue.",
+                    }
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "store_memory_fact",
             "description": "Mémorise durablement une information, préférence ou fait important dans la mémoire permanente (ex: 'retiens que...', 'souviens-toi que...', 'mon serveur principal est...').",
             "parameters": {
@@ -718,6 +747,8 @@ VOICE_SEMANTIC_SYSTEM_PROMPT = (
     "- Si Moctar demande 'on en était où ?', 'qu'est-ce qu'on faisait ?', 'rappelle-moi ce qu'on fait', 'l'état du travail' ou la prochaine étape -> appelle 'get_active_task'.\n"
     "- Si Moctar fixe un nouvel objectif ou demande de noter une étape/vérification -> appelle 'update_active_task'.\n"
     "- Si Moctar demande de regarder son écran, d'analyser ce qui est affiché ou d'inspecter un bug visible (ex: 'regarde mon écran', 'analyse mon écran') -> appelle 'analyze_screen'.\n"
+    "- Si Moctar parle de NeuroVision 3D, de sa caméra/webcam, demande si tu le vois ('est-ce que tu me vois ?', 'comment je suis dans la caméra ?', 'tu vois mon visage ?') ou demande s'il est fatigué, son score de fatigue, ses clignements d'yeux, ses bâillements ou l'inclinaison de sa tête -> appelle OBLIGATOIREMENT 'get_vision_telemetry' (et N'APPELLE JAMAIS 'switch_hud_view' avec 'globe' pour une question sur NeuroVision ou la caméra !).\n"
+    "- Si Moctar corrige sa position géographique (ex: 'je ne suis pas à Niamey, je suis au Maroc') -> appelle 'store_memory_fact' avec category='personal', key='localisation_actuelle' et confirme immédiatement que tu as mis à jour sa position actuelle.\n"
     "- Si Moctar demande de retenir ou mémoriser une information ou préférence (ex: 'retiens que...', 'souviens-toi que...') -> appelle 'store_memory_fact'.\n"
     "- Si Moctar demande de rappeler un souvenir ou un fait (ex: 'rappelle-moi...', 'quel est mon...') -> appelle 'search_memory_facts'.\n"
     "- Si Moctar demande de lancer une tâche ou des tests en arrière-plan (ex: 'lance les tests en tâche de fond') -> appelle 'run_background_task'.\n"
@@ -769,32 +800,32 @@ def _call_groq_voice_semantic(
         if role in ("user", "assistant", "system") and content:
             norm_messages.append({"role": str(role), "content": str(content)})
 
-    # Découverte dynamique des modèles autorisés sur la clé Groq
+    # Découverte dynamique des modèles autorisés sur la clé Groq (sans modèles décommissionnés)
     discovered_models = []
     try:
         discovered_models = ai_brain.get_available_groq_chat_models(groq_api_key)
     except Exception:
         pass
-    preferred_order = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama-3.1-70b-versatile"]
+    dead_models = getattr(ai_brain, "_DEAD_GROQ_MODELS", set())
+    preferred_order = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
     models_to_try = []
     for pref in preferred_order:
-        if pref in discovered_models and pref not in models_to_try:
+        if pref in discovered_models and pref not in dead_models and pref not in models_to_try:
             models_to_try.append(pref)
     for m in discovered_models:
-        if m and m not in models_to_try:
+        if m and m not in dead_models and m not in models_to_try:
             models_to_try.append(m)
-    for pref in preferred_order:
-        if pref not in models_to_try:
-            models_to_try.append(pref)
 
     for model_name in models_to_try:
-        # Tente d'abord avec outils, puis repli sans outils sur le même modèle si erreur de schéma
+        if model_name in dead_models:
+            continue
+        # Tente d'abord avec outils, puis repli sans outils sur le même modèle uniquement si erreur de schéma d'outil
         tools_options = [tools, None] if tools else [None]
         for active_tools in tools_options:
             # 1. Via SDK Groq si disponible
             try:
                 from groq import Groq
-                client = Groq(api_key=groq_api_key, timeout=4.0, max_retries=0)
+                client = Groq(api_key=groq_api_key, timeout=3.5, max_retries=0)
                 kwargs: dict[str, Any] = {
                     "model": model_name,
                     "messages": norm_messages,
@@ -827,11 +858,23 @@ def _call_groq_voice_semantic(
                 pass
             except Exception as sdk_err:
                 err_str = str(sdk_err).lower()
-                LOGGER.warning("⚡ [GROQ SDK %s] (tools=%s) a échoué: %s", model_name, bool(active_tools), sdk_err)
-                if "429" in err_str or "rate_limit" in err_str:
+                if (
+                    "404" in err_str
+                    or "model_not_found" in err_str
+                    or "model_decommissioned" in err_str
+                    or "decommissioned" in err_str
+                ):
+                    if hasattr(ai_brain, "mark_groq_model_dead"):
+                        ai_brain.mark_groq_model_dead(model_name)
+                    LOGGER.warning("⚡ [GROQ SDK %s] modèle indisponible/décommissionné (blacklisté)", model_name)
                     break
+                if "429" in err_str or "rate_limit" in err_str:
+                    LOGGER.warning("⚡ [GROQ SDK %s] 429 rate_limit — passage immédiat au modèle suivant", model_name)
+                    break
+                LOGGER.warning("⚡ [GROQ SDK %s] (tools=%s) a échoué: %s", model_name, bool(active_tools), sdk_err)
+                continue
 
-            # 2. Requête HTTP directe vers l'API Groq (fallback direct universel)
+            # 2. Requête HTTP directe vers l'API Groq (uniquement si le SDK n'est pas installé)
             try:
                 import requests
                 url = "https://api.groq.com/openai/v1/chat/completions"
@@ -849,7 +892,7 @@ def _call_groq_voice_semantic(
                     payload["tools"] = active_tools
                     payload["tool_choice"] = "auto"
 
-                res = requests.post(url, headers=headers, json=payload, timeout=4.0)
+                res = requests.post(url, headers=headers, json=payload, timeout=3.5)
                 if res.status_code == 200:
                     data = res.json()
                     choice = data["choices"][0]
@@ -870,6 +913,11 @@ def _call_groq_voice_semantic(
                         "tool_calls": tool_calls,
                         "finish_reason": "tool_calls" if tool_calls else "stop",
                     }
+                elif res.status_code in (400, 404) or "model_not_found" in res.text.lower() or "decommissioned" in res.text.lower():
+                    if hasattr(ai_brain, "mark_groq_model_dead"):
+                        ai_brain.mark_groq_model_dead(model_name)
+                    LOGGER.warning("⚡ [GROQ HTTP %s] indisponible/décommissionné (blacklisté)", model_name)
+                    break
                 elif res.status_code == 429:
                     LOGGER.warning("⚡ [GROQ HTTP %s]: 429 Rate limit, passage au modèle suivant.", model_name)
                     break
@@ -1049,7 +1097,7 @@ def execute_voice_semantic_turn(
         except Exception:
             brain = None
 
-    # 3. Moteur Vocal Ultra-Rapide Groq LPU (< 250 ms) avec Repli Fluide Gemini
+    # 3. Cascade IA Unidirectionnelle : Niveau 1 Primaire Gemini (< 800 ms) -> Niveau 2 Secours Groq LPU
     groq_api_key = (
         os.environ.get("GROQ_API_KEY", "")
         or os.environ.get("NOC_GROQ_API_KEY", "")
@@ -1059,7 +1107,27 @@ def execute_voice_semantic_turn(
     ).strip()
 
     llm_res: dict[str, Any] | None = None
-    if groq_api_key:
+    if brain and hasattr(brain, "chat"):
+        try:
+            t0 = time.perf_counter()
+            llm_res = brain.chat(
+                llm_payload,
+                tools=VOICE_FAST_TOOLS,
+                system_prompt=full_system_prompt,
+                temperature=0.6,
+            )
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            if llm_res and (llm_res.get("tool_calls") or not _is_failed_llm_reply(str(llm_res.get("content") or ""))):
+                LOGGER.info("⚡ [GEMINI VOICE SEMANTIC LLM] (%dms): finish_reason=%s, tools=%d",
+                            duration_ms, llm_res.get("finish_reason"), len(llm_res.get("tool_calls", [])))
+            else:
+                LOGGER.warning("Gemini sémantique vide/en échec (%dms), bascule Niveau 2 Groq.", duration_ms)
+                llm_res = None
+        except Exception as exc:
+            LOGGER.warning("Erreur lors de l'appel LLM sémantique Gemini : %s", exc)
+            llm_res = None
+
+    if llm_res is None and groq_api_key:
         try:
             t0 = time.perf_counter()
             llm_res = _call_groq_voice_semantic(
@@ -1073,23 +1141,7 @@ def execute_voice_semantic_turn(
                 LOGGER.info("⚡ [GROQ VOICE SEMANTIC LLM] (%dms): finish_reason=%s, tools=%d",
                             duration_ms, llm_res.get("finish_reason"), len(llm_res.get("tool_calls", [])))
         except Exception as groq_err:
-            LOGGER.warning("Appel Groq vocal échoué, repli vers Gemini: %s", groq_err)
-            llm_res = None
-
-    if llm_res is None and brain and hasattr(brain, "chat"):
-        try:
-            t0 = time.perf_counter()
-            llm_res = brain.chat(
-                llm_payload,
-                tools=VOICE_FAST_TOOLS,
-                system_prompt=full_system_prompt,
-                temperature=0.6,
-            )
-            duration_ms = int((time.perf_counter() - t0) * 1000)
-            LOGGER.info("⚡ [GEMINI VOICE SEMANTIC LLM] (%dms): finish_reason=%s, tools=%d",
-                        duration_ms, llm_res.get("finish_reason"), len(llm_res.get("tool_calls", [])))
-        except Exception as exc:
-            LOGGER.warning("Erreur lors de l'appel LLM sémantique Gemini : %s", exc)
+            LOGGER.warning("Appel Groq vocal de secours échoué: %s", groq_err)
             llm_res = None
 
     # 3. Traitement des Function Calls s'ils ont été émis par le LLM
@@ -1213,9 +1265,9 @@ def execute_voice_semantic_turn(
             elif func_name == "update_active_task":
                 tool_replies.append(tool_res.get("message", "Mémoire de travail active mise à jour"))
 
-            elif func_name == "analyze_screen":
+            elif func_name in ("analyze_screen", "get_vision_telemetry", "analyze_neurovision_camera"):
                 msg = tool_res.get("message")
-                tool_replies.append(msg if msg else "Écran analysé avec succès.")
+                tool_replies.append(msg if msg else "Analyse visuelle et biométrique effectuée avec succès.")
 
             elif func_name == "store_memory_fact":
                 tool_replies.append(tool_res.get("message", "Fait enregistré dans la mémoire permanente."))
@@ -1258,10 +1310,14 @@ def execute_voice_semantic_turn(
         has_security_block = any(t.get("security_status") == "blocked" for t in tools_used)
         has_security_confirm = any(t.get("security_status") == "pending_confirmation" for t in tools_used)
         has_web_search_tool = any(t.get("tool") in ("web_search", "search_web") for t in tools_used)
+        has_direct_vision_tool = any(
+            t.get("tool") in ("get_vision_telemetry", "analyze_neurovision_camera", "analyze_screen")
+            for t in tools_used
+        )
 
         # Synthèse vocale intelligente par le LLM (Two-Step ReAct Loop) uniquement si pas d'interception sécurité
         final_reply: str | None = None
-        if has_security_block or has_security_confirm:
+        if has_security_block or has_security_confirm or (has_direct_vision_tool and any(tool_replies)):
             final_reply = _format_reply_ending(" ".join(r for r in tool_replies if r))
         elif brain and hasattr(brain, "chat"):
             try:

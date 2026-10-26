@@ -165,15 +165,77 @@ def control_vision(action: str = "toggle") -> Dict[str, Any]:
         return format_action_result("control_vision", False, f"Erreur contrôle vision : {exc}", {"active": False, "error": str(exc)})
 
 
-def get_vision_telemetry() -> Dict[str, Any]:
-    """Récupère la télémétrie de vision temps réel (clignements, bâillements, fatigue, posture)."""
+def get_vision_telemetry(question: str = "") -> Dict[str, Any]:
+    """Récupère la télémétrie biométrique NeuroVision 3D en temps réel (présence, clignements, bâillements, fatigue, posture Yaw/Roll) et analyse l'image de la caméra de Moctar si active."""
     try:
         from vision_engine import VisionEngine
         v = VisionEngine.get_instance()
         metrics = v.get_metrics()
-        score = metrics.get("fatigue_score", 0)
-        level = metrics.get("fatigue_level", "Normal")
-        msg = f"Vision cognitive : score de fatigue {score}% ({level}), clignements {metrics.get('blink_count', 0)}, bâillements {metrics.get('yawn_count', 0)}."
+        active = bool(metrics.get("active", False))
+        present = bool(metrics.get("user_present", False) or metrics.get("face_detected", False))
+        score = int(metrics.get("fatigue_score", 0))
+        level = str(metrics.get("fatigue_level", "Normal"))
+        blinks = int(metrics.get("blink_count", 0))
+        blink_rate = metrics.get("blink_rate_per_min", 0.0)
+        yawns = int(metrics.get("yawn_count", 0))
+        yaw = metrics.get("head_tilt_yaw", 0.0)
+        roll = metrics.get("head_roll", 0.0)
+        fps = metrics.get("measured_fps", 25.0)
+
+        visual_desc = ""
+        jpg_bytes = v.get_latest_jpeg_frame()
+        if jpg_bytes and len(jpg_bytes) > 200:
+            try:
+                import config
+                import ai_brain
+                from datetime import datetime
+                config.ensure_runtime_directories()
+                snap_path = config.SCREENSHOTS_DIR / f"neurovision_live_{datetime.now().strftime('%H%M%S')}.jpg"
+                snap_path.write_bytes(jpg_bytes)
+                prompt_q = question or "Décris brièvement Moctar devant sa caméra NeuroVision 3D (expression, posture, éclairage, état de forme)."
+                visual_desc = str(
+                    ai_brain.ask_ai(
+                        f"{prompt_q}\nDonnées biométriques mesurées en direct : fatigue={score}% ({level}), clignements={blinks} ({blink_rate}/min), bâillements={yawns}, inclinaison Yaw={yaw}°, Roll={roll}°.",
+                        images=[str(snap_path)],
+                        max_predict=180,
+                        temperature=0.2,
+                        system_prompt=(
+                            "Tu es M.O.C.T.A.R, l'assistant cybernétique de Moctar. "
+                            "Tu analyses l'image en direct de sa webcam NeuroVision 3D ainsi que ses capteurs biométriques. "
+                            "Réponds en 2 ou 3 phrases naturelles, précises et chaleureuses, en mentionnant ce que tu vois et ses constantes (fatigue, clignements, posture), et termine par 'Moctar'."
+                        ),
+                    )
+                ).strip()
+            except Exception:
+                visual_desc = ""
+
+        if visual_desc and not visual_desc.lower().startswith("erreur"):
+            msg = visual_desc
+        elif active and present:
+            fatigue_comment = (
+                "Vous semblez en pleine forme et bien concentré"
+                if score < 30
+                else "Je note une légère fatigue visuelle, pensez à cligner des yeux régulièrement"
+                if score < 60
+                else "Votre score de fatigue est élevé, je vous recommande une courte pause"
+            )
+            msg = (
+                f"Oui je vous vois clairement dans le scanner NeuroVision 3D ({fps} FPS) : "
+                f"votre visage est verrouillé, votre score de charge cognitive et fatigue est de {score}% ({level}), "
+                f"avec {blinks} clignements ({blink_rate}/min), {yawns} bâillement, et une posture de tête à {yaw}° d'inclinaison (Roll {roll}°). "
+                f"{fatigue_comment}, Moctar."
+            )
+        elif active and not present:
+            msg = (
+                f"Le scanner NeuroVision 3D est actif ({fps} FPS), mais votre visage n'est pas verrouillé au centre du capteur en ce moment "
+                f"(dernières mesures : fatigue {score}% [{level}], {blinks} clignements, {yawns} bâillements), Moctar."
+            )
+        else:
+            msg = (
+                "Le scanner NeuroVision 3D est actuellement en veille. Ouvrez l'onglet VISION dans le HUD 3D pour que je puisse vous voir en direct et analyser votre fatigue, Moctar."
+            )
+
+        metrics["analysis"] = msg
         return format_action_result("get_vision_telemetry", True, msg, metrics)
     except Exception as exc:
         return format_action_result("get_vision_telemetry", False, f"Vision non disponible : {exc}", {"active": False, "fatigue_score": 0, "fatigue_level": "Normal", "error": str(exc)})

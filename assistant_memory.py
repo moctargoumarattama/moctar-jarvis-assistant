@@ -50,7 +50,9 @@ from contextlib import contextmanager
 DEFAULT_MOCTAR_PROFILE: Dict[str, Any] = {
     "name": "Moctar",
     "nationality": "Nigérien",
-    "country": "Niger",
+    "origin": "Niger",
+    "country": "Maroc",
+    "current_location": "Maroc (Rabat)",
     "hardware": "Dell Precision M4800 (Linux Ubuntu)",
     "role": "Ingénieur & Pilote des systèmes",
     "tone_preference": "Naturel, chaleureux, direct, concis et complice (comme un ami)",
@@ -59,7 +61,12 @@ DEFAULT_MOCTAR_PROFILE: Dict[str, Any] = {
     "favorite_sports_teams": ["Real Madrid"],
     "favorite_competitions": ["Ligue 1", "Champions League", "Liga", "Premier League"],
     "recent_topics": [],
-    "known_preferences": {"nationality": "Nigérien", "origin": "Niger", "editor": "VS Code"},
+    "known_preferences": {
+        "nationality": "Nigérien",
+        "origin": "Niger",
+        "current_location": "Maroc (Rabat)",
+        "editor": "VS Code",
+    },
     "last_interaction": None,
     "total_turns": 0,
 }
@@ -596,26 +603,38 @@ class AssistantMemory:
                     _record_provenance(f"favorite_sports_team:{canonical}", canonical)
         profile["favorite_sports_teams"] = list(fav_teams)
 
-        # 3. Préférences d'outils, nationalité et villes (protégées contre les négations et questions générales)
+        # 3. Préférences d'outils, nationalité et localisation actuelle (analyse par proposition pour gérer "Non, je ne suis pas à Niamey, je suis au Maroc")
         known_prefs = profile.get("known_preferences", {})
-        if can_extract_positive_fact:
-            if "vscode" in low_user or "visual studio code" in low_user:
+        clauses = [c.strip().lower() for c in re.split(r"[,;.]|\bmais\b", clean_user) if c.strip()]
+        for clause in clauses:
+            clause_neg = bool(negation_pattern.search(clause))
+            clause_fp = bool(first_person_pattern.search(clause))
+            clause_q = "?" in clause or bool(
+                re.match(r"^\s*(?:quel|quelle|quels|quelles|ou|où|comment|pourquoi|qui|est-ce\s+que)\b", clause)
+            )
+            if not (clause_fp and not clause_neg and not clause_q):
+                continue
+            if "vscode" in clause or "visual studio code" in clause:
                 known_prefs["editor"] = "VS Code"
                 _record_provenance("editor", "VS Code")
-            if "chrome" in low_user:
+            if "chrome" in clause:
                 known_prefs["browser"] = "Chrome"
                 _record_provenance("browser", "Chrome")
-            if re.search(r"\b(?:nig[ée]rien(?:ne)?|niger)\b", low_user):
+            if re.search(r"\b(?:nig[ée]rien(?:ne)?)\b", clause):
                 profile["nationality"] = "Nigérien"
-                profile["country"] = "Niger"
                 known_prefs["nationality"] = "Nigérien"
-                known_prefs["origin"] = "Niger"
-                known_prefs["primary_city"] = "Niamey"
                 _record_provenance("nationality", "Nigérien")
-                _record_provenance("country", "Niger")
-            elif any(w in low_user for w in ("casablanca", "casa", "maroc")):
-                known_prefs["secondary_city"] = "Casablanca"
-                _record_provenance("secondary_city", "Casablanca")
+            if any(w in clause for w in ("au maroc", "à rabat", "a rabat", "à casablanca", "a casablanca", "j'habite au maroc")):
+                loc_val = "Maroc (Casablanca)" if ("casablanca" in clause or "casa" in clause) else "Maroc (Rabat)"
+                profile["current_location"] = loc_val
+                profile["country"] = "Maroc"
+                known_prefs["current_location"] = loc_val
+                _record_provenance("current_location", loc_val)
+            elif any(w in clause for w in ("au niger", "à niamey", "a niamey", "j'habite à niamey")):
+                profile["current_location"] = "Niger (Niamey)"
+                profile["country"] = "Niger"
+                known_prefs["current_location"] = "Niger (Niamey)"
+                _record_provenance("current_location", "Niger (Niamey)")
         profile["known_preferences"] = known_prefs
         profile["fact_provenance"] = provenance_map
 
@@ -630,11 +649,13 @@ class AssistantMemory:
         teams = ", ".join(profile.get("favorite_sports_teams", ["Real Madrid"]))
         turn_count = profile.get("total_turns", 0)
         nationality = profile.get("nationality", "Nigérien")
+        current_loc = profile.get("current_location", "Maroc (Rabat)")
 
         lines = [
             "[PROFIL CONTINU DE MOCTAR (PERSONNALISATION VIVANTE & AMICALE)]",
             f"- Utilisateur : {profile.get('name', 'Moctar')} (Ingénieur & Architecte sur {profile.get('hardware', 'Dell Precision M4800')})",
-            f"- Nationalité & Origine : {nationality} (Niger)",
+            f"- Nationalité & Origine : {nationality} (Originaire du Niger)",
+            f"- Localisation actuelle : {current_loc} (Moctar réside actuellement au Maroc ; ne confonds jamais son pays d'origine le Niger avec sa position actuelle au Maroc)",
             f"- Ton souhaité : {profile.get('tone_preference', 'Humain, chaleureux, direct et complice (comme un ami)')}",
             f"- Équipes & Sports suivis : {teams}",
             f"- Sujets récents abordés : {topics_str}",

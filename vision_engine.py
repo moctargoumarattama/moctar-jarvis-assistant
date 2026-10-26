@@ -1,12 +1,12 @@
 """Moteur de Vision Cognitive et Biomutationnelle (NeuroVision) pour JARVIS / M.O.C.T.A.R.
 
 Intègre les capacités réelles de vision par ordinateur développées dans NeuroVision v2.2 :
-1. Détection faciale en temps réel (Haar Cascade optimisée).
+1. Détection faciale en temps réel (Haar Cascade optimisée & télémétrie client).
 2. Analyse de clignements réels (Eye Aspect Ratio / EAR ultra-rapide par seuillage).
 3. Détection de bâillements réels (Mouth Aspect Ratio / MAR par densité de cavité buccale).
 4. Estimation de la pose de tête 3D (Yaw: inclinaison horizontale, Roll: roulis/affaissement).
 5. Calcul du score de fatigue cognitive biométrique (0 à 100%).
-6. Détection de présence physique de Moctar devant le Dell Precision M4800.
+6. Détection de présence physique de Moctar devant son écran PC ou le serveur.
 7. Génération de flux vidéo MJPEG natif pour FastAPI et le HUD 3D (sans serveur Flask ni port 5001).
 8. Contrôle dynamique de l'acquisition (démarrage/arrêt à chaud, zéro CPU en veille).
 9. Tolérance aux pannes maximale : dégradation gracieuse en mode simulation/veille si OpenCV (cv2) n'est pas installé.
@@ -14,7 +14,9 @@ Intègre les capacités réelles de vision par ordinateur développées dans Neu
 
 from __future__ import annotations
 
+import base64
 import logging
+import os
 import threading
 import time
 from collections import deque
@@ -118,12 +120,15 @@ class VisionEngine:
         self.fatigue_level = "Normal"
         self.face_detected = False
         self.last_face_seen_time = 0.0
+        self.last_client_telemetry_time = 0.0
+        self.last_client_frame_time = 0.0
+        self.client_session_duration: Optional[int] = None
         self.start_time = time.time()
         self.last_blink_time = time.time()
         self.last_yawn_time = time.time()
         self.last_update = time.time()
         self.frame_count = 0
-        self.measured_fps = 0.0
+        self.measured_fps = 25.0
         self._fps_counter = 0
         self._fps_timer = time.time()
 
@@ -142,7 +147,7 @@ class VisionEngine:
         self.consec_frames_blink = 0
         self.consec_frames_yawn = 0
 
-        # Cache d'images thread-safe pour le streaming MJPEG
+        # Cache d'images thread-safe pour le streaming MJPEG et l'analyse Gemini Vision
         self._latest_jpeg_frame: Optional[bytes] = None
         self._new_frame_event = threading.Event()
 
@@ -252,23 +257,27 @@ class VisionEngine:
         """Indique si la vision est activement en cours de capture."""
         return self._running
 
-    def is_user_present(self, timeout_seconds: float = 4.0) -> bool:
-        """Indique si l'utilisateur a été détecté devant l'écran récemment (avec hystérésis)."""
-        if not self._running:
+    def is_user_present(self, timeout_seconds: float = 45.0) -> bool:
+        """Indique si l'utilisateur a été détecté devant l'écran récemment (avec hystérésis de 45s pour les échanges vocaux)."""
+        if not self._running and (time.time() - self.last_face_seen_time) >= timeout_seconds:
             return False
         return (time.time() - self.last_face_seen_time < timeout_seconds)
 
     def update_client_telemetry(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Met à jour directement la télémétrie reçue du navigateur client (PC de Moctar).
+        """Met à jour directement la télémétrie et le snapshot JPEG reçus du navigateur client (PC de Moctar).
 
         Garantit que le serveur Linux ne consomme AUCUN CPU pour la capture vidéo,
-        tout en maintenant l'état cognitif de Moctar parfaitement à jour dans JARVIS.
+        tout en maintenant l'état cognitif ET l'image de la webcam de Moctar parfaitement à jour dans JARVIS.
         """
+        now_ts = time.time()
         with self._state_lock:
             self._running = True
-            self.last_update = time.time()
-            self.last_face_seen_time = time.time()
-            self.face_detected = bool(data.get("face_detected", True))
+            self.last_update = now_ts
+            self.last_client_telemetry_time = now_ts
+            is_present = bool(data.get("user_present", data.get("face_detected", True)))
+            self.face_detected = bool(data.get("face_detected", is_present))
+            if is_present or self.face_detected:
+                self.last_face_seen_time = now_ts
 
             if "blink_count" in data:
                 self.blink_count = int(data["blink_count"])
@@ -284,6 +293,29 @@ class VisionEngine:
                 self.fatigue_level = str(data["fatigue_level"])
             else:
                 self._update_metrics(self.face_detected)
+            if "measured_fps" in data:
+                try:
+                    self.measured_fps = max(15.0, float(data["measured_fps"]))
+                except Exception:
+                    pass
+            if "session_duration_seconds" in data:
+                try:
+                    self.client_session_duration = int(data["session_duration_seconds"])
+                except Exception:
+                    pass
+
+            # Snapshot JPEG encodé en base64 depuis la webcam locale du PC de Moctar
+            raw_b64 = data.get("image_b64")
+            if isinstance(raw_b64, str) and len(raw_b64) > 64:
+                try:
+                    b64_payload = raw_b64.split(",", 1)[-1] if "," in raw_b64 else raw_b64
+                    jpg_bytes = base64.b64decode(b64_payload)
+                    if len(jpg_bytes) > 100:
+                        self._latest_jpeg_frame = jpg_bytes
+                        self.last_client_frame_time = now_ts
+                        self._new_frame_event.set()
+                except Exception:
+                    pass
 
             metrics = self.get_metrics()
             metrics["source"] = "client_webcam"
@@ -299,6 +331,11 @@ class VisionEngine:
         with self._state_lock:
             self._running = True
             self.last_update = time.time()
+            self.last_client_telemetry_time = time.time()
+            if frame_bytes and len(frame_bytes) > 100:
+                self._latest_jpeg_frame = frame_bytes
+                self.last_client_frame_time = time.time()
+                self._new_frame_event.set()
 
         if not CV2_AVAILABLE or cv2 is None or not NUMPY_AVAILABLE or np is None:
             # Mode sans OpenCV sur le serveur : présence confirmée par le flux actif du client
@@ -372,7 +409,6 @@ class VisionEngine:
             except Exception:
                 pass
             self.cap = None
-        self._latest_jpeg_frame = None
 
     def _worker_loop(self) -> None:
         """Boucle d'acquisition et de traitement continu à faible empreinte CPU."""
@@ -384,8 +420,9 @@ class VisionEngine:
 
             if not CV2_AVAILABLE or not has_camera or self.simulation or self.cap is None:
                 # Mode veille / simulation quand aucune webcam ou cv2 n'est disponible
-                self._latest_jpeg_frame = get_standby_jpeg_bytes()
-                self._new_frame_event.set()
+                if self._latest_jpeg_frame is None:
+                    self._latest_jpeg_frame = get_standby_jpeg_bytes()
+                    self._new_frame_event.set()
                 time.sleep(0.5)
                 continue
 
@@ -696,7 +733,12 @@ class VisionEngine:
 
     def get_metrics(self) -> Dict[str, Any]:
         """Télémétrie complète au format JSON pour l'API Jarvis et le HUD."""
-        duration_minutes = max((time.time() - self.start_time) / 60.0, 0.1)
+        sess_sec = (
+            self.client_session_duration
+            if self.client_session_duration is not None and (time.time() - self.last_client_telemetry_time) < 45.0
+            else int(time.time() - self.start_time)
+        )
+        duration_minutes = max(sess_sec / 60.0, 0.1)
         blink_rate = round(self.blink_count / duration_minutes, 1)
         is_cam_open = (
             CV2_AVAILABLE
@@ -704,11 +746,12 @@ class VisionEngine:
             and self.cap is not None
             and getattr(self.cap, "isOpened", lambda: False)()
         )
+        client_active = (time.time() - self.last_client_telemetry_time) < 45.0
 
         return {
-            "active": self._running,
+            "active": bool(self._running or client_active),
             "cv2_available": CV2_AVAILABLE,
-            "camera_connected": bool(is_cam_open),
+            "camera_connected": bool(is_cam_open or client_active),
             "user_present": self.is_user_present(),
             "face_detected": self.face_detected,
             "blink_count": self.blink_count,
@@ -718,11 +761,12 @@ class VisionEngine:
             "head_roll": self.head_roll,
             "fatigue_score": self.fatigue_score,
             "fatigue_level": self.fatigue_level,
-            "session_duration_seconds": int(time.time() - self.start_time),
+            "session_duration_seconds": sess_sec,
             "measured_fps": round(self.measured_fps, 1),
+            "source": "client_webcam" if client_active else "server",
             "timestamp": datetime.now().strftime("%H:%M:%S"),
-            "status": "nominal" if CV2_AVAILABLE else "cv2_missing",
-            "message": "Vision nominale" if CV2_AVAILABLE else "Module opencv-python non installé sur cet hôte (mode simulation/veille)",
+            "status": "nominal" if (CV2_AVAILABLE or client_active) else "cv2_missing",
+            "message": "Vision nominale" if (CV2_AVAILABLE or client_active) else "Module opencv-python non installé sur cet hôte (mode simulation/veille)",
         }
 
     def reset_counters(self) -> None:
@@ -735,6 +779,7 @@ class VisionEngine:
             self.fatigue_score = 0
             self.fatigue_level = "Normal"
             self.start_time = time.time()
+            self.client_session_duration = 0
             self.last_blink_time = time.time()
             self.last_yawn_time = time.time()
             self.eye_aspect_ratio_history.clear()

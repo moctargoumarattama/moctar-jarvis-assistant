@@ -2005,6 +2005,36 @@ def build_live_system_context(runtime: Any = None) -> str:
         except Exception:
             pass
 
+    # Télémétrie biométrique et visuelle NeuroVision 3D en temps réel
+    neurovision_block = ""
+    try:
+        from vision_engine import VisionEngine
+        ve = VisionEngine.get_instance()
+        vm = ve.get_metrics()
+        nv_active = bool(vm.get("active"))
+        nv_present = bool(vm.get("user_present") or vm.get("face_detected"))
+        nv_source = vm.get("source") or ("Webcam locale PC de Moctar" if nv_active else "En veille")
+        nv_fatigue_score = vm.get("fatigue_score", 0)
+        nv_fatigue_lvl = vm.get("fatigue_level", "Normal")
+        nv_blinks = vm.get("blink_count", 0)
+        nv_blink_rate = vm.get("blink_rate_per_min", 0.0)
+        nv_yawns = vm.get("yawn_count", 0)
+        nv_yaw = vm.get("head_tilt_yaw", 0.0)
+        nv_roll = vm.get("head_roll", 0.0)
+        nv_dur = vm.get("session_duration_seconds", 0)
+        has_frame = ve.get_latest_jpeg_frame() is not None
+        neurovision_block = (
+            f"\n\n[SCANNER BIOMÉTRIQUE & CAMÉRA NEUROVISION 3D EN DIRECT]\n"
+            f"- Statut capteur NeuroVision 3D : {'ACTIF EN DIRECT' if nv_active else 'EN VEILLE (prêt à activer)'} (Source : {nv_source})\n"
+            f"- Présence devant la caméra : {'PRÉSENT (Visage de Moctar verrouillé)' if nv_present else ('Hors champ / En attente' if nv_active else 'Capteur en veille')}\n"
+            f"- État cognitif & Fatigue : {nv_fatigue_lvl} (Score de fatigue : {nv_fatigue_score}%)\n"
+            f"- Biométrie oculaire & buccale : {nv_blinks} clignements ({nv_blink_rate}/min) | {nv_yawns} bâillement(s)\n"
+            f"- Posture 3D de la tête (Digital Twin) : Inclinaison Yaw={nv_yaw}°, Affaissement Roll={nv_roll}°\n"
+            f"- Durée de surveillance : {nv_dur // 60}m {nv_dur % 60}s | Flux image caméra reçu : {'OUI' if has_frame else 'NON'}"
+        )
+    except Exception:
+        pass
+
     return (
         f"[TÉLÉMÉTRIE EN TEMPS RÉEL DU SERVEUR DELL PRECISION M4800]\n"
         f"- Date et heure : {date_fr} à {time_str}\n"
@@ -2014,28 +2044,35 @@ def build_live_system_context(runtime: Any = None) -> str:
         f"- Espace disque libre : {disk_free_gb} Go\n"
         f"- Pont WhatsApp : {whatsapp_status}\n"
         f"- Runtime NOC : {noc_status}"
+        f"{neurovision_block}"
     )
 
 
 _FAST_VOICE_SESSION_TURNS: dict[str, list[dict[str, str]]] = {}
 _GROQ_MODELS_CACHE: tuple[float, list[str]] = (0.0, [])
-
-GROQ_MODELS_PRIORITY: list[str] = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "llama-3.1-70b-versatile",
-    "llama3-70b-8192",
-]
-DEFAULT_PREFERRED_GROQ_MODELS: list[str] = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
+_DEAD_GROQ_MODELS: set[str] = {
     "llama-3.1-70b-versatile",
     "llama3-70b-8192",
     "llama3-8b-8192",
     "mixtral-8x7b-32768",
     "gemma2-9b-it",
     "qwen-2.5-32b",
+}
+
+GROQ_MODELS_PRIORITY: list[str] = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
 ]
+DEFAULT_PREFERRED_GROQ_MODELS: list[str] = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+]
+
+
+def mark_groq_model_dead(model_name: str) -> None:
+    """Enregistre un modèle Groq ayant renvoyé 400 (decommissioned) ou 404 (not_found) pour ne plus jamais le rappeler."""
+    if model_name:
+        _DEAD_GROQ_MODELS.add(str(model_name).strip())
 
 
 def _ensure_moctar_ending(text: str) -> str:
@@ -2050,19 +2087,20 @@ def _ensure_moctar_ending(text: str) -> str:
 
 
 def get_available_groq_chat_models(api_key: str, force_refresh: bool = False) -> list[str]:
-    """Interroge dynamiquement l'API Groq pour lister les modèles de chat actifs autorisés pour cette clé."""
+    """Interroge dynamiquement l'API Groq pour lister uniquement les modèles de chat actifs autorisés pour cette clé."""
     global _GROQ_MODELS_CACHE
     now = time.monotonic()
     cached_t, cached_list = _GROQ_MODELS_CACHE
     if not force_refresh and cached_list and (now - cached_t < 1800.0):
-        return cached_list
+        return [m for m in cached_list if m not in _DEAD_GROQ_MODELS]
 
-    candidates = list(DEFAULT_PREFERRED_GROQ_MODELS)
+    candidates = [m for m in DEFAULT_PREFERRED_GROQ_MODELS if m not in _DEAD_GROQ_MODELS]
     env_model = os.environ.get("GROQ_CHAT_MODEL", "").strip()
-    if env_model:
+    if env_model and env_model not in _DEAD_GROQ_MODELS:
         candidates.insert(0, env_model)
 
     discovered: list[str] = []
+    discovery_succeeded = False
     if api_key:
         try:
             import urllib.request
@@ -2075,12 +2113,14 @@ def get_available_groq_chat_models(api_key: str, force_refresh: bool = False) ->
             )
             with urllib.request.urlopen(req, timeout=3.0) as resp:
                 if resp.status == 200:
+                    discovery_succeeded = True
                     body = json.loads(resp.read().decode("utf-8"))
                     items = body.get("data", [])
                     raw_ids = [m.get("id") for m in items if isinstance(m, dict) and m.get("id")]
                     chat_ids = [
                         i for i in raw_ids
-                        if not any(k in i.lower() for k in ("whisper", "guard", "embed", "tts", "audio", "moderation", "vision"))
+                        if i not in _DEAD_GROQ_MODELS
+                        and not any(k in i.lower() for k in ("whisper", "guard", "embed", "tts", "audio", "moderation", "vision"))
                     ]
                     APPROVED_FAMILIES = ("llama", "mixtral", "gemma", "qwen", "deepseek")
                     for pref in candidates:
@@ -2091,23 +2131,25 @@ def get_available_groq_chat_models(api_key: str, force_refresh: bool = False) ->
                             if cid not in discovered:
                                 discovered.append(cid)
                     if discovered:
-                        logger.info("⚡ [GROQ DISCOVERY]: %d modèles de chat approuvés (%s...)", len(discovered), discovered[:3])
+                        logger.info("⚡ [GROQ DISCOVERY]: %d modèles de chat actifs autorisés (%s)", len(discovered), discovered[:3])
                     else:
-                        logger.warning("⚡ [GROQ DISCOVERY]: Aucun modèle de chat général approuvé sur cette clé (reçus: %s). Repli sur Gemini.", chat_ids[:3])
+                        logger.warning("⚡ [GROQ DISCOVERY]: Aucun modèle de chat actif sur cette clé. Utilisation exclusive de Gemini.")
         except Exception as exc:
-            logger.debug("Découverte dynamique des modèles Groq indisponible (%s), repli sur la liste par défaut.", exc)
+            logger.debug("Découverte dynamique des modèles Groq indisponible (%s).", exc)
 
     final_list: list[str] = []
-    # Priorité absolue aux modèles haute capacité et réactivité ultra-rapide
-    for pref in GROQ_MODELS_PRIORITY:
-        if pref in discovered and pref not in final_list:
-            final_list.append(pref)
-    for m in discovered:
-        if m and m not in final_list:
-            final_list.append(m)
-    for pref in candidates:
-        if pref not in final_list:
-            final_list.append(pref)
+    if discovery_succeeded:
+        # Utiliser strictement les modèles réellement autorisés par l'API pour cette clé
+        for pref in GROQ_MODELS_PRIORITY:
+            if pref in discovered and pref not in final_list and pref not in _DEAD_GROQ_MODELS:
+                final_list.append(pref)
+        for m in discovered:
+            if m and m not in final_list and m not in _DEAD_GROQ_MODELS:
+                final_list.append(m)
+    else:
+        for pref in candidates:
+            if pref not in final_list and pref not in _DEAD_GROQ_MODELS:
+                final_list.append(pref)
     _GROQ_MODELS_CACHE = (now, final_list)
     return final_list
 
@@ -2219,14 +2261,16 @@ def voice_fast_llm_reply(
 
     if groq_api_key and "groq" not in failed_providers:
         discovered_models = get_available_groq_chat_models(groq_api_key)
-        models_to_try = [m for m in discovered_models if m]
+        models_to_try = [m for m in discovered_models if m and m not in _DEAD_GROQ_MODELS]
         if "llama-3.3-70b-versatile" in models_to_try:
             models_to_try.remove("llama-3.3-70b-versatile")
-        models_to_try.insert(0, "llama-3.3-70b-versatile")
+            models_to_try.insert(0, "llama-3.3-70b-versatile")
         failed_404_models: set[str] = set()
         refreshed_on_404 = False
 
         def _try_groq_candidate(cand: str, call_timeout: float) -> str | None:
+            if cand in _DEAD_GROQ_MODELS:
+                return None
             # 1. SDK Groq officiel (si le package groq est installé)
             try:
                 from groq import Groq  # type: ignore[import-not-found]
@@ -2248,13 +2292,24 @@ def voice_fast_llm_reply(
                 pass
             except Exception as sdk_err:
                 err_msg = str(sdk_err).lower()
-                if "404" in err_msg or "model_not_found" in err_msg or type(sdk_err).__name__ == "NotFoundError":
+                if (
+                    "404" in err_msg
+                    or "model_not_found" in err_msg
+                    or "model_decommissioned" in err_msg
+                    or "decommissioned" in err_msg
+                    or type(sdk_err).__name__ in ("NotFoundError", "BadRequestError")
+                ):
                     failed_404_models.add(cand)
-                    logger.warning("Groq SDK 404 model_not_found pour %s", cand)
+                    mark_groq_model_dead(cand)
+                    logger.warning("Groq SDK modèle %s indisponible/décommissionné (blacklisté)", cand)
+                    return None
+                if "429" in err_msg or "rate_limit" in err_msg or type(sdk_err).__name__ == "RateLimitError":
+                    logger.warning("Groq SDK 429 rate_limit sur %s — passage immédiat au modèle suivant", cand)
                     return None
                 logger.warning("Groq SDK modèle %s a échoué: %s", cand, sdk_err)
+                return None
 
-            # 2. Requête HTTP directe vers l'API Groq (fallback direct universel)
+            # 2. Requête HTTP directe vers l'API Groq (uniquement si le SDK n'est pas installé)
             try:
                 import requests
 
@@ -2276,9 +2331,10 @@ def voice_fast_llm_reply(
                     if reply:
                         logger.info("⚡ [GROQ HTTP %s]: '%s'", cand.upper(), reply)
                         return reply
-                elif resp.status_code == 404 or "model_not_found" in resp.text.lower():
+                elif resp.status_code in (400, 404) or "model_not_found" in resp.text.lower() or "decommissioned" in resp.text.lower():
                     failed_404_models.add(cand)
-                    logger.warning("Groq Chat API HTTP 404 (model_not_found) pour %s: %s", cand, resp.text)
+                    mark_groq_model_dead(cand)
+                    logger.warning("Groq Chat API HTTP %s pour %s (blacklisté)", resp.status_code, cand)
                 else:
                     logger.warning("Groq Chat API HTTP %s (%s): %s", resp.status_code, cand, resp.text)
             except Exception as exc:
