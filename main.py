@@ -634,19 +634,26 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
 
     # 0a2b. Présentation personnalisée ou salutation d'un ami ("je te présente mon ami Omar", "je te présente mon ami Arafat", "voici mon ami Youssef", "dis bonjour à Moussa")
     match_intro = re.search(
-        r"\b(?:je\s+te\s+pr[ée]sente|voici|c['’]est|(?:dis\s+bonjour|salue|passe\s+le\s+bonjour)\s+[aà]|je\s+suis\s+avec|accueil(?:le)?)"
+        r"\b(?:je\s+te\s+pr[ée]sente|voici|(?:dis\s+bonjour|salue|passe\s+le\s+bonjour)\s+[aà]|je\s+suis\s+avec|accueil(?:le)?)"
         r"(?:\s+(?:mon|notre|un|une)\s+(?:tr[èe]s\s+bon\s+|meilleur\s+|cher\s+)?(?:ami|amie|pote|coll[èe]gue|fr[èe]re|fr[ée]rot|cousin|cousine|camarade|invit[ée]|invit[ée]e|associ[ée]))?"
-        r"\s+([A-ZÀ-ÿa-z-]{2,20})\b",
+        r"\s+([A-ZÀ-ÿa-z-]{2,20})\b|"
+        r"\b(?:c['’]est)\s+(?:mon|notre|un|une)\s+(?:tr[èe]s\s+bon\s+|meilleur\s+|cher\s+)?(?:ami|amie|pote|coll[èe]gue|fr[èe]re|fr[ée]rot|cousin|cousine|camarade|invit[ée]|invit[ée]e|associ[ée])\s+([A-ZÀ-ÿa-z-]{2,20})\b",
         cleaned,
         re.IGNORECASE,
     )
     if match_intro:
-        friend_name = match_intro.group(1).capitalize()
-        if friend_name.lower() not in (
+        raw_cand = match_intro.group(1) or match_intro.group(2) or ""
+        friend_name = raw_cand.capitalize()
+        INVALID_FRIEND_NAMES = {
             "moctar", "moktar", "jarvis", "un", "une", "mon", "ma", "mes",
-            "notre", "ce", "cet", "cette", "le", "la", "les", "tout", "tous",
+            "notre", "nos", "votre", "vos", "ce", "cet", "cette", "ces", "le", "la", "les", "tout", "tous",
             "ami", "amie", "pote", "collegue", "collègue", "frere", "frère",
-        ):
+            "quoi", "qui", "ou", "où", "comment", "pourquoi", "quand", "combien",
+            "ca", "ça", "ceci", "cela", "parti", "fini", "bon", "bien", "vrai", "faux",
+            "cool", "super", "merci", "conneries", "rien", "normal", "possible", "impossible",
+            "sur", "sous", "dans", "avec", "sans", "jeu", "jeux", "mot", "mots"
+        }
+        if friend_name.lower() not in INVALID_FRIEND_NAMES and len(friend_name) >= 2:
             is_known = False
             if memory and hasattr(memory, "get_known_friend"):
                 try:

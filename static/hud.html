@@ -630,7 +630,7 @@
       font-family: var(--font-sans);
     }
   </style>
-  <link rel="stylesheet" href="/static/neurovision_hud.css?v=6.4">
+  <link rel="stylesheet" href="/static/neurovision_hud.css?v=6.5">
 </head>
 <body>
   <!-- Conteneur 3D WebGL (Three.js) -->
@@ -747,18 +747,16 @@
   </div>
 
   <!-- Moteur Three.js Local (Offline) -->
-  <script src="/static/js/three.min.js?v=6.4"></script>
+  <script src="/static/js/three.min.js?v=6.5"></script>
   <!-- Moteur Vocal Audio Réel & Wake-Word -->
-  <script src="/static/voice.js?v=6.4"></script>
+  <script src="/static/voice.js?v=6.5"></script>
   <!-- Moteur Graphique HUD 3D Unifié (Source Unique de Vérité) -->
-  <script src="/static/js/hud_3d.js?v=6.4"></script>
+  <script src="/static/js/hud_3d.js?v=6.5"></script>
 
   <!-- ========================================================================= -->
   <!-- MODAL HOLOGRAPHIQUE NEUROVISION POUR LE HUD 3D (3D ULTRA-CINÉMATIQUE)     -->
   <!-- ========================================================================= -->
-  <div id="hud-neurovision-overlay" class="hud-modal-overlay">
-    <div class="hud-modal-card" style="max-width: 1520px; width: min(1520px, calc(100vw - 32px)); max-height: 94vh; overflow: hidden; padding: 0; background: transparent; border: none; box-shadow: none;">
-      <div id="neurovision-dialog" style="display:block; position:relative; width:100%; border-radius:18px; margin:0;">
+  <dialog id="neurovision-dialog" aria-labelledby="neurovision-dialog-title">
         <div class="nv-header">
           <div>
             <div class="nv-title-badge">
@@ -898,10 +896,8 @@
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
+  </dialog>
 
-  <script src="/static/neurovision_hud.js?v=6.4"></script>
+  <script src="/static/neurovision_hud.js?v=6.5"></script>
 </body>
 </html>

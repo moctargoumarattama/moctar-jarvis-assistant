@@ -1051,32 +1051,34 @@
     switchSrcBtn.addEventListener('click', switchSource);
   }
 
-  // Support spécifique du HUD 3D (bouton mode pill et overlay)
-  const hudOverlay = document.getElementById('hud-neurovision-overlay');
-  const hudCloseBtn = document.getElementById('hud-nv-close-btn');
+  // Support spécifique du HUD 3D (bouton mode pill 👁️ VISION & fermeture)
   const btnNeuroHud = document.getElementById('btn-neurovision-hud');
-
-  if (btnNeuroHud && hudOverlay) {
+  if (btnNeuroHud) {
     btnNeuroHud.addEventListener('click', () => {
-      hudOverlay.classList.add('active');
-      setTimeout(resizeCanvases, 60);
-      init3DDigitalTwin();
-      initWaveOscilloscope();
-      startClientCamera();
-      if (!pollInterval) pollInterval = setInterval(pollMetrics, 1000);
-    });
-  }
-
-  if (hudCloseBtn && hudOverlay) {
-    hudCloseBtn.addEventListener('click', () => {
-      hudOverlay.classList.remove('active');
-      stopClientCamera();
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
+      const d = document.getElementById('neurovision-dialog');
+      if (d) {
+        if (typeof d.showModal === 'function') {
+          if (!d.open) d.showModal();
+        } else {
+          d.setAttribute('open', '');
+        }
       }
     });
   }
+
+  const hudCloseBtns = document.querySelectorAll('#hud-nv-close-btn, .nv-close-btn');
+  hudCloseBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const d = document.getElementById('neurovision-dialog');
+      if (d) {
+        if (typeof d.close === 'function') {
+          d.close();
+        } else {
+          d.removeAttribute('open');
+        }
+      }
+    });
+  });
 
   if (resetBtn) {
     resetBtn.addEventListener('click', async () => {
@@ -1142,12 +1144,17 @@
     }
 
     // Sur le NOC, on déplace la pilule lumineuse verte directement à côté du bouton
-    // "Activer le micro / Couper le micro" (#home-voice-status) sans doublon en haut d'écran
+    // "Activer le micro / Couper le micro" (#home-voice-status) sans doublon en haut d'écran.
+    // Sur le HUD 3D, le statut s'affiche sur #voice-state-badge sans jamais masquer l'horloge.
     const nocVoicePill = document.getElementById('home-voice-status');
+    const hudVoiceBadge = document.getElementById('voice-state-badge');
     let globalToast = null;
+
+    // Supprime systématiquement tout toast flottant résiduel qui masquerait l'horloge ou les boutons
+    const strayToast = document.getElementById('moctar-global-voice-toast');
+    if (strayToast) strayToast.remove();
+
     if (nocVoicePill) {
-      const strayToast = document.getElementById('moctar-global-voice-toast');
-      if (strayToast && strayToast !== nocVoicePill) strayToast.remove();
       nocVoicePill.classList.add('moctar-noc-voice-pill');
       if (!nocVoicePill.querySelector('#moctar-gvt-badge')) {
         const currentTxt = nocVoicePill.textContent || 'Mains libres sur cet appareil';
@@ -1157,15 +1164,6 @@
         if (txtSpan) txtSpan.textContent = currentTxt;
       }
       globalToast = nocVoicePill;
-    } else if (document.body) {
-      globalToast = document.getElementById('moctar-global-voice-toast');
-      if (!globalToast) {
-        globalToast = document.createElement('div');
-        globalToast.id = 'moctar-global-voice-toast';
-        globalToast.setAttribute('data-vstate', 'idle');
-        globalToast.innerHTML = '<span id="moctar-gvt-badge">🎙️</span><span id="moctar-gvt-text"></span>';
-        document.body.appendChild(globalToast);
-      }
     }
 
     let lastHeardAck = '';
@@ -1182,6 +1180,22 @@
       const micActive = Boolean(
         window.jarvisVoice && (window.jarvisVoice.listeningDesired || window.jarvisVoice.enabled)
       );
+
+      if (hudVoiceBadge) {
+        if (st === 'listening') {
+          hudVoiceBadge.setAttribute('data-state', 'listening');
+          hudVoiceBadge.textContent = '🎙️ MOCTAR VOUS ÉCOUTE... (PARLEZ)';
+        } else if (st === 'processing') {
+          hudVoiceBadge.setAttribute('data-state', 'processing');
+          hudVoiceBadge.textContent = d.transcript ? ('🧠 ANALYSE : « ' + d.transcript.slice(0, 32) + '... »') : '⏳ AUDIO REÇU...';
+        } else if (st === 'speaking') {
+          hudVoiceBadge.setAttribute('data-state', 'speaking');
+          hudVoiceBadge.textContent = '🔊 M.O.C.T.A.R VOUS PARLE...';
+        } else if (st === 'off') {
+          hudVoiceBadge.setAttribute('data-state', 'off');
+          hudVoiceBadge.textContent = '● MICRO COUPÉ';
+        }
+      }
 
       if (hideToastTimer) {
         clearTimeout(hideToastTimer);

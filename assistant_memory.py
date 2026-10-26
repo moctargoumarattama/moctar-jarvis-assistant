@@ -170,6 +170,14 @@ class AssistantMemory:
                 GROUP BY session_id
                 """
             )
+            # Nettoyage automatique des faux amis residuels (ex: stop words, pronoms)
+            cursor.execute(
+                """
+                DELETE FROM memories
+                WHERE category = 'known_friends'
+                  AND lower(key) IN ('quoi', 'qui', 'ou', 'comment', 'pourquoi', 'conneries', 'rien', 'ceci', 'cela')
+                """
+            )
             conn.commit()
 
     # ==========================================================================
@@ -356,6 +364,17 @@ class AssistantMemory:
         """Enregistre ou met à jour la visite d'un ami ou invité présenté par Moctar."""
         clean_name = name.strip()
         if not clean_name:
+            return {}
+        INVALID_FRIENDS = {
+            "moctar", "moktar", "jarvis", "un", "une", "mon", "ma", "mes",
+            "notre", "nos", "votre", "vos", "ce", "cet", "cette", "ces", "le", "la", "les", "tout", "tous",
+            "ami", "amie", "pote", "collegue", "coll?gue", "frere", "fr?re",
+            "quoi", "qui", "ou", "o?", "comment", "pourquoi", "quand", "combien",
+            "ca", "?a", "ceci", "cela", "parti", "fini", "bon", "bien", "vrai", "faux",
+            "cool", "super", "merci", "conneries", "rien", "normal", "possible", "impossible",
+            "sur", "sous", "dans", "avec", "sans", "jeu", "jeux", "mot", "mots"
+        }
+        if clean_name.lower() in INVALID_FRIENDS or len(clean_name) < 2:
             return {}
         norm_key = clean_name.lower()
         now_iso = datetime.now().isoformat(timespec="seconds")

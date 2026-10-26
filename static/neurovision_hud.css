@@ -17,8 +17,7 @@
 }
 
 /* Boîte de dialogue du Scanner NeuroVision - Format Cockpit Panoramique */
-#neurovision-dialog,
-.hud-modal-overlay.active .hud-modal-card {
+#neurovision-dialog {
   position: fixed !important;
   inset: 20px auto auto 50% !important;
   transform: translateX(-50%) !important;
@@ -42,8 +41,7 @@
 }
 
 /* Animation d'ouverture fluide en Rideau (Curtain Drop) */
-#neurovision-dialog[open],
-.hud-modal-overlay.active .hud-modal-card {
+#neurovision-dialog[open] {
   animation: nvCurtainDrop 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
 }
 
