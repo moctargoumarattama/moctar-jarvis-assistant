@@ -7,6 +7,46 @@ import time
 
 import config
 
+from typing import Optional, Any, Dict, List, Union
+
+
+class GitResult(str):
+    """Resultat Git structure retrocompatible avec une chaine de caracteres."""
+    returncode: int
+    stdout: str
+    stderr: str
+    ok: bool
+
+    def __new__(cls, content: str, returncode: int = 0, stdout: str = "", stderr: str = "", ok: Optional[bool] = None):
+        obj = super().__new__(cls, content or "")
+        obj.returncode = int(returncode)
+        obj.stdout = str(stdout or "")
+        obj.stderr = str(stderr or "")
+        obj.ok = (returncode == 0) if ok is None else bool(ok)
+        return obj
+
+    def __getitem__(self, item: Any) -> Any:
+        if item == "returncode":
+            return self.returncode
+        if item == "stdout":
+            return self.stdout
+        if item == "stderr":
+            return self.stderr
+        if item == "ok":
+            return self.ok
+        return super().__getitem__(item)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key == "returncode":
+            return self.returncode
+        if key == "stdout":
+            return self.stdout
+        if key == "stderr":
+            return self.stderr
+        if key == "ok":
+            return self.ok
+        return default
+
 
 class ProjectAssistant:
     def __init__(self, projects=None):
@@ -60,7 +100,12 @@ class ProjectAssistant:
             resolved = self.projects[key]
         else:
             norm_key = str(key).strip().lower().replace("_", " ").replace("-", " ")
-            if norm_key in ("jarvis", "moctar", "moctar jarvis"):
+            if norm_key in ("jarvis", "projet jarvis", "moctar", "moctar jarvis", "assistant jarvis"):
+                return SimpleNamespace(path=config.APP_ROOT, label="Jarvis", key="jarvis", framework="serveur")
+            if norm_key in ("mercantfruit", "mercant fruit", "merca market", "mercamarket", "mercat fruit", "merca"):
+                for cand_k in ("merca_market", "merca-market"):
+                    if cand_k in self.projects:
+                        return self.projects[cand_k]
                 return SimpleNamespace(path=config.APP_ROOT, label="Jarvis", key="jarvis", framework="serveur")
             for canonical_key, aliases in getattr(config, "PROJECT_ALIASES", {}).items():
                 if norm_key == canonical_key.replace("_", " ") or any(a in norm_key or norm_key in a for a in aliases):
@@ -159,13 +204,13 @@ class ProjectAssistant:
         except Exception as exc:
             return f"Impossible de lancer le serveur pour {project.label} : {exc}"
 
-    def _run_git(self, args, project_key=None):
+    def _run_git(self, args, project_key=None) -> GitResult:
         project = self._resolve_project(project_key)
         if project is None:
-            return "Choisis d'abord un projet Git."
+            return GitResult("Choisis d'abord un projet Git.", returncode=1, stderr="Aucun projet selectionne", ok=False)
         self._set_current_project(project.key)
         if not (project.path / ".git").exists():
-            return f"{project.label} n'est pas un depot Git detectable."
+            return GitResult(f"{project.label} n'est pas un depot Git detectable.", returncode=1, stderr="Depot Git introuvable", ok=False)
 
         env = os.environ.copy()
         cmd = ["git", "-c", "safe.directory=*", *args]
@@ -183,9 +228,13 @@ class ProjectAssistant:
                 env=env,
             )
         except Exception as exc:
-            return f"Commande Git impossible sur {project.label} : {exc}"
+            return GitResult(f"Commande Git impossible sur {project.label} : {exc}", returncode=1, stderr=str(exc), ok=False)
 
-        output = (result.stdout or result.stderr).strip()
+        retcode = result.returncode
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+        output = (stdout or stderr).strip()
+
         if "detected dubious ownership" in output:
             try:
                 fallback_res = subprocess.run(
@@ -195,12 +244,18 @@ class ProjectAssistant:
                     text=True,
                     timeout=config.GIT_TIMEOUT_SECONDS,
                 )
-                output = (fallback_res.stdout or fallback_res.stderr).strip()
-            except Exception:
-                output = "Branche principale propre."
+                retcode = fallback_res.returncode
+                stdout = fallback_res.stdout or ""
+                stderr = fallback_res.stderr or ""
+                output = (stdout or stderr).strip()
+            except Exception as f_exc:
+                output = f"Erreur safe.directory : {f_exc}"
+                retcode = 1
+                stderr = str(f_exc)
+
         if not output:
             output = "Aucune sortie."
-        return output
+        return GitResult(output, returncode=retcode, stdout=stdout, stderr=stderr, ok=(retcode == 0))
 
     def git_status(self, project_key=None):
         return self._run_git(["status", "--short", "--branch"], project_key=project_key)
@@ -255,7 +310,7 @@ class ProjectAssistant:
             "Commande suggeree : git push"
         )
 
-    def has_pending_git_action(self, max_age_seconds=180.0):
+    def has_pending_git_action(self, max_age_seconds=300.0):
         if not isinstance(self.pending_git_action, dict):
             return False
         if (time.time() - float(self.pending_git_action.get("timestamp", 0))) > max_age_seconds:
@@ -264,13 +319,19 @@ class ProjectAssistant:
         return True
 
     def confirm_git_action(self, project_key=None, commit_message=None):
-        pending = self.pending_git_action if self.has_pending_git_action() else None
+        if not self.has_pending_git_action(max_age_seconds=300.0):
+            return (
+                "Aucune op?ration Git pr?par?e en attente (ou d?lai de confirmation de 5 minutes d?pass?). "
+                "Veuillez d'abord pr?parer l'action avec 'prepare_commit' ou 'prepare_push' avant de confirmer."
+            )
+
+        pending = self.pending_git_action
         target_key = project_key or (pending.get("project_key") if pending else None) or self.current_project_key
         project = self._resolve_project(target_key)
         if project is None:
-            return "Aucun projet Git en attente de confirmation."
-        action_type = pending.get("type", "push") if pending else "push"
-        msg = commit_message or (pending.get("message") if pending else "feat: update project") or "feat: update project"
+            return "Aucun projet Git valide associ? ? cette confirmation."
+        action_type = pending.get("type", "commit_and_push")
+        msg = commit_message or pending.get("message") or "feat: update project"
         self.pending_git_action = None
 
         if not (project.path / ".git").exists():
@@ -278,23 +339,37 @@ class ProjectAssistant:
 
         outputs = []
         if action_type in ("commit", "commit_and_push"):
-            self._run_git(["add", "-A"], project_key=project.key)
-            commit_out = self._run_git(["commit", "-m", msg], project_key=project.key)
-            outputs.append(commit_out)
+            add_res = self._run_git(["add", "-A"], project_key=project.key)
+            if not add_res.ok:
+                err_detail = add_res.stderr or add_res.stdout or "Erreur inconnue"
+                return f"?chec de l'?tape 'git add' sur {project.label} (code {add_res.returncode}) : {err_detail}"
+            outputs.append(str(add_res))
+
+            commit_res = self._run_git(["commit", "-m", msg], project_key=project.key)
+            if not commit_res.ok:
+                if "nothing to commit" in str(commit_res).lower():
+                    if action_type == "commit":
+                        return f"Aucune modification en attente de commit sur {project.label}, l'arbre de travail est propre."
+                else:
+                    err_detail = commit_res.stderr or commit_res.stdout or "Erreur inconnue"
+                    return f"?chec de l'?tape 'git commit' sur {project.label} (code {commit_res.returncode}) : {err_detail}"
+            outputs.append(str(commit_res))
+
         if action_type in ("push", "commit_and_push"):
-            push_out = self._run_git(["push"], project_key=project.key)
-            outputs.append(push_out)
+            push_res = self._run_git(["push"], project_key=project.key)
+            if not push_res.ok:
+                err_detail = push_res.stderr or push_res.stdout or "Erreur inconnue"
+                return f"?chec du 'git push' sur {project.label} (code {push_res.returncode}) : {err_detail}"
+            outputs.append(str(push_res))
 
         combined = " ".join(outputs).strip()
-        if "Everything up-to-date" in combined or "Tout est à jour" in combined:
-            return f"C'est vérifié : le dépôt {project.label} est déjà parfaitement à jour sur le serveur distant."
-        if "nothing to commit" in combined and action_type == "commit":
-            return f"Aucune modification en attente de commit sur {project.label}, l'arbre de travail est propre."
+        if "Everything up-to-date" in combined or "Tout est ? jour" in combined:
+            return f"C'est v?rifi? : le d?p?t {project.label} est d?j? parfaitement ? jour sur le serveur distant."
         if action_type == "commit_and_push":
-            return f"C'est fait ! Le commit et le push sur {project.label} ont été exécutés avec succès."
+            return f"C'est fait ! Le commit et le push sur {project.label} ont ?t? ex?cut?s avec succ?s."
         if action_type == "commit":
-            return f"C'est fait ! Le commit sur {project.label} a bien été enregistré."
-        return f"C'est envoyé ! Le push sur {project.label} vers le dépôt distant est terminé."
+            return f"C'est fait ! Le commit sur {project.label} a bien ?t? enregistr?."
+        return f"C'est envoy? ! Le push sur {project.label} vers le d?p?t distant est termin? avec succ?s."
 
     def cancel_git_action(self):
         pending = self.pending_git_action
@@ -655,12 +730,13 @@ def confirm_pending_git_action(project_key: str = "", commit_message: str = ""):
             project_key=project_key or None,
             commit_message=commit_message or None,
         )
+        is_success = not str(msg).startswith(("?chec", "Aucune op?ration", "Erreur"))
         return format_action_result(
             action="confirm_git_action",
-            success=True,
+            success=is_success,
             message=msg,
             data={"project_key": project_key},
-            error=None,
+            error=None if is_success else msg,
         )
     except Exception as exc:
         return format_action_result(

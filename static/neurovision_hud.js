@@ -1052,6 +1052,22 @@
   }
 
   // Support spécifique du HUD 3D (bouton mode pill 👁️ VISION & fermeture)
+  function closeNeuroVisionDialog() {
+    const d = document.getElementById('neurovision-dialog');
+    if (d) {
+      if (typeof d.close === 'function') {
+        if (d.open) d.close();
+      } else {
+        d.removeAttribute('open');
+      }
+    }
+    stopClientCamera();
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+  }
+
   const btnNeuroHud = document.getElementById('btn-neurovision-hud');
   if (btnNeuroHud) {
     btnNeuroHud.addEventListener('click', () => {
@@ -1062,23 +1078,30 @@
         } else {
           d.setAttribute('open', '');
         }
+        setTimeout(resizeCanvases, 60);
+        init3DDigitalTwin();
+        initWaveOscilloscope();
+        startClientCamera();
+        if (!pollInterval) pollInterval = setInterval(pollMetrics, 1000);
       }
     });
   }
 
   const hudCloseBtns = document.querySelectorAll('#hud-nv-close-btn, .nv-close-btn');
   hudCloseBtns.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const d = document.getElementById('neurovision-dialog');
-      if (d) {
-        if (typeof d.close === 'function') {
-          d.close();
-        } else {
-          d.removeAttribute('open');
-        }
+    btn.addEventListener('click', closeNeuroVisionDialog);
+  });
+
+  const nvDialogEl = document.getElementById('neurovision-dialog');
+  if (nvDialogEl) {
+    nvDialogEl.addEventListener('close', () => {
+      stopClientCamera();
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
       }
     });
-  });
+  }
 
   if (resetBtn) {
     resetBtn.addEventListener('click', async () => {

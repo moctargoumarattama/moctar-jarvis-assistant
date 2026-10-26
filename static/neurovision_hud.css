@@ -17,6 +17,10 @@
 }
 
 /* Boîte de dialogue du Scanner NeuroVision - Format Cockpit Panoramique */
+#neurovision-dialog:not([open]) {
+  display: none !important;
+}
+
 #neurovision-dialog {
   position: fixed !important;
   inset: 20px auto auto 50% !important;
@@ -651,6 +655,7 @@
 }
 
 #moctar-global-voice-toast {
+  display: none !important;
   position: fixed;
   top: 14px;
   left: 50%;

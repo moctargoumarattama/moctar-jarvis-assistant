@@ -452,12 +452,28 @@ class JarvisHeadlessBridge:
             # Une réponse déterministe ou une erreur d'outil ne prouve pas une
             # panne IA. Seul l'échec observé de Gemini signale son indisponibilité ;
             # cette lecture ne fait aucun appel réseau.
+            # Propagation structuree des etats de securite, confirmation et verification
+            res_status = getattr(agent_result, "status", None) if not isinstance(agent_result, dict) else agent_result.get("status")
+            if res_status:
+                status = res_status
+
+            sec_status = getattr(agent_result, "security_status", None) if not isinstance(agent_result, dict) else agent_result.get("security_status")
+            req_confirm = getattr(agent_result, "requires_confirmation", None) if not isinstance(agent_result, dict) else agent_result.get("requires_confirmation")
+            pending_act_id = getattr(agent_result, "pending_action_id", None) if not isinstance(agent_result, dict) else agent_result.get("pending_action_id")
+            tool_calls = getattr(agent_result, "tool_calls", None) if not isinstance(agent_result, dict) else agent_result.get("tool_calls")
+            verif_status = getattr(agent_result, "verification_status", None) if not isinstance(agent_result, dict) else agent_result.get("verification_status")
+
             ai_status = self.brain.get_health_status(probe=False)
             model_offline = fallback_required and ai_status.get("all_providers_offline") is True
             resp_dict: Dict[str, Any] = {
                 **ai_status,
                 "status": status,
                 "reply": reply,
+                "security_status": sec_status or ("blocked" if status == "blocked" else ("pending_confirmation" if status == "pending_confirmation" else "allowed")),
+                "requires_confirmation": bool(req_confirm or (status == "pending_confirmation")),
+                "pending_action_id": pending_act_id,
+                "tool_calls": tool_calls or tools_used,
+                "verification_status": verif_status or ("verified" if status == "success" else status),
                 "thought_chain": thought_chain,
                 "tools_used": tools_used,
                 "timestamp": timestamp,

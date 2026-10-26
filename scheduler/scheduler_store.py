@@ -43,6 +43,8 @@ REQUIRED_COLUMNS = {
     "media_type": "TEXT NOT NULL DEFAULT ''",
     "media_paths_json": "TEXT NOT NULL DEFAULT '[]'",
     "media_types_json": "TEXT NOT NULL DEFAULT '[]'",
+    "last_attempt_at": "TEXT DEFAULT NULL",
+    "execution_note": "TEXT DEFAULT NULL",
 }
 
 
@@ -234,6 +236,8 @@ def update_task(task_id: int, **kwargs) -> dict | None:
         "status",
         "ai_enhanced",
         "last_sent",
+        "last_attempt_at",
+        "execution_note",
     }
     fields = {key: value for key, value in kwargs.items() if key in allowed}
     if "media_paths" in fields:

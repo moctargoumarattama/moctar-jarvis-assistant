@@ -21,6 +21,7 @@ logger = logging.getLogger("jarvis.scheduler")
 
 _lock = threading.Lock()
 _dispatch_lock = threading.Lock()
+_start_lock = threading.Lock()
 _in_flight_tasks: set[int] = set()
 _recent_dispatches: dict[int, tuple[float, str]] = {}
 _IDEMPOTENCY_TTL_SECONDS = 30.0
@@ -120,17 +121,35 @@ def _reserve_task_atomically(task_id: int) -> tuple[bool, dict | None, str]:
 
         current_status = str(task.get("status") or "").strip().lower()
         if current_status == "processing":
-            return False, task, f"Tache {tid} deja en cours de traitement (processing)."
+            # Si la tâche n'est plus en vol et que son bail de 300s a expiré, on la réclame proprement
+            last_att = task.get("last_attempt_at")
+            is_stale = False
+            if last_att:
+                try:
+                    if (datetime.now() - datetime.fromisoformat(last_att)).total_seconds() > 300.0:
+                        is_stale = True
+                except Exception:
+                    is_stale = True
+            else:
+                is_stale = True
+            if is_stale and tid not in _in_flight_tasks:
+                note = f"Bail expiré (>300s). Rebasculement en attente de confirmation ({datetime.now().isoformat()})."
+                store.update_task(tid, status="awaiting_confirmation", execution_note=note)
+                return False, store.get_task(tid), f"Tâche {tid} expirée et réinitialisée en attente de confirmation."
+            return False, task, f"Tâche {tid} déjà en cours de traitement (processing)."
         if current_status in ("completed", "sent", "confirmed"):
-            return False, task, f"Tache {tid} deja executee ({current_status})."
+            return False, task, f"Tâche {tid} déjà exécutée ({current_status})."
 
-        # 3. Transition atomique SQLite : UPDATE ... SET status = 'processing' WHERE id = ? AND status IN (...)
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        # 3. Transition atomique SQLite : UPDATE ... SET status = 'processing', last_attempt_at = ?
         if hasattr(store, "_conn_scope"):
             try:
                 with store._conn_scope() as conn:
                     cur = conn.execute(
                         """UPDATE scheduled_tasks
-                           SET status = 'processing'
+                           SET status = 'processing',
+                               last_attempt_at = ?,
+                               execution_note = 'Traitement en cours'
                            WHERE id = ?
                              AND status IN (
                                  'pending',
@@ -141,7 +160,7 @@ def _reserve_task_atomically(task_id: int) -> tuple[bool, dict | None, str]:
                                  'failed',
                                  'error'
                              )""",
-                        (tid,),
+                        (now_iso, tid),
                     )
                     if cur.rowcount == 0:
                         existing_row = conn.execute(
@@ -153,14 +172,45 @@ def _reserve_task_atomically(task_id: int) -> tuple[bool, dict | None, str]:
                             return (
                                 False,
                                 task,
-                                f"Tache {tid} deja reservee ou traitee (statut={db_status}).",
+                                f"Tâche {tid} déjà réservée ou traitée (statut={db_status}).",
                             )
             except Exception as db_exc:
-                logger.debug("Transition SQLite directe ignoree (fallback store.update_task): %s", db_exc)
+                logger.debug("Transition SQLite directe ignorée (fallback store.update_task): %s", db_exc)
 
-        store.update_task(tid, status="processing")
+        store.update_task(tid, status="processing", last_attempt_at=now_iso, execution_note="Réservé pour envoi")
         _in_flight_tasks.add(tid)
         return True, task, ""
+
+
+def _reclaim_stale_processing_tasks(max_age_seconds: float = 300.0) -> None:
+    """Identifie les tâches bloquées en 'processing' depuis plus de 300 secondes sans activité en vol.
+    Ne les renvoie pas automatiquement à l'aveugle : passe leur statut à awaiting_confirmation avec une note explicite."""
+    try:
+        processing_tasks = store.list_tasks(status="processing")
+        now_dt = datetime.now()
+        for t in processing_tasks:
+            tid = int(t["id"])
+            with _dispatch_lock:
+                if tid in _in_flight_tasks:
+                    continue
+            last_att = t.get("last_attempt_at")
+            is_stale = False
+            if not last_att:
+                is_stale = True
+            else:
+                try:
+                    diff = (now_dt - datetime.fromisoformat(last_att)).total_seconds()
+                    if diff > max_age_seconds:
+                        is_stale = True
+                except Exception:
+                    is_stale = True
+
+            if is_stale:
+                note = f"Exécution précédente interrompue (>300s). Vérification requise avant renvoi ({now_dt.isoformat()})."
+                logger.warning("Récupération de la tâche stale [%d] -> awaiting_confirmation: %s", tid, note)
+                store.update_task(tid, status="awaiting_confirmation", execution_note=note)
+    except Exception as exc:
+        logger.error("Erreur lors de la récupération des tâches stale : %s", exc)
 
 
 def run_once(now: datetime | None = None) -> None:
@@ -179,8 +229,10 @@ def _sleep_with_stop(total_seconds: float) -> None:
 
 def _scheduler_loop(poll_seconds: int) -> None:
     logger.info("Scheduler thread started.")
+    _reclaim_stale_processing_tasks()
     while not _stop_event.is_set():
         try:
+            _reclaim_stale_processing_tasks()
             run_once()
         except Exception as exc:
             logger.error("Scheduler loop error: %s", exc)
@@ -195,19 +247,20 @@ def serve_forever(poll_seconds: int | None = None) -> None:
 
 
 def start(poll_seconds: int | None = None) -> None:
-    """Start the background scheduler thread."""
+    """Start the background scheduler thread with concurrency lock."""
     global _thread
-    if _thread and _thread.is_alive():
-        return
-    _stop_event.clear()
-    resolved_poll_seconds = max(int(poll_seconds or _configured_poll_seconds()), 5)
-    _thread = threading.Thread(
-        target=_scheduler_loop,
-        args=(resolved_poll_seconds,),
-        daemon=True,
-        name="jarvis-scheduler",
-    )
-    _thread.start()
+    with _start_lock:
+        if _thread and _thread.is_alive():
+            return
+        _stop_event.clear()
+        resolved_poll_seconds = max(int(poll_seconds or _configured_poll_seconds()), 5)
+        _thread = threading.Thread(
+            target=_scheduler_loop,
+            args=(resolved_poll_seconds,),
+            daemon=True,
+            name="jarvis-scheduler",
+        )
+        _thread.start()
 
 
 def stop(join_timeout: float = 2) -> None:

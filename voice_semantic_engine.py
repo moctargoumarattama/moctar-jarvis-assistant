@@ -91,6 +91,185 @@ def _resolve_security_engine(runtime: Any = None) -> SecurityPolicyEngine:
     return _DEFAULT_SECURITY_ENGINE
 
 
+_TOOL_TO_DOMAIN: Dict[str, str] = {
+    "open_app": "system",
+    "close_active_window": "system",
+    "snap_active_window": "system",
+    "optimize_system": "system",
+    "execute_system_command": "system",
+    "run_background_task": "system",
+    "restart_service": "services",
+    "manage_service": "services",
+    "manage_docker_container": "docker",
+    "query_database": "database",
+    "backup_database": "database",
+    "web_search": "web",
+    "search_web": "web",
+    "fetch_web_content": "web",
+    "browse_url": "web",
+    "get_weather": "web",
+    "google_workspace_action": "personal",
+    "send_whatsapp_message": "personal",
+    "schedule_whatsapp_message": "personal",
+    "manage_alarm": "personal",
+    "manage_reminder": "personal",
+    "store_memory_fact": "personal",
+    "recall_memory_facts": "personal",
+    "forget_memory_fact": "personal",
+    "set_active_project": "project",
+    "switch_active_project": "project",
+    "get_active_task": "project",
+    "update_active_task": "project",
+    "manage_git_repo": "project",
+    "commit_and_push_project": "project",
+    "confirm_git_action": "project",
+    "play_music": "music",
+    "control_music": "music",
+    "get_system_telemetry": "system",
+    "get_vision_telemetry": "system",
+    "analyze_neurovision_camera": "system",
+}
+
+
+def _infer_tool_domain(tool_name: str) -> str:
+    tool_clean = str(tool_name or "").strip().lower()
+    if tool_clean in _TOOL_TO_DOMAIN:
+        return _TOOL_TO_DOMAIN[tool_clean]
+    if any(k in tool_clean for k in ("docker", "container")):
+        return "docker"
+    if any(k in tool_clean for k in ("service", "systemctl", "daemon")):
+        return "services"
+    if any(k in tool_clean for k in ("database", "sql", "db")):
+        return "database"
+    if any(k in tool_clean for k in ("project", "git", "task")):
+        return "project"
+    if any(k in tool_clean for k in ("web", "url", "search", "browse", "weather")):
+        return "web"
+    if any(k in tool_clean for k in ("music", "media", "audio", "spotify")):
+        return "music"
+    if any(k in tool_clean for k in ("system", "window", "process", "cmd", "shell")):
+        return "system"
+    return "system"
+
+
+_pending_voice_actions: Dict[str, Dict[str, Any]] = {}
+
+
+def get_pending_voice_action(action_id_or_session: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Recupere la derniere action vocale en attente valide ou celle correspondant a l'ID/session."""
+    now = time.time()
+    expired = [k for k, v in list(_pending_voice_actions.items()) if v.get("expires_at", 0) < now]
+    for k in expired:
+        _pending_voice_actions.pop(k, None)
+
+    if not _pending_voice_actions:
+        return None
+
+    if action_id_or_session:
+        target = str(action_id_or_session).strip()
+        if target in _pending_voice_actions:
+            return _pending_voice_actions[target]
+        for v in reversed(list(_pending_voice_actions.values())):
+            if str(v.get("session_id") or "").strip() == target:
+                return v
+
+    return list(_pending_voice_actions.values())[-1]
+
+
+def clear_pending_voice_action(action_id: Optional[str] = None) -> bool:
+    """Efface une action en attente ou vide le registre."""
+    if action_id:
+        return _pending_voice_actions.pop(action_id, None) is not None
+    if _pending_voice_actions:
+        _pending_voice_actions.clear()
+        return True
+    return False
+
+
+def has_pending_voice_action(session_id: Optional[str] = None) -> bool:
+    """Verifie si une action vocale non expiree est actuellement en attente de confirmation."""
+    return get_pending_voice_action(session_id) is not None
+
+
+def confirm_pending_voice_action(action_id_or_session: Optional[str] = None, runtime: Any = None) -> Dict[str, Any]:
+    """Execute et valide l'action vocale en attente dans le registre."""
+    action = get_pending_voice_action(action_id_or_session)
+    if not action:
+        return {
+            "success": False,
+            "status": "error",
+            "message": "Aucune action en attente de confirmation n'a ete trouvee ou le delai de 3 minutes est expire.",
+        }
+
+    act_id = action["action_id"]
+    tool_name = action["tool_name"]
+    args = action["arguments"]
+    security_engine = _resolve_security_engine(runtime)
+
+    try:
+        tool_res = execute_tool(tool_name, args)
+        if not isinstance(tool_res, dict):
+            tool_res = {"success": bool(tool_res), "action": tool_name, "message": str(tool_res or "")}
+
+        clear_pending_voice_action(act_id)
+        security_engine.audit_log(
+            tool_name=tool_name,
+            arguments=args,
+            risk_level=action.get("risk_level", 2),
+            confirmed=True,
+            status="allowed" if tool_res.get("success", False) else "failed",
+            details="Action validee et confirmee par l'utilisateur.",
+        )
+        msg = tool_res.get("message") or f"Action {tool_name} executee avec succes."
+        return {
+            "success": True,
+            "status": "success",
+            "action": tool_name,
+            "pending_action_id": act_id,
+            "data": tool_res,
+            "message": f"Action confirmee Moctar : {msg}",
+        }
+    except Exception as exc:
+        LOGGER.exception("Erreur lors de l'execution de l'action confirmee '%s': %s", tool_name, exc)
+        clear_pending_voice_action(act_id)
+        return {
+            "success": False,
+            "status": "error",
+            "action": tool_name,
+            "message": f"Erreur lors de l'execution de l'action : {exc}",
+        }
+
+
+def cancel_pending_voice_action(action_id_or_session: Optional[str] = None, runtime: Any = None) -> Dict[str, Any]:
+    """Annule expressement l'action vocale en attente."""
+    action = get_pending_voice_action(action_id_or_session)
+    if not action:
+        return {
+            "success": False,
+            "status": "cancelled",
+            "message": "Aucune action en attente a annuler.",
+        }
+    act_id = action["action_id"]
+    tool_name = action["tool_name"]
+    clear_pending_voice_action(act_id)
+    security_engine = _resolve_security_engine(runtime)
+    security_engine.audit_log(
+        tool_name=tool_name,
+        arguments=action.get("arguments", {}),
+        risk_level=action.get("risk_level", 2),
+        confirmed=False,
+        status="cancelled",
+        details="Action annulee par l'utilisateur.",
+    )
+    return {
+        "success": True,
+        "status": "cancelled",
+        "action": tool_name,
+        "pending_action_id": act_id,
+        "message": f"Entendu Moctar, j'ai annule l'action '{tool_name}'.",
+    }
+
+
 def execute_voice_tool_securely(
     func_name: str,
     arguments: Optional[Dict[str, Any]] = None,
@@ -108,6 +287,29 @@ def execute_voice_tool_securely(
     tool_lower = tool_clean.lower()
     args = dict(arguments or {})
     security_engine = _resolve_security_engine(runtime)
+
+    # 0. Controle d'acces par domaine fonctionnel (system, services, docker, database, web, personal, project, music)
+    domain = _infer_tool_domain(tool_clean)
+    if hasattr(security_engine, "is_domain_allowed") and not security_engine.is_domain_allowed(domain):
+        LOGGER.warning("[VOICE SECURITY BLOCKED] Domaine '%s' desactive pour l'outil '%s'", domain, tool_clean)
+        security_engine.audit_log(
+            tool_name=tool_clean,
+            arguments=args,
+            risk_level=3,
+            confirmed=False,
+            status="blocked",
+            details=f"Domaine '{domain}' non autorise par la politique de securite.",
+        )
+        return {
+            "success": False,
+            "status": "blocked",
+            "security_status": "domain_disabled",
+            "requires_confirmation": False,
+            "action": tool_clean,
+            "error": "DomainDisabled",
+            "data": None,
+            "message": f"Action bloquee : le domaine '{domain}' est actuellement desactive dans la politique de securite.",
+        }
 
     # 1. Validation préventive des arguments (injections, null-bytes, path traversal, commandes destructrices)
     is_valid, sec_err = security_engine.validate_arguments(tool_clean, args)
@@ -152,10 +354,23 @@ def execute_voice_tool_securely(
 
     if needs_confirmation or risk_level >= 3:
         confirm_prompt = security_engine.confirmation_prompt(tool_clean, args)
+        session_id = str(args.get("session_id") or getattr(runtime, "session_id", "default_voice_session") or "default_voice_session")
+        action_id = f"act_{int(time.time())}_{tool_clean[:12]}"
+        _pending_voice_actions[action_id] = {
+            "action_id": action_id,
+            "session_id": session_id,
+            "tool_name": tool_clean,
+            "arguments": args,
+            "risk_level": risk_level,
+            "expires_at": time.time() + 180.0,
+            "created_at": time.time(),
+            "prompt": confirm_prompt,
+        }
         LOGGER.warning(
-            "[VOICE SECURITY CONFIRMATION REQUIRED] Outil '%s' (risque=%d) bloqué en attente de validation : %s",
+            "[VOICE SECURITY CONFIRMATION REQUIRED] Outil '%s' (risque=%d, id=%s) bloque en attente de validation (TTL 180s) : %s",
             tool_clean,
             risk_level,
+            action_id,
             confirm_prompt,
         )
         security_engine.audit_log(
@@ -171,13 +386,15 @@ def execute_voice_tool_securely(
             "status": "pending_confirmation",
             "security_status": "pending_confirmation",
             "requires_confirmation": True,
+            "pending_action_id": action_id,
             "action": tool_clean,
             "data": {
+                "action_id": action_id,
                 "tool": tool_clean,
                 "arguments": args,
                 "risk_level": risk_level,
             },
-            "message": confirm_prompt,
+            "message": f"{confirm_prompt} (Dites 'Confirme l'action' ou 'Annule l'action')",
         }
 
     # 3. Exécution immédiate sans friction pour les outils sûrs/ordinaires (Tier 1 & Tier 2)

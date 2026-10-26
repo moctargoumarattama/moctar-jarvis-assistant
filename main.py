@@ -493,7 +493,13 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
         has_pending_git = project_actions.has_pending_git_action()
     except Exception:
         pass
-    allow_short = bool(session_active or has_pending_git)
+    has_pending_voice = False
+    try:
+        import voice_semantic_engine
+        has_pending_voice = voice_semantic_engine.has_pending_voice_action()
+    except Exception:
+        pass
+    allow_short = bool(session_active or has_pending_git or has_pending_voice)
     repaired, _ = stt_phonetic_repair.repair_stt_transcript(transcript)
     filtered = voice_transcribe.filter_whisper_hallucinations(repaired, allow_short_confirmations=allow_short)
     if not filtered:
@@ -518,7 +524,7 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
         # 3. Commande prononcée avant le mot-clé ("Quel est le statut réseau Mokhtar ?")
         return True, before, True
 
-    if session_active or has_pending_git:
+    if session_active or has_pending_git or has_pending_voice:
         clean_text = filtered.strip(" ,.:;!?-")
         norm_clean = _strip_accents_1to1(clean_text).lower()
         if norm_clean in (
@@ -620,6 +626,25 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
         return None
     normalized = _strip_accents_1to1(cleaned).lower()
     device_label = (client_device or "terminal client").strip()
+
+    # 0a0. Reprise et confirmation / annulation d'actions supervis?es avec TTL
+    if re.search(r"\b(?:confirme|valide)\s+(?:l['?]action|la\s+derni[?e]re\s+action)\b", normalized):
+        try:
+            import voice_semantic_engine
+            if voice_semantic_engine.has_pending_voice_action():
+                res = voice_semantic_engine.confirm_pending_voice_action()
+                return res.get("message")
+        except Exception:
+            pass
+
+    if re.search(r"\b(?:annule|rejette)\s+(?:l['?]action|la\s+derni[?e]re\s+action)\b", normalized):
+        try:
+            import voice_semantic_engine
+            if voice_semantic_engine.has_pending_voice_action():
+                res = voice_semantic_engine.cancel_pending_voice_action()
+                return res.get("message")
+        except Exception:
+            pass
 
     # 0a. Commandes d'interruption vocale (Barge-In)
     if re.search(r"\b(?:tais[- ]toi|ferme[- ]la|chut|silence)\b", normalized) or normalized in ("tais-toi", "tais toi", "stop", "chut", "silence"):
@@ -1576,6 +1601,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         task = asyncio.create_task(runtime.collect_loop(), name="noc-collector")
         runtime.collect_task = task
         asyncio.create_task(_prewarm_common_voice_tts(), name="tts-cache-prewarm")
+        try:
+            from scheduler import scheduler_core
+            scheduler_core.start()
+            LOGGER.info("Planificateur supervise Jarvis demarre avec succes dans lifespan.")
+        except Exception as exc:
+            LOGGER.warning("Impossible de demarrer le planificateur dans lifespan: %s", exc)
         def _on_native_audio(wav_bytes: bytes) -> dict[str, Any] | None:
             try:
                 import tempfile
@@ -1633,6 +1664,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 from native_voice_daemon import NativeVoiceDaemon
                 NativeVoiceDaemon.get_instance().stop()
+            except Exception:
+                pass
+            try:
+                from scheduler import scheduler_core
+                scheduler_core.stop()
+                LOGGER.info("Planificateur supervise Jarvis arrete proprement.")
             except Exception:
                 pass
             task.cancel()

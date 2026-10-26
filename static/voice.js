@@ -128,6 +128,8 @@
     let proactiveCheckTimer = null;
     const PROACTIVE_POLL_INTERVAL_MS = 25000;
     let activeVoiceAbortController = null;
+    let proactiveAbortController = null;
+    let isProactivePollInFlight = false;
     let currentRequestId = 0;
 
     function abortActiveVoiceNetworkAndAudio() {
@@ -137,6 +139,13 @@
           activeVoiceAbortController.abort();
         } catch {}
         activeVoiceAbortController = null;
+      if (proactiveAbortController) {
+        try {
+          proactiveAbortController.abort();
+        } catch {}
+        proactiveAbortController = null;
+      }
+      isProactivePollInFlight = false;
       }
       if (activeAudioPlaybackFinish) {
         const finish = activeAudioPlaybackFinish;
@@ -1352,15 +1361,22 @@
     }
 
     async function pollProactiveInitiative() {
+      if (isProactivePollInFlight) return;
       if (destroyed || suspended || !wanted() || isAssistantSpeaking || processingAudio || job || isSpeaking) return;
       if (phase !== 'wake') return;
       if (!fetchImpl) return;
 
+      isProactivePollInFlight = true;
+      const reqEpoch = currentRequestId;
+      proactiveAbortController = (typeof AbortController !== 'undefined') ? new AbortController() : null;
       let current = null;
       try {
-        const res = await fetchImpl('/api/voice/proactive');
+        const fetchOpts = proactiveAbortController ? { signal: proactiveAbortController.signal } : {};
+        const res = await fetchImpl('/api/voice/proactive', fetchOpts);
         if (!res || !res.ok) return;
+        if (currentRequestId !== reqEpoch || isSpeaking || isAssistantSpeaking || processingAudio || job || !wanted() || userBargedIn) return;
         const data = await res.json();
+        if (currentRequestId !== reqEpoch || isSpeaking || isAssistantSpeaking || processingAudio || job || !wanted() || userBargedIn) return;
         if (!data || !data.has_event || !data.message) return;
 
         if (isSpeaking || isAssistantSpeaking || processingAudio || job || phase !== 'wake') return;
@@ -1368,7 +1384,7 @@
         const initiativeText = String(data.message || '').trim();
         if (!initiativeText) return;
 
-        current = { generation };
+        current = { generation, reqEpoch };
         job = current;
         isAssistantSpeaking = true;
         clearPreRollBuffer();
@@ -1382,24 +1398,26 @@
         });
 
         let played = false;
-        if (data.audio_url && !userBargedIn) {
+        if (data.audio_url && !userBargedIn && currentRequestId === reqEpoch) {
           played = await playAudioUrl(data.audio_url);
         }
-        if (!played && initiativeText && !userBargedIn) {
+        if (!played && initiativeText && !userBargedIn && currentRequestId === reqEpoch) {
           await speakWithNativeSpeechSynthesis(initiativeText);
         }
 
         releaseEchoLock();
-        if (generation !== current.generation || destroyed || suspended) return;
+        if (generation !== current.generation || currentRequestId !== reqEpoch || destroyed || suspended) return;
 
-        // Ouvre automatiquement la fenêtre d'écoute pour la réponse de Moctar (ex: "Oui", "Non merci")
+        // Ouvre automatiquement la fenetre d'ecoute pour la reponse de Moctar (ex: "Oui", "Non merci")
         openFollowup();
       } catch {
-        // En cas d'erreur réseau ou synthèse, libérer proprement l'état d'écoute
+        // En cas d'erreur reseau, abort ou synthese, liberer proprement l'etat d'ecoute
         if (current && isAssistantSpeaking) {
           releaseEchoLock();
         }
       } finally {
+        proactiveAbortController = null;
+        isProactivePollInFlight = false;
         if (current && job === current) job = null;
         if (current && isAssistantSpeaking) {
           isAssistantSpeaking = false;
@@ -1421,6 +1439,13 @@
       if (proactiveCheckTimer !== null) {
         clearInterval(proactiveCheckTimer);
         proactiveCheckTimer = null;
+      if (proactiveAbortController) {
+        try {
+          proactiveAbortController.abort();
+        } catch {}
+        proactiveAbortController = null;
+      }
+      isProactivePollInFlight = false;
       }
     }
 

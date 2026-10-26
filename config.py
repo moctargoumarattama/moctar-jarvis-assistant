@@ -142,13 +142,14 @@ FOLDER_ALIASES = {
 PROJECT_ALIASES = {
     "noor_express": ["noor express", "noor", "noorexpress"],
     "baba_market": ["baba market", "baba marketplace", "baba", "papa market", "babamarket", "papamarket"],
+    "merca_market": ["merca market", "mercamarket", "mercantfruit", "mercant fruit", "mercat fruit", "merca-market", "merca"],
     "edumanage": ["edumanage", "edu manage"],
     "audit_energetique": [
         "audit energetique",
         "audit energie",
         "monitoring energy",
     ],
-    "jarvis": ["jarvis", "moctar", "moctar jarvis"],
+    "jarvis": ["jarvis", "moctar", "moctar jarvis", "projet jarvis"],
 }
 
 
