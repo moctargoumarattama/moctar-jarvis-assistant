@@ -623,10 +623,11 @@ def handle_instant_local_command(text: str, memory: Any = None, client_device: s
 _COMPLEX_ACTION_KEYWORDS = {
     "aide", "aider", "ouvre", "ouvrir", "lance", "lancer", "ferme", "fermer",
     "finis", "finir", "termine", "terminer", "rapport", "serveur", "vps", "panne",
-    "erreur", "probleme", "probl?me", "crash", "bug", "malheureux", "malheureuse",
+    "erreur", "probleme", "problème", "crash", "bug", "malheureux", "malheureuse", "malheur",
     "triste", "degoute", "verifie", "verifier", "cherche", "chercher", "trouve",
     "execute", "executer", "supprime", "supprimer", "cree", "creer", "fais", "faire",
-    "relance", "relancer", "analyse", "analyser", "pourquoi", "quand",
+    "relance", "relancer", "analyse", "analyser", "pourquoi", "quand", "propose", "proposes",
+    "conseille", "superdefense", "cyberdefense", "defense", "sentinelle", "securite", "securiser",
     "navigateur", "chrome", "vscode", "terminal", "fichier", "code", "git", "commit", "push",
     "meteo", "musique", "todo", "tache", "taches", "relais", "programme", "calendrier"
 }
@@ -964,7 +965,7 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
         except Exception as exc:
             return f"Erreur lors de la désactivation de la vision Moctar : {exc}"
 
-    if re.search(r"\b(?:[ée]tat|niveau|score)\s+de\s+fatigue\b|\b(?:suis[- ]je|je\s+suis)\s+fatigu[ée]\b|\b(?:analyse\s+(?:ma\s+)?fatigue)\b", normalized):
+    if not is_compound and re.search(r"\b(?:[ée]tat|niveau|score)\s+de\s+fatigue\b|\b(?:analyse\s+(?:ma\s+)?fatigue)\b|\b(?:regarde|analyse)\s+mon\s+visage\b", normalized):
         try:
             from vision_engine import VisionEngine
             v = VisionEngine.get_instance()
@@ -1748,8 +1749,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         peer = request.client.host if request.client else ""
         # Les headers X-Forwarded-For/Forwarded reçus ne sont jamais une identité
         # pour les bannissements. Le lancement Uvicorn désactive leur réécriture.
-        if (runtime and runtime.cyber.is_banned(peer) and
-                request.url.path.rstrip("/") not in TRAP_PATHS):
+        path = request.url.path.rstrip("/")
+        if runtime and hasattr(runtime, "cyber"):
+            try:
+                runtime.cyber.record_request_traffic(path)
+            except Exception:
+                pass
+            if path in TRAP_PATHS:
+                try:
+                    await runtime.cyber.trap(peer, path)
+                except Exception:
+                    pass
+                return JSONResponse({"detail": "Accès interdit - tentative répertoriée"}, status_code=403)
+
+        if (runtime and runtime.cyber.is_banned(peer) and path not in TRAP_PATHS):
             response = JSONResponse({"detail": "Accès refusé"}, status_code=403)
         else:
             response = await call_next(request)

@@ -20,7 +20,12 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 LOGGER = logging.getLogger("noc-dashboard.cyberdefense")
-TRAP_PATHS = frozenset({"/wp-login.php", "/wp-admin", "/wp-admin.php", "/.env", "/phpmyadmin", "/actuator/env", "/api/config"})
+TRAP_PATHS = frozenset({
+    "/wp-login.php", "/wp-admin", "/wp-admin.php", "/.env", "/phpmyadmin",
+    "/actuator/env", "/api/config", "/.git/config", "/xmlrpc.php",
+    "/eval-stdin.php", "/setup.php", "/boaform/admin/formLogin", "/solr/admin/info/system",
+    "/vendor/phpunit", "/config.json", "/admin.php"
+})
 MAX_BANS = 512
 MAX_ATTEMPTS = 256
 MAX_STATE_BYTES = 1024 * 1024
@@ -271,6 +276,14 @@ class CyberDefenseManager:
     def _prune_traffic(self) -> None:
         cutoff = int(time.time() // 60) - 59
         self._traffic = {minute: counts for minute, counts in self._traffic.items() if minute >= cutoff}
+
+    def record_request_traffic(self, path: str = "") -> None:
+        """Enregistre le trafic HTTP réel de l'application pour le graphique de supervision 60 minutes."""
+        now = time.time()
+        minute = int(now // 60)
+        counts = self._traffic.setdefault(minute, {"count": 0, "simulated_count": 0})
+        counts["count"] += 1
+        self._prune_traffic()
 
     def _record(self, address: str, path: str, simulated: bool, blocked: bool, protected: bool) -> None:
         now = time.time()

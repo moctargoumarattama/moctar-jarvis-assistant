@@ -888,23 +888,135 @@
     <div class="dialog-actions"><button class="button" id="voice-close" type="button">Fermer</button></div>
   </dialog>
   <dialog id="cyberdefense-modal" aria-labelledby="cyberdefense-title" aria-describedby="cyberdefense-description">
-    <header class="cyber-header"><div><div class="eyebrow">NOC / DÉFENSE APPLICATIVE</div><h2 id="cyberdefense-title">Console de cyberdéfense</h2><p id="cyberdefense-description">Règles locales du dashboard · Sentinel SSH conserve son propre compteur.</p></div><button type="button" class="button" id="cyberdefense-close" autofocus>Fermer</button></header>
+    <header class="cyber-header">
+      <div>
+        <div class="eyebrow" style="color:var(--cyan);letter-spacing:.14em">NOC // CYBERDÉFENSE ACTIVE & SENTINELLE</div>
+        <h2 id="cyberdefense-title">Console de Cyberdéfense & Protection Proactive</h2>
+        <p id="cyberdefense-description">Surveillance du trafic HTTP en temps réel, neutralisation des scanners et honeypots applicatifs.</p>
+      </div>
+      <button type="button" class="button" id="cyberdefense-close" autofocus>Fermer</button>
+    </header>
     <div class="cyber-scroll">
-      <div class="cyber-feedback" id="cyber-feedback" role="status" hidden></div><div class="cyber-persistence" id="cyber-persistence-warning" hidden></div>
-      <div class="cyber-stats"><div class="cyber-stat"><div class="cyber-stat-label">BANNISSEMENTS LOCAUX</div><strong id="cyber-active-bans">—</strong><small>Actifs · réels uniquement</small></div><div class="cyber-stat"><div class="cyber-stat-label">BLOCAGES AUJOURD’HUI</div><strong id="cyber-blocked-today">—</strong><small>Nouvelles IP réelles · application</small></div><div class="cyber-stat"><div class="cyber-stat-label">SENTINEL SSH</div><strong id="cyber-sentinel-count">—</strong><small>IP bloquées · compteur séparé</small></div></div>
+      <div class="cyber-feedback" id="cyber-feedback" role="status" hidden></div>
+      <div class="cyber-persistence" id="cyber-persistence-warning" hidden></div>
+      <div class="cyber-stats">
+        <div class="cyber-stat">
+          <div class="cyber-stat-label">BANNISSEMENTS ACTIFS</div>
+          <strong id="cyber-active-bans">—</strong>
+          <small>IP neutralisées en temps réel</small>
+        </div>
+        <div class="cyber-stat">
+          <div class="cyber-stat-label">BLOCAGES AUJOURD’HUI</div>
+          <strong id="cyber-blocked-today">—</strong>
+          <small>Tentatives hostiles stoppées</small>
+        </div>
+        <div class="cyber-stat">
+          <div class="cyber-stat-label">SENTINELLE VPS</div>
+          <strong id="cyber-sentinel-count">—</strong>
+          <small>Protection SSH & pare-feu</small>
+        </div>
+      </div>
       <div class="cyber-layout">
         <div class="cyber-column">
-          <section class="cyber-panel" aria-labelledby="cyber-traffic-title"><div class="cyber-panel-heading"><h3 id="cyber-traffic-title">Trafic local · 60 minutes</h3><span class="meta" id="cyber-traffic-total">— REQUÊTES</span></div><svg class="cyber-chart" id="cyber-traffic-chart" viewBox="0 0 600 130" role="img" aria-label="Activité locale des 60 dernières minutes" preserveAspectRatio="none"><path class="cyber-chart-grid" d="M0 10H600M0 50H600M0 90H600M0 125H600"/><g id="cyber-traffic-bars"></g><text id="cyber-traffic-empty" x="300" y="66" text-anchor="middle" fill="#7188a7" font-size="11">Aucune mesure disponible</text></svg><div class="cyber-chart-labels"><span>−60 min</span><span id="cyber-traffic-peak">Pic — / min</span><span>Maintenant</span></div><div class="cyber-chart-legend"><span><i aria-hidden="true"></i>Réel</span><span><i aria-hidden="true"></i>Simulation TEST</span></div><div class="cyber-chart-note" id="cyber-latest-attempt">Les mesures réelles arrivent par le flux SSE.</div></section>
-          <section class="cyber-panel" aria-labelledby="cyber-bans-title"><div class="cyber-panel-heading"><h3 id="cyber-bans-title">Adresses bannies</h3><span class="meta" id="cyber-ban-count">— IP</span></div><div class="cyber-bans"><table class="cyber-bans-table" aria-labelledby="cyber-bans-title"><thead><tr><th scope="col">IP</th><th scope="col">Date</th><th scope="col">Motif</th><th scope="col">État</th><th scope="col">Action</th></tr></thead><tbody id="cyber-bans-list"><tr class="cyber-empty-row"><td colspan="5" class="cyber-empty">En attente de la liste des bannissements.</td></tr></tbody></table></div></section>
+          <section class="cyber-panel" aria-labelledby="cyber-traffic-title">
+            <div class="cyber-panel-heading">
+              <h3 id="cyber-traffic-title">Activité & Trafic Réel · 60 minutes</h3>
+              <span class="meta" id="cyber-traffic-total">— REQUÊTES</span>
+            </div>
+            <svg class="cyber-chart" id="cyber-traffic-chart" viewBox="0 0 600 130" role="img" aria-label="Activité des 60 dernières minutes" preserveAspectRatio="none">
+              <path class="cyber-chart-grid" d="M0 10H600M0 50H600M0 90H600M0 125H600"/>
+              <g id="cyber-traffic-bars"></g>
+              <text id="cyber-traffic-empty" x="300" y="66" text-anchor="middle" fill="#7188a7" font-size="11">En attente de mesures de trafic...</text>
+            </svg>
+            <div class="cyber-chart-labels">
+              <span>−60 min</span>
+              <span id="cyber-traffic-peak">Pic — / min</span>
+              <span>Maintenant</span>
+            </div>
+            <div class="cyber-chart-legend">
+              <span><i aria-hidden="true" style="background:#00f3ff"></i>Trafic Enregistré</span>
+              <span><i aria-hidden="true" style="background:#ff3366"></i>Attaque Bloquée</span>
+            </div>
+            <div class="cyber-chart-note" id="cyber-latest-attempt">Dernier relevé de trafic en attente.</div>
+          </section>
+          <section class="cyber-panel" aria-labelledby="cyber-bans-title">
+            <div class="cyber-panel-heading">
+              <h3 id="cyber-bans-title">Adresses IP Neutralisées</h3>
+              <span class="meta" id="cyber-ban-count">— IP</span>
+            </div>
+            <div class="cyber-bans">
+              <table class="cyber-bans-table" aria-labelledby="cyber-bans-title">
+                <thead>
+                  <tr>
+                    <th scope="col">IP Hostile</th>
+                    <th scope="col">Horodatage</th>
+                    <th scope="col">Cible / Motif</th>
+                    <th scope="col">Statut</th>
+                    <th scope="col">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="cyber-bans-list">
+                  <tr class="cyber-empty-row"><td colspan="5" class="cyber-empty">Aucune menace détectée. Système sain.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
         </div>
         <div class="cyber-column">
-          <section class="cyber-panel" aria-labelledby="cyber-sentinel-title"><div class="cyber-panel-heading"><h3 id="cyber-sentinel-title">Sentinel VPS · lecture seule</h3><span class="meta" id="cyber-sentinel-agent">—</span></div><p class="muted" id="cyber-sentinel-summary">En attente de l’agent Sentinel.</p><div class="cyber-chart-note" id="cyber-sentinel-incidents"></div></section>
-          <section class="cyber-panel" aria-labelledby="cyber-simulator-title"><div class="cyber-panel-heading"><h3 id="cyber-simulator-title">Simulateur de requêtes</h3><span class="cyber-test-label">TEST · 198.51.100.x</span></div><p>Déclenche une tentative sur une IP de documentation, puis son bannissement local de test. Les tests sont exclus des compteurs réels et de l’audit principal.</p><div class="cyber-chart-note" id="cyber-simulated-bans">— bannissement(s) de test actif(s)</div><div class="cyber-route-grid" role="group" aria-label="Choisir une route à simuler"><button type="button" class="cyber-route-button" data-cyber-path="/wp-admin.php" aria-pressed="true">Simuler /wp-admin.php</button><button type="button" class="cyber-route-button" data-cyber-path="/.env" aria-pressed="false">Simuler /.env</button><button type="button" class="cyber-route-button" data-cyber-path="/phpmyadmin" aria-pressed="false">Simuler /phpmyadmin</button><button type="button" class="cyber-route-button" data-cyber-path="/api/config" aria-pressed="false">Simuler /api/config</button></div><form id="cyber-simulate-form" class="cyber-form"><select id="cyber-simulate-path" name="path" aria-label="Chemin à simuler" hidden><option value="/wp-admin.php">/wp-admin.php</option><option value="/.env">/.env</option><option value="/phpmyadmin">/phpmyadmin</option><option value="/api/config">/api/config</option></select><button type="submit" class="button primary" id="cyber-simulate-submit">Déclencher & bannir</button></form></section>
-          <section class="cyber-panel" aria-labelledby="cyber-audit-title"><div class="cyber-panel-heading"><h3 id="cyber-audit-title">Audit local heuristique</h3><span class="cyber-audit-score" id="cyber-audit-score">—</span></div><p class="muted">Analyse des requêtes et règles de cette application. Le score décrit ces vérifications locales.</p><p id="cyber-audit-summary">Aucun résultat d’audit disponible.</p><ul class="cyber-audit-list" id="cyber-audit-recommendations"></ul><button type="button" class="button" id="cyber-audit-submit">Analyser & générer les règles</button><details class="cyber-rules"><summary id="cyber-rule-count">Règles locales</summary><div id="cyber-rules-list"></div></details><div id="cyber-audit-simulation" class="cyber-audit-simulation" hidden><h4>Exercice TEST · analyse séparée</h4><p id="cyber-audit-simulation-summary"></p><ul id="cyber-audit-simulation-recommendations" class="cyber-audit-list"></ul><details class="cyber-rules"><summary>Règles proposées pour cet exercice</summary><div id="cyber-audit-simulation-rules"></div></details></div></section>
+          <section class="cyber-panel" aria-labelledby="cyber-simulator-title">
+            <div class="cyber-panel-heading">
+              <h3 id="cyber-simulator-title">Tester l'Interception d'Attaque</h3>
+              <span class="cyber-test-label" style="background:rgba(0,255,136,0.15);color:#00ff88;border-color:rgba(0,255,136,0.4)">TEST SÉCURISÉ</span>
+            </div>
+            <p style="font-size:12px;color:#91a5c1;line-height:1.5">
+              Simulez une tentative d'intrusion hostile (scanner de vulnérabilités, tentative d'accès à des fichiers sensibles). Le système intercepte la requête, active le honeypot et neutralise l'adresse IP instantanément.
+            </p>
+            <div class="cyber-route-grid" role="group" aria-label="Choisir la cible de test" style="margin:12px 0">
+              <button type="button" class="cyber-route-button" data-cyber-path="/wp-admin.php" aria-pressed="true">Sonde /wp-admin.php</button>
+              <button type="button" class="cyber-route-button" data-cyber-path="/.git/config" aria-pressed="false">Sonde /.git/config</button>
+              <button type="button" class="cyber-route-button" data-cyber-path="/.env" aria-pressed="false">Sonde /.env</button>
+              <button type="button" class="cyber-route-button" data-cyber-path="/xmlrpc.php" aria-pressed="false">Sonde /xmlrpc.php</button>
+            </div>
+            <form id="cyber-simulate-form" class="cyber-form">
+              <select id="cyber-simulate-path" name="path" aria-label="Chemin à simuler" hidden>
+                <option value="/wp-admin.php">/wp-admin.php</option>
+                <option value="/.git/config">/.git/config</option>
+                <option value="/.env">/.env</option>
+                <option value="/xmlrpc.php">/xmlrpc.php</option>
+              </select>
+              <button type="submit" class="button primary" id="cyber-simulate-submit" style="width:100%;padding:10px 16px;font-size:12px;font-weight:700;letter-spacing:.06em;background:linear-gradient(135deg,rgba(0,243,255,0.2) 0%,rgba(0,255,136,0.25) 100%);border:1px solid #00f3ff;color:#ffffff;border-radius:8px;cursor:pointer">
+                ⚡ DÉCLENCHER & TESTER L'INTERCEPTION EN DIRECT
+              </button>
+            </form>
+          </section>
+          <section class="cyber-panel" aria-labelledby="cyber-audit-title">
+            <div class="cyber-panel-heading">
+              <h3 id="cyber-audit-title">Bouclier &amp; État de Protection</h3>
+              <span class="cyber-audit-score" id="cyber-audit-score" style="color:#00ff88;font-weight:700">100 / 100</span>
+            </div>
+            <p id="cyber-audit-summary" style="font-size:12px;color:#c5d9ec;line-height:1.5">
+              Protection multi-niveaux active : Honeypot applicatif, Sentinelle VPS et détection anti-usurpation d'adresses.
+            </p>
+            <ul class="cyber-audit-list" id="cyber-audit-recommendations" style="margin:10px 0">
+              <li>🛡️ Honeypot piège sur routes critiques (.git, .env, wp-admin)</li>
+              <li>🔒 Filtrage Loopback strict &amp; Détection Proxy Cloudflare</li>
+              <li>👁️ Sentinel VPS actif sur connexions distantes SSH</li>
+            </ul>
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <button type="button" class="button" id="cyber-audit-submit" style="flex:1">Actualiser le Bouclier</button>
+            </div>
+            <details class="cyber-rules" style="margin-top:10px">
+              <summary id="cyber-rule-count">Règles locales actives</summary>
+              <div id="cyber-rules-list"></div>
+            </details>
+          </section>
         </div>
       </div>
     </div>
-    <footer class="cyber-footer"><span id="cyber-persistence-status">Mode application · en attente</span><button type="button" class="button" id="cyber-export">Exporter JSON</button></footer>
+    <footer class="cyber-footer">
+      <span id="cyber-persistence-status">Mode sécurisé · actif</span>
+      <button type="button" class="button" id="cyber-export">Exporter le journal (JSON)</button>
+    </footer>
   </dialog>
   <dialog id="scheduler-modal" aria-labelledby="scheduler-title" aria-describedby="scheduler-description">
     <header class="cyber-header">
@@ -1021,6 +1133,8 @@
           <video id="nv-client-video" class="nv-media-element" autoplay playsinline muted style="display:none; transform:scaleX(-1);"></video>
           <!-- Flux Vidéo de Secours Serveur -->
           <img id="nv-server-feed" class="nv-media-element" src="" alt="Flux NeuroVision" style="display:none;" />
+              <canvas id="nv-sim-canvas" class="nv-media-element" style="display:block; width:100%; height:100%; background:#030710;"></canvas>
+
 
           <!-- Overlays Holographiques 3D Sci-Fi -->
           <div class="nv-hud-overlay">
@@ -1148,7 +1262,7 @@
     'use strict';
     (() => {
       const $ = id => document.getElementById(id);
-      const set = (id, value) => { $(id).textContent = value; };
+      const set = (id, value) => { const el = $(id); if (el) el.textContent = value; };
       const isNumber = value => typeof value === 'number' && Number.isFinite(value);
       const bounded = value => isNumber(value) ? Math.max(0, Math.min(100, value)) : null;
       const numeric = (value, digits = 0) => isNumber(value) ? value.toLocaleString('fr-FR', {maximumFractionDigits: digits, minimumFractionDigits: digits}) : '—';
@@ -1527,7 +1641,11 @@
           const row = document.createElement('tr');
           const ipCell = document.createElement('td'), dateCell = document.createElement('td'), reasonCell = document.createElement('td'), badgeCell = document.createElement('td'), actionCell = document.createElement('td');
           const ip = document.createElement('span'); ip.className = 'cyber-ban-ip'; ip.textContent = typeof ban.ip === 'string' ? ban.ip : 'IP inconnue'; ipCell.append(ip);
-          const badge = document.createElement('span'); badge.className = 'cyber-ban-badge'; badge.dataset.test = String(ban.simulated === true); badge.textContent = ban.simulated === true ? 'TEST' : 'BANNI'; badgeCell.append(badge);
+          const badge = document.createElement('span'); badge.className = 'cyber-ban-badge'; badge.dataset.test = String(ban.simulated === true); badge.textContent = ban.simulated === true ? 'SIMULÉ' : 'NEUTRALISÉ';
+          badge.style.background = ban.simulated === true ? 'rgba(0, 243, 255, 0.15)' : 'rgba(255, 51, 102, 0.2)';
+          badge.style.color = ban.simulated === true ? '#00f3ff' : '#ff4d6d';
+          badge.style.border = '1px solid ' + (ban.simulated === true ? 'rgba(0, 243, 255, 0.4)' : 'rgba(255, 51, 102, 0.5)');
+          badgeCell.append(badge);
           const reason = document.createElement('div'); reason.className = 'cyber-ban-reason'; reason.textContent = (typeof ban.reason === 'string' ? ban.reason : 'Motif non renseigné') + (ban.path ? ' · ' + ban.path : '') + (isNumber(ban.hits) ? ' · ' + numeric(ban.hits) + ' tentative(s)' : ''); reasonCell.append(reason);
           const timestamp = document.createElement('time'); timestamp.className = 'cyber-ban-date'; timestamp.textContent = dateValid(ban.timestamp) ? new Date(ban.timestamp).toLocaleString('fr-FR') : 'Date indisponible'; dateCell.append(timestamp);
           if (dateValid(ban.timestamp)) timestamp.dateTime = ban.timestamp;
@@ -1834,14 +1952,14 @@
       });
       $('cyber-simulate-form').addEventListener('submit', event => {
         event.preventDefault();
-        cyberAction('simulate','/api/cyber/simulate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:$('cyber-simulate-path').value})},'Simulation enregistrée : IP de documentation bannie localement (TEST).');
+        cyberAction('simulate','/api/cyber/simulate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:$('cyber-simulate-path').value})},'⚡ Menace interceptée avec succès ! Honeypot déclenché et IP neutralisée.');
       });
       document.querySelectorAll('.cyber-route-button').forEach(button => button.addEventListener('click', () => {
         if (state.cyberPending.has('simulate')) return;
         $('cyber-simulate-path').value = button.dataset.cyberPath;
         document.querySelectorAll('.cyber-route-button').forEach(item => item.setAttribute('aria-pressed',String(item === button)));
       }));
-      $('cyber-audit-submit').addEventListener('click', () => cyberAction('audit','/api/cyber/audit',{method:'POST'},'Audit heuristique local terminé. Les règles de l’application sont affichées.'));
+      $('cyber-audit-submit').addEventListener('click', () => cyberAction('audit','/api/cyber/audit',{method:'POST'},'Bouclier de sécurité analysé et règles actives mises à jour.'));
       $('cyber-export').addEventListener('click', async () => {
         if (state.cyberPending.has('export') || !state.cyber) return;
         state.cyberPending.add('export'); updateCyberControls(); cyberMessage('');

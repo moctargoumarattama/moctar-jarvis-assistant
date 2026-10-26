@@ -90,7 +90,7 @@
   const $ = (id) => document.getElementById(id);
   const container = $('hud-viewport');
   const canvas = $('hud-canvas');
-  const btnPlasmaView = $('btn-view-plasma');
+  const btnPlasmaView = $('btn-view-plasma') || $('btn-view-core');
   const btnQuantumView = $('btn-view-quantum');
   const btnGlobeView = $('btn-view-globe');
   const btnLocate = $('btn-action-locate');

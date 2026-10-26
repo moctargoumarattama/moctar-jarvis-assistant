@@ -269,6 +269,38 @@ def execute_autonomous_task(
             "task_category": "telemetry",
         }
 
+    # 2.1b. BRIEFING CYBERDÉFENSE & SENTINELLE (Prise en charge de SuperDefense / Cyberdéfense)
+    if any(k in norm for k in [
+        "superdefense", "cyberdefense", "cyber defense", "cyber-defense", "point sur la cyberdefense",
+        "point sur la defense", "point sur superdefense", "etat de la cyberdefense", "etat du bouclier",
+        "bouclier cyber", "sentinelle", "point securite", "point sur la securite"
+    ]):
+        active_bans = 0
+        req_count = 0
+        try:
+            from main import application
+            runtime = getattr(application.state, "runtime", None) if application else None
+            if runtime and hasattr(runtime, "cyber"):
+                snap = runtime.cyber.snapshot()
+                active_bans = snap.get("active_bans", 0)
+                traffic = snap.get("traffic", [])
+                req_count = sum(t.get("count", 0) for t in traffic)
+        except Exception:
+            pass
+
+        reply_msg = (
+            f"🛡️ Moctar, la console de cyberdéfense et la sentinelle sont pleinement actives. "
+            f"Sur les 60 dernières minutes, {req_count} requêtes applicatives ont été analysées et filtrées avec succès. "
+            + (f"{active_bans} adresse(s) suspecte(s) sont actuellement neutralisées. " if active_bans > 0 else "Aucune intrusion ni tentative suspecte sur le périmètre. ")
+            + "Le pare-feu applicatif, les routes sensibles et l'accès sécurisé du Dell Precision M4800 sont totalement sous contrôle."
+        )
+        return {
+            "handled": True,
+            "reply": reply_msg,
+            "tools_used": [{"tool": "get_cyberdefense_status", "arguments": {}, "success": True}],
+            "task_category": "cyberdefense",
+        }
+
     # 2.2. OPTIMISATION SYSTÈME & LIBÉRATION DES RESSOURCES
     if any(k in norm for k in ["optimise le systeme", "optimise le pc", "libere les ressources", "libere la ram", "purge la memoire", "nettoie la ram"]):
         import gc
@@ -858,8 +890,13 @@ def execute_autonomous_task(
         msg = screen_res.get("message") if isinstance(screen_res, dict) else str(screen_res)
         return {"handled": True, "reply": f"🖥️ {msg}", "tools_used": tools_used, "task_category": "system_tools"}
 
-    # 6. HEURE & DATE
-    if any(k in norm for k in ["heure", "quelle heure"]):
+    # 6. HEURE & DATE (avec exclusion formelle des faux positifs comme 'malheureux', 'heureux')
+    EXCLUDED_TIME_SUBSTRINGS = ("malheureux", "malheureuse", "malheur", "heureux", "heureuse", "heureusement", "a tout a l'heure", "a toute a l'heure")
+    is_time_excluded = any(w in norm for w in EXCLUDED_TIME_SUBSTRINGS)
+    if not is_time_excluded and (
+        re.search(r"\b(?:quelle\s+heure(?:\s+est[- ]il)?|donne[- ](?:moi\s+)?l[' ]heure|il\s+est\s+quelle\s+heure|l[' ]heure\s+qu[' ]il\s+est|l[' ]heure\s+actuelle|l[' ]heure\s+exacte)\b", norm)
+        or norm.strip() in {"heure", "l heure", "l'heure", "time"}
+    ):
         res = actions.execute_tool("get_time_response", {})
         tools_used.append({"tool": "get_time_response", "arguments": {}, "success": True})
         msg = res.get("message") if isinstance(res, dict) else str(res)

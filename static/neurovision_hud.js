@@ -16,6 +16,82 @@
   const dialog = document.getElementById('neurovision-dialog');
   const clientVideo = document.getElementById('nv-client-video');
   const serverImg = document.getElementById('nv-server-feed');
+  const simCanvas = document.getElementById('nv-sim-canvas');
+  let simAnimId = null;
+
+  function drawRadarFrame() {
+    if (!simCanvas) return;
+    const ctx = simCanvas.getContext('2d');
+    if (!ctx) return;
+    const w = simCanvas.width = simCanvas.clientWidth || 360;
+    const h = simCanvas.height = simCanvas.clientHeight || 240;
+    const cx = w / 2, cy = h / 2, maxR = Math.min(cx, cy) * 0.85;
+
+    ctx.fillStyle = '#030710';
+    ctx.fillRect(0, 0, w, h);
+
+    // Grille radar
+    ctx.strokeStyle = 'rgba(0, 243, 255, 0.15)';
+    ctx.lineWidth = 1;
+    for (let r = maxR * 0.25; r <= maxR; r += maxR * 0.25) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(cx - maxR, cy); ctx.lineTo(cx + maxR, cy);
+    ctx.moveTo(cx, cy - maxR); ctx.lineTo(cx, cy + maxR);
+    ctx.stroke();
+
+    // Balayage rotatif
+    const t = performance.now() * 0.002;
+    const sweepAngle = t % (Math.PI * 2);
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
+    grad.addColorStop(0, 'rgba(0, 243, 255, 0.35)');
+    grad.addColorStop(1, 'rgba(0, 243, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, maxR, sweepAngle - 0.45, sweepAngle);
+    ctx.closePath();
+    ctx.fill();
+
+    // Cœur radar
+    ctx.strokeStyle = '#00f3ff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Textes HUD Sci-Fi
+    ctx.fillStyle = '#00f3ff';
+    ctx.font = '10px "SF Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('M.O.C.T.A.R // BALAYAGE BIOMÉTRIQUE', 14, 20);
+    ctx.fillStyle = '#799bbb';
+    ctx.font = '9px "SF Mono", monospace';
+    ctx.fillText('SURVEILLANCE ACTIVE · PRÊT', 14, 34);
+
+    if (simCanvas && simCanvas.style.display !== 'none') {
+      simAnimId = requestAnimationFrame(drawRadarFrame);
+    }
+  }
+
+  function startRadarStandby() {
+    if (!simCanvas) return;
+    simCanvas.style.display = 'block';
+    if (clientVideo) clientVideo.style.display = 'none';
+    if (serverImg) serverImg.style.display = 'none';
+    if (!simAnimId) simAnimId = requestAnimationFrame(drawRadarFrame);
+  }
+
+  function stopRadarStandby() {
+    if (simAnimId) {
+      cancelAnimationFrame(simAnimId);
+      simAnimId = null;
+    }
+    if (simCanvas) simCanvas.style.display = 'none';
+  }
   const toggleBtn = document.getElementById('nv-toggle-btn');
   const switchSrcBtn = document.getElementById('nv-switch-source-btn');
   const resetBtn = document.getElementById('nv-reset-btn');
@@ -483,6 +559,7 @@
       clientStream = stream;
 
       if (clientVideo) {
+        stopRadarStandby();
         clientVideo.srcObject = stream;
         clientVideo.style.display = 'block';
         await clientVideo.play();
@@ -518,6 +595,7 @@
   }
 
   function startClientSimulation() {
+    startRadarStandby();
     isCameraActive = true;
     updateToggleButtonUI(true);
     if (sourceBadge) sourceBadge.textContent = 'MODE SIMULATION 3D';
@@ -567,6 +645,11 @@
       serverImg.removeAttribute('src');
       serverImg.style.display = 'none';
     }
+    if (isNeuroVisionModalOpen()) {
+      startRadarStandby();
+    } else {
+      stopRadarStandby();
+    }
     if (trackerInterval) {
       clearInterval(trackerInterval);
       trackerInterval = null;
@@ -606,6 +689,7 @@
   function fallbackToServerCamera() {
     stopClientCamera(false);
     isClientMode = false;
+    stopRadarStandby();
     if (serverImg) {
       serverImg.src = '/api/vision/stream?t=' + Date.now();
       serverImg.style.display = 'block';
@@ -1051,7 +1135,24 @@
     switchSrcBtn.addEventListener('click', switchSource);
   }
 
-  // Support spécifique du HUD 3D (bouton mode pill 👁️ VISION & fermeture)
+  // Ouverture et fermeture unifiées et garanties sans race condition
+  function openNeuroVisionDialog() {
+    const d = document.getElementById('neurovision-dialog');
+    if (!d) return;
+    if (d.open) return; // Déjà ouvert
+    startRadarStandby();
+    if (typeof d.showModal === 'function') {
+      d.showModal();
+    } else {
+      d.setAttribute('open', '');
+    }
+    setTimeout(resizeCanvases, 60);
+    init3DDigitalTwin();
+    initWaveOscilloscope();
+    startClientCamera();
+    if (!pollInterval) pollInterval = setInterval(pollMetrics, 1000);
+  }
+
   function closeNeuroVisionDialog() {
     const d = document.getElementById('neurovision-dialog');
     if (d) {
@@ -1061,6 +1162,7 @@
         d.removeAttribute('open');
       }
     }
+    stopRadarStandby();
     stopClientCamera();
     if (pollInterval) {
       clearInterval(pollInterval);
@@ -1070,20 +1172,17 @@
 
   const btnNeuroHud = document.getElementById('btn-neurovision-hud');
   if (btnNeuroHud) {
-    btnNeuroHud.addEventListener('click', () => {
-      const d = document.getElementById('neurovision-dialog');
-      if (d) {
-        if (typeof d.showModal === 'function') {
-          if (!d.open) d.showModal();
-        } else {
-          d.setAttribute('open', '');
-        }
-        setTimeout(resizeCanvases, 60);
-        init3DDigitalTwin();
-        initWaveOscilloscope();
-        startClientCamera();
-        if (!pollInterval) pollInterval = setInterval(pollMetrics, 1000);
-      }
+    btnNeuroHud.addEventListener('click', (e) => {
+      e.preventDefault();
+      openNeuroVisionDialog();
+    });
+  }
+
+  const navBtnNoc = document.getElementById('neurovision-nav-btn');
+  if (navBtnNoc) {
+    navBtnNoc.addEventListener('click', (e) => {
+      e.preventDefault();
+      openNeuroVisionDialog();
     });
   }
 
@@ -1107,6 +1206,7 @@
     });
 
     nvDialogEl.addEventListener('close', () => {
+      stopRadarStandby();
       stopClientCamera();
       if (pollInterval) {
         clearInterval(pollInterval);
@@ -1115,26 +1215,14 @@
     });
   }
 
-  // Liaison universelle du bouton NEUROVISION (NOC et HUD)
-  const navBtnNoc = document.getElementById('neurovision-nav-btn');
-  if (navBtnNoc) {
-    navBtnNoc.addEventListener('click', (e) => {
-      e.preventDefault();
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
       const d = document.getElementById('neurovision-dialog');
-      if (d) {
-        if (typeof d.showModal === 'function') {
-          if (!d.open) d.showModal();
-        } else {
-          d.setAttribute('open', '');
-        }
-        setTimeout(resizeCanvases, 60);
-        init3DDigitalTwin();
-        initWaveOscilloscope();
-        startClientCamera();
-        if (!pollInterval) pollInterval = setInterval(pollMetrics, 1000);
+      if (d && d.open) {
+        closeNeuroVisionDialog();
       }
-    });
-  }
+    }
+  });
 
   if (resetBtn) {
     resetBtn.addEventListener('click', async () => {
@@ -1155,16 +1243,11 @@
     });
   }
 
-  // Surveillance de l'ouverture du dialog
+  // Surveillance de la fermeture du dialog
   if (dialog) {
     const observer = new MutationObserver(() => {
-      if (dialog.open) {
-        setTimeout(resizeCanvases, 60);
-        init3DDigitalTwin();
-        initWaveOscilloscope();
-        startClientCamera();
-        if (!pollInterval) pollInterval = setInterval(pollMetrics, 1000);
-      } else {
+      if (!dialog.open) {
+        stopRadarStandby();
         stopClientCamera();
         if (pollInterval) {
           clearInterval(pollInterval);
