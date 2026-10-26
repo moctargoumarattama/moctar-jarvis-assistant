@@ -223,7 +223,8 @@ def apply_workspace_layout() -> Dict[str, Any]:
             except Exception:
                 if shutil.which("code"):
                     try:
-                        subprocess.Popen(["code", "/opt/jarvis"], env=env)
+                        import config as _cfg
+                        subprocess.Popen(["code", str(_cfg.APP_ROOT)], env=env)
                     except Exception:
                         pass
 

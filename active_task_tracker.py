@@ -16,9 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import config
+
 LOGGER = logging.getLogger("moctar.active_task_tracker")
 
-_DEFAULT_STORAGE_PATH = Path("/opt/jarvis/data/active_task_state.json")
+_DEFAULT_STORAGE_PATH = config.APP_ROOT / "data" / "active_task_state.json"
 _LOCAL_FALLBACK_PATH = Path("data/active_task_state.json")
 
 

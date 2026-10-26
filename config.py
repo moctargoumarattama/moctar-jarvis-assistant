@@ -26,7 +26,7 @@ class ProjectConfig:
     server_command: tuple[str, ...] | None = None
 
 
-APP_ROOT = Path(__file__).resolve().parent
+APP_ROOT = Path(os.getenv("JARVIS_APP_ROOT", Path(__file__).resolve().parent)).resolve()
 HOME_DIR = Path(os.environ.get("USERPROFILE", str(Path.home())))
 DESKTOP_DIR = HOME_DIR / "Desktop"
 DOWNLOADS_DIR = HOME_DIR / "Downloads"
@@ -81,9 +81,9 @@ APP_COMMANDS = {
     "calculator": "start calc" if _is_win else "gnome-calculator",
     "notepad": "start notepad" if _is_win else "gedit",
     "cmd": "start cmd" if _is_win else "gnome-terminal",
-    "explorer": "start explorer" if _is_win else "xdg-open /opt/jarvis",
-    "vscode": "start code" if _is_win else "code /opt/jarvis",
-    "code": "start code" if _is_win else "code /opt/jarvis",
+    "explorer": "start explorer" if _is_win else f"xdg-open {APP_ROOT.as_posix()}",
+    "vscode": "start code" if _is_win else f"code {APP_ROOT.as_posix()}",
+    "code": "start code" if _is_win else f"code {APP_ROOT.as_posix()}",
 }
 
 APP_PROCESS_NAMES = {
@@ -482,6 +482,8 @@ class Settings:
     whatsapp_admin_numbers: tuple[str, ...] | None = None
     whatsapp_webhook_token: str = ""
     whatsapp_session_id: str = "1"
+    whatsapp_bridge_url: str = "http://127.0.0.1:3001"
+    whatsapp_bridge_restart_cmd: str = ""
     whatsapp_send_url: str = "http://127.0.0.1:3001/session/{session_id}/send"
     whatsapp_send_to_field: str = "jid"
     whatsapp_send_text_field: str = "text"
@@ -491,8 +493,8 @@ class Settings:
     whatsapp_audio_seconds: int = 60
     voice_enabled: bool = True
     whisper_model: str = "base"
-    whisper_model_path: str = "/opt/jarvis/models/whisper"
-    whisper_python: str = "/opt/jarvis/venv/bin/python"
+    whisper_model_path: str = (APP_ROOT / "models" / "whisper").as_posix()
+    whisper_python: str = (APP_ROOT / "venv" / "bin" / "python").as_posix()
     whisper_timeout: float = 120.0
     groq_api_key: str = ""
     backup_script: str = "/usr/local/bin/backup-babamarket.sh"
@@ -504,11 +506,15 @@ class Settings:
     sentinel_state_path: str = str(DATA_DIR / "sentinel-counters.json")
     cyber_state_path: str = str(DATA_DIR / "blocked_ips.json")
     cyber_protected_ips: tuple[str, ...] = ("187.77.171.225",)
-    ssl_keyfile: str = "/opt/jarvis/certs/server.key"
-    ssl_certfile: str = "/opt/jarvis/certs/server.crt"
+    ssl_keyfile: str = (APP_ROOT / "certs" / "server.key").as_posix()
+    ssl_certfile: str = (APP_ROOT / "certs" / "server.crt").as_posix()
 
     @classmethod
     def from_env(cls) -> Settings:
+        default_whisper_model_path = (APP_ROOT / "models" / "whisper").as_posix()
+        default_whisper_python = (APP_ROOT / "venv" / "bin" / "python").as_posix()
+        default_ssl_keyfile = (APP_ROOT / "certs" / "server.key").as_posix()
+        default_ssl_certfile = (APP_ROOT / "certs" / "server.crt").as_posix()
         return cls(
             host=os.environ.get("NOC_HOST", "127.0.0.1"),
             port=int(_noc_number("NOC_PORT", 5050, 1, 65535)),
@@ -531,6 +537,8 @@ class Settings:
             )),
             whatsapp_webhook_token=os.environ.get("NOC_WHATSAPP_WEBHOOK_TOKEN", ""),
             whatsapp_session_id=os.environ.get("NOC_WHATSAPP_SESSION_ID", "1"),
+            whatsapp_bridge_url=os.environ.get("WHATSAPP_BRIDGE_URL", os.environ.get("NOC_WHATSAPP_BRIDGE_URL", "http://127.0.0.1:3001")).strip() or "http://127.0.0.1:3001",
+            whatsapp_bridge_restart_cmd=os.environ.get("WHATSAPP_BRIDGE_RESTART_CMD", "").strip(),
             whatsapp_send_url=os.environ.get("NOC_WHATSAPP_SEND_URL", os.environ.get(
                 "WHATSAPP_SEND_URL", "http://127.0.0.1:3001/session/{session_id}/send")),
             whatsapp_send_to_field=os.environ.get("NOC_WHATSAPP_SEND_TO_FIELD", os.environ.get(
@@ -543,8 +551,8 @@ class Settings:
             whatsapp_audio_seconds=int(_noc_number("NOC_WHATSAPP_AUDIO_SECONDS", 60, 1, 60)),
             voice_enabled=_noc_boolean("NOC_VOICE_ENABLED", True),
             whisper_model=os.environ.get("NOC_WHISPER_MODEL", "base") or "base",
-            whisper_model_path=os.environ.get("NOC_WHISPER_MODEL_PATH", "/opt/jarvis/models/whisper") or "/opt/jarvis/models/whisper",
-            whisper_python=os.environ.get("NOC_WHISPER_PYTHON", "/opt/jarvis/venv/bin/python"),
+            whisper_model_path=os.environ.get("NOC_WHISPER_MODEL_PATH", default_whisper_model_path) or default_whisper_model_path,
+            whisper_python=os.environ.get("NOC_WHISPER_PYTHON", default_whisper_python),
             whisper_timeout=_noc_number("NOC_WHISPER_TIMEOUT", 120, 5, 300),
             groq_api_key=os.environ.get("GROQ_API_KEY", "") or os.environ.get("NOC_GROQ_API_KEY", ""),
             backup_script=os.environ.get("NOC_BACKUP_SCRIPT", os.environ.get("NOC_BABAMARKET_BACKUP_SCRIPT", "/usr/local/bin/backup-babamarket.sh")) or "/usr/local/bin/backup-babamarket.sh",
@@ -558,6 +566,6 @@ class Settings:
             cyber_protected_ips=tuple(value.strip() for value in
                                       os.environ.get("NOC_CYBER_PROTECTED_IPS", "187.77.171.225").split(",")
                                       if value.strip()),
-            ssl_keyfile=os.environ.get("NOC_SSL_KEYFILE", "/opt/jarvis/certs/server.key"),
-            ssl_certfile=os.environ.get("NOC_SSL_CERTFILE", "/opt/jarvis/certs/server.crt"),
+            ssl_keyfile=os.environ.get("NOC_SSL_KEYFILE", default_ssl_keyfile),
+            ssl_certfile=os.environ.get("NOC_SSL_CERTFILE", default_ssl_certfile),
         )

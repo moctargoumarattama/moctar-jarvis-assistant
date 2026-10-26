@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+import config
 from config import Settings
 from main import app, run_server
 
@@ -14,8 +15,8 @@ from main import app, run_server
 def test_ssl_configuration_defaults_and_environment_override():
     with patch.dict(os.environ, {}, clear=True):
         settings = Settings.from_env()
-    assert settings.ssl_keyfile == "/opt/jarvis/certs/server.key"
-    assert settings.ssl_certfile == "/opt/jarvis/certs/server.crt"
+    assert settings.ssl_keyfile == (config.APP_ROOT / "certs" / "server.key").as_posix()
+    assert settings.ssl_certfile == (config.APP_ROOT / "certs" / "server.crt").as_posix()
     with patch.dict(os.environ, {"NOC_SSL_KEYFILE": "C:/certs/local.key", "NOC_SSL_CERTFILE": "C:/certs/local.crt"}, clear=True):
         settings = Settings.from_env()
     assert settings.ssl_keyfile == "C:/certs/local.key"

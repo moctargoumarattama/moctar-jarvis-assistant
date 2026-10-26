@@ -57,6 +57,77 @@ def find_audio_player() -> Optional[str]:
     return None
 
 
+def has_audio_hardware_device() -> bool:
+    """Vérifie si une carte son / périphérique d'entrée-sortie audio matériel est réellement présent."""
+    if os.name == "nt":
+        return True
+    if not is_linux_environment():
+        return False
+    try:
+        cards_proc = Path("/proc/asound/cards")
+        if cards_proc.exists():
+            content = cards_proc.read_text(encoding="utf-8", errors="ignore").strip().lower()
+            if content and "no soundcards" not in content:
+                return True
+        snd_dir = Path("/dev/snd")
+        if snd_dir.exists() and any(p.name.startswith("pcmC") for p in snd_dir.iterdir()):
+            return True
+    except Exception:
+        pass
+    arecord_bin = shutil.which("arecord")
+    if arecord_bin:
+        try:
+            res = subprocess.run([arecord_bin, "-l"], capture_output=True, text=True, timeout=1.5)
+            if res.returncode == 0 and ("card " in res.stdout.lower() or "carte " in res.stdout.lower()):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def detect_hardware_audio_and_display() -> Dict[str, Any]:
+    """Détecte automatiquement le matériel audio/affichage selon JARVIS_HEADLESS=auto|true|false."""
+    headless_env = os.getenv("JARVIS_HEADLESS", "auto").strip().lower() or "auto"
+    recorder = find_audio_recorder()
+    player = find_audio_player()
+    has_soundcard = has_audio_hardware_device()
+    has_display = bool(os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY") or os.name == "nt")
+
+    if headless_env in {"true", "1", "yes", "on"}:
+        headless = True
+        mode = "HEADLESS_WEB_ONLY"
+        reason = "Mode headless activé explicitement (JARVIS_HEADLESS=true)"
+    elif headless_env in {"false", "0", "no", "off"}:
+        if has_soundcard and (recorder or player or os.name == "nt"):
+            headless = False
+            mode = "NATIVE_HARDWARE_ACTIVE"
+            reason = "Matériel audio forcé et disponible (JARVIS_HEADLESS=false)"
+        else:
+            headless = True
+            mode = "HEADLESS_WEB_ONLY"
+            reason = "Aucun périphérique audio matériel détecté malgré JARVIS_HEADLESS=false — repli sécurisé HEADLESS_WEB_ONLY"
+    else:
+        if has_soundcard and (recorder or player):
+            headless = False
+            mode = "NATIVE_HARDWARE_ACTIVE"
+            reason = "Périphériques audio matériels et utilitaires détectés sur l'hôte"
+        else:
+            headless = True
+            mode = "HEADLESS_WEB_ONLY"
+            reason = "Aucun matériel audio/écran détecté (VPS/Conteneur) — bascule automatique HEADLESS_WEB_ONLY"
+
+    return {
+        "headless_setting": headless_env,
+        "headless": headless,
+        "mode": mode,
+        "reason": reason,
+        "has_soundcard": has_soundcard,
+        "has_display": has_display,
+        "recorder": recorder,
+        "player": player,
+    }
+
+
 def is_pc_audio_playing() -> bool:
     """Détecte si des applications (navigateur YouTube, lecteur média, etc.) diffusent du son sur les haut-parleurs."""
     if not is_linux_environment():
@@ -190,6 +261,9 @@ class NativeVoiceDaemon:
         self.on_audio_captured = on_audio_captured
         self.runtime = runtime
         self.running = False
+        self.headless = False
+        self.mode = "UNKNOWN"
+        self.hardware_status: Dict[str, Any] = {}
         self._thread: Optional[threading.Thread] = None
 
     @classmethod
@@ -199,14 +273,41 @@ class NativeVoiceDaemon:
         return cls._instance
 
     def start(self) -> None:
-        """Démarre le listener d'arrière-plan sur un thread démon non bloquant."""
+        """Démarre le listener d'arrière-plan sur un thread démon non bloquant, ou passe en mode HEADLESS_WEB_ONLY."""
         if self.running:
             return
+        hw = detect_hardware_audio_and_display()
+        self.hardware_status = hw
+        self.headless = bool(hw.get("headless", False))
+        self.mode = str(hw.get("mode", "HEADLESS_WEB_ONLY"))
+
+        if self.headless:
+            self.running = False
+            LOGGER.info(
+                "ℹ️ [NATIVE VOICE DAEMON]: Mode %s activé (%s). API Web/HUD/WhatsApp 100%% opérationnelle sans démon audio local.",
+                self.mode,
+                hw.get("reason", "Headless"),
+            )
+            return
+
         setup_linux_acoustic_echo_cancellation()
         self.running = True
         self._thread = threading.Thread(target=self._run_loop, name="native-voice-daemon", daemon=True)
         self._thread.start()
-        LOGGER.info("NativeVoiceDaemon démarré (pipe: %s, AEC actif).", self.pipe_path)
+        LOGGER.info("NativeVoiceDaemon démarré en mode %s (pipe: %s, AEC actif).", self.mode, self.pipe_path)
+
+    def get_status(self) -> Dict[str, Any]:
+        """Retourne l'état courant du démon vocal natif et du matériel détecté."""
+        if not self.hardware_status:
+            self.hardware_status = detect_hardware_audio_and_display()
+            self.headless = bool(self.hardware_status.get("headless", False))
+            self.mode = str(self.hardware_status.get("mode", "HEADLESS_WEB_ONLY"))
+        return {
+            "running": self.running,
+            "mode": self.mode,
+            "headless": self.headless,
+            **self.hardware_status,
+        }
 
     def stop(self) -> None:
         """Arrête le listener système."""

@@ -75,9 +75,10 @@ def test_voice_session_duration_default_is_generous():
 
 
 def test_voice_transcribe_candidates_include_opt_jarvis():
-    """Vérifie que le répertoire /opt/jarvis est bien inclus dans les chemins de recherche Whisper."""
+    """Vérifie que le répertoire APP_DIR est bien inclus dans les chemins de recherche Whisper."""
     candidates = [str(c[0]) for c in voice_transcribe._candidates("base")]
-    assert any("/opt/jarvis" in c or "\\opt\\jarvis" in c for c in candidates)
+    app_dir_str = str(voice_transcribe.APP_DIR)
+    assert any(app_dir_str in c for c in candidates)
 
 
 def test_is_local_request_recognizes_lan_and_loopback():

@@ -1,0 +1,24 @@
+services:
+  jarvis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jarvis-noc
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      JARVIS_APP_ROOT: /app
+      JARVIS_HEADLESS: "true"
+      NOC_HOST: 0.0.0.0
+      NOC_PORT: "5050"
+    ports:
+      - "5050:5050"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./notes:/app/notes
+      - ./screenshots:/app/screenshots
+      - ./certs:/app/certs:ro
+

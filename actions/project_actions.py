@@ -45,7 +45,7 @@ class ProjectAssistant:
                             return child
             except Exception:
                 continue
-        return Path(default_path) if default_path else Path("/opt/jarvis")
+        return Path(default_path) if default_path else config.APP_ROOT
 
     def _resolve_project(self, project_key=None):
         from types import SimpleNamespace

@@ -1433,7 +1433,9 @@ class Runtime:
         snapshot["events"] = list(self.collector.events)
         snapshot["sentinel"] = self.sentinel.snapshot()
         snapshot["cyber"] = self.cyber.snapshot()
-        snapshot["voice"] = self.whatsapp.snapshot()
+        whatsapp_snap = self.whatsapp.snapshot()
+        snapshot["voice"] = whatsapp_snap
+        snapshot["whatsapp_bridge"] = whatsapp_snap.get("bridge", {"status": "UNREACHABLE"})
         serialized = json.dumps(snapshot, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
         self.latest = snapshot
         self.serialized = serialized
@@ -1560,8 +1562,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             daemon.runtime = runtime
             daemon.on_audio_captured = _on_native_audio
             daemon.start()
-        except Exception:
-            pass
+            daemon_status = daemon.get_status()
+            LOGGER.info(
+                "Mode audio/display Jarvis initialisé : mode=%s headless=%s audio_hw=%s (%s)",
+                daemon_status.get("mode"),
+                daemon_status.get("headless"),
+                daemon_status.get("has_audio_hardware"),
+                daemon_status.get("reason"),
+            )
+        except Exception as exc:
+            LOGGER.info("Démon vocal natif en repli HEADLESS_WEB_ONLY : %s", exc)
         try:
             yield
         finally:
@@ -1896,7 +1906,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         last_success = latest["collector"].get("last_success") if latest else None
         collecting = bool(last_success and not latest["collector"].get("error") and time.monotonic() - runtime.last_published <= max(10, 3 * settings.interval) and runtime.collect_task and not runtime.collect_task.done())
         ai_status = await ai_status_payload()
-        return JSONResponse({"status": "ok" if collecting else "starting" if latest is None else "degraded", "collector_ready": collecting, "interval_seconds": settings.interval, "process_id": os.getpid(), "ai": ai_status, "ai_online": ai_status.get("online")}, status_code=200 if collecting else 503)
+        try:
+            from native_voice_daemon import NativeVoiceDaemon
+            voice_daemon_status = NativeVoiceDaemon.get_instance().get_status()
+        except Exception:
+            voice_daemon_status = {"mode": "HEADLESS_WEB_ONLY", "headless": True}
+        whatsapp_bridge = runtime.whatsapp.snapshot().get("bridge", {"status": "UNREACHABLE"})
+        return JSONResponse(
+            {
+                "status": "ok" if collecting else "starting" if latest is None else "degraded",
+                "collector_ready": collecting,
+                "interval_seconds": settings.interval,
+                "process_id": os.getpid(),
+                "ai": ai_status,
+                "ai_online": ai_status.get("online"),
+                "voice_mode": voice_daemon_status.get("mode", "HEADLESS_WEB_ONLY"),
+                "headless": voice_daemon_status.get("headless", False),
+                "whatsapp_bridge": whatsapp_bridge,
+            },
+            status_code=200 if collecting else 503,
+        )
 
     @application.get("/api/overview")
     @application.get("/api/snapshot")

@@ -15,13 +15,17 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import config
+
 LOGGER = logging.getLogger("moctar.google_workspace")
+
+_CREDS_DIR = config.APP_ROOT / "credentials"
 
 # Chemins standards de détection des credentials Google OAuth
 DEFAULT_CREDENTIALS_PATHS = [
     Path(os.getenv("GOOGLE_WORKSPACE_CREDENTIALS_PATH", "")) if os.getenv("GOOGLE_WORKSPACE_CREDENTIALS_PATH") else None,
-    Path("/opt/jarvis/credentials/credentials.json"),
-    Path("/opt/jarvis/credentials.json"),
+    _CREDS_DIR / "credentials.json",
+    config.APP_ROOT / "credentials.json",
     Path("./credentials/credentials.json"),
     Path("./credentials.json"),
     Path.home() / ".config" / "jarvis" / "credentials.json",
@@ -29,8 +33,8 @@ DEFAULT_CREDENTIALS_PATHS = [
 CREDENTIALS_PATHS = [p for p in DEFAULT_CREDENTIALS_PATHS if p is not None]
 
 DEFAULT_TOKEN_PATHS = [
-    Path("/opt/jarvis/credentials/token.json"),
-    Path("/opt/jarvis/token.json"),
+    _CREDS_DIR / "token.json",
+    config.APP_ROOT / "token.json",
     Path("./credentials/token.json"),
     Path("./token.json"),
     Path.home() / ".config" / "jarvis" / "token.json",
@@ -78,7 +82,7 @@ def _format_missing_credentials_reply(service_name: str = "Google Workspace") ->
     """Message courtois et guidé en l'absence de credentials.json."""
     return _ensure_moctar_ending(
         f"Le module {service_name} est prêt mais nécessite votre clé OAuth. "
-        "Déposez votre fichier credentials.json dans le dossier /opt/jarvis/credentials/credentials.json "
+        f"Déposez votre fichier credentials.json dans le dossier {_CREDS_DIR / 'credentials.json'} "
         "pour activer la synchronisation de vos e-mails et agendas"
     )
 
@@ -122,8 +126,8 @@ def get_unread_emails_summary(max_results: int = 5) -> Dict[str, Any]:
                     "success": False,
                     "configured": True,
                     "reply": _ensure_moctar_ending(
-                        "Une ré-authentification Google Workspace est requise pour Gmail. "
-                        "Veuillez renouveler token.json dans /opt/jarvis/credentials/"
+                        f"Une ré-authentification Google Workspace est requise pour Gmail. "
+                        f"Veuillez renouveler token.json dans {_CREDS_DIR}/"
                     ),
                     "emails": [],
                     "count": 0,
@@ -223,7 +227,7 @@ def get_today_agenda_summary() -> Dict[str, Any]:
                     "success": False,
                     "configured": True,
                     "reply": _ensure_moctar_ending(
-                        "Une ré-authentification est requise pour Google Calendar dans /opt/jarvis/credentials/"
+                        f"Une ré-authentification est requise pour Google Calendar dans {_CREDS_DIR}/"
                     ),
                     "events": [],
                     "count": 0,
@@ -340,7 +344,7 @@ def search_drive_documents(query: str, max_results: int = 5) -> Dict[str, Any]:
                     "success": False,
                     "configured": True,
                     "reply": _ensure_moctar_ending(
-                        "Une ré-authentification est requise pour Google Drive dans /opt/jarvis/credentials/"
+                        f"Une ré-authentification est requise pour Google Drive dans {_CREDS_DIR}/"
                     ),
                     "files": [],
                     "count": 0,

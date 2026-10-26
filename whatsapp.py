@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import signal
 import stat
@@ -34,6 +35,37 @@ LOGGER = logging.getLogger(__name__)
 
 AUDIO_MIME_TYPES = frozenset({"audio/ogg", "audio/opus", "application/ogg",
                               "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav"})
+
+
+async def check_whatsapp_bridge_health(
+    bridge_url: str | None = None,
+    timeout: float = 1.5,
+) -> dict[str, Any]:
+    """Vérifie de façon non-bloquante la disponibilité de la passerelle Baileys (port 3001 par défaut)."""
+    resolved_url = (bridge_url or os.getenv("WHATSAPP_BRIDGE_URL", "http://127.0.0.1:3001")).strip() or "http://127.0.0.1:3001"
+    parsed = urlsplit(resolved_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 3001)
+    started = time.perf_counter()
+    reachable = False
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+        reachable = True
+    except Exception:
+        reachable = False
+    latency_ms = round((time.perf_counter() - started) * 1000, 1)
+    return {
+        "reachable": reachable,
+        "status": "CONNECTED" if reachable else "UNREACHABLE",
+        "url": resolved_url,
+        "host": host,
+        "port": port,
+        "latency_ms": latency_ms if reachable else None,
+        "checked_at": utc_now(),
+    }
 
 
 def normalize_phone(value: Any) -> str:
@@ -271,6 +303,18 @@ class WhatsAppController:
                        "reason": "Vérification du moteur vocal en cours" if settings.voice_enabled
                        else "Module vocal désactivé par NOC_VOICE_ENABLED", "download_available": False}
         self._voice_python = sys.executable
+        self._bridge_health: dict[str, Any] = {
+            "reachable": False,
+            "status": "UNREACHABLE",
+            "url": getattr(settings, "whatsapp_bridge_url", "http://127.0.0.1:3001"),
+            "latency_ms": None,
+            "checked_at": None,
+            "restart_attempts_10m": 0,
+            "consecutive_failures": 0,
+        }
+        self._bridge_restart_timestamps: list[float] = []
+        self._next_restart_allowed_at: float = 0.0
+        self._consecutive_bridge_failures: int = 0
 
     @property
     def enabled(self) -> bool:
@@ -316,8 +360,60 @@ class WhatsAppController:
         LOGGER.info("Workers WhatsApp prêts : traitement texte indépendant de Whisper (voice_enabled=%s)",
                     self.settings.voice_enabled)
 
+    async def check_bridge_health(self) -> dict[str, Any]:
+        """Supervise la passerelle WhatsApp (port 3001) avec watchdog à backoff exponentiel (max 3/10 min)."""
+        bridge_url = getattr(self.settings, "whatsapp_bridge_url", "http://127.0.0.1:3001")
+        probe = await check_whatsapp_bridge_health(bridge_url)
+        now = time.monotonic()
+        self._bridge_restart_timestamps = [
+            ts for ts in self._bridge_restart_timestamps if now - ts <= 600.0
+        ]
+        restart_cmd = (
+            getattr(self.settings, "whatsapp_bridge_restart_cmd", "")
+            or os.getenv("WHATSAPP_BRIDGE_RESTART_CMD", "")
+        ).strip()
+
+        if probe["reachable"]:
+            self._consecutive_bridge_failures = 0
+            self._next_restart_allowed_at = 0.0
+            probe["status"] = "CONNECTED"
+        else:
+            self._consecutive_bridge_failures += 1
+            if restart_cmd and len(self._bridge_restart_timestamps) < 3 and now >= self._next_restart_allowed_at:
+                attempt_idx = len(self._bridge_restart_timestamps)
+                backoff_seconds = 10.0 * (3 ** attempt_idx)
+                self._bridge_restart_timestamps.append(now)
+                self._next_restart_allowed_at = now + backoff_seconds
+                probe["status"] = "RECOVERING"
+                try:
+                    cmd_args = shlex.split(restart_cmd)
+                    if cmd_args:
+                        LOGGER.warning(
+                            "Watchdog WhatsApp Bridge : port 3001 injoignable, tentative de relance %d/3 (prochain essai dans %.0fs)",
+                            attempt_idx + 1,
+                            backoff_seconds,
+                        )
+                        await run_process(cmd_args, timeout=10.0)
+                except Exception as exc:
+                    LOGGER.warning("Watchdog WhatsApp Bridge : échec de relance locale (%s)", exc)
+            elif restart_cmd and self._bridge_restart_timestamps and now < self._next_restart_allowed_at:
+                probe["status"] = "RECOVERING"
+            else:
+                probe["status"] = "UNREACHABLE"
+
+        probe["restart_attempts_10m"] = len(self._bridge_restart_timestamps)
+        probe["consecutive_failures"] = self._consecutive_bridge_failures
+        changed = probe.get("status") != self._bridge_health.get("status")
+        self._bridge_health = probe
+        if changed:
+            with contextlib.suppress(Exception):
+                await self._publish()
+        return dict(self._bridge_health)
+
     async def _readiness_loop(self) -> None:
         while True:
+            with contextlib.suppress(Exception):
+                await self.check_bridge_health()
             await self.refresh_voice_readiness()
             await asyncio.sleep(300 if self.enabled else 30)
 
@@ -409,7 +505,9 @@ class WhatsAppController:
                 "text_enabled": self.webhook_configured and self.worker is not None and not self.worker.done(),
                 "voice_enabled": self.enabled,
                 "busy": self.busy, "queued": self.queue.qsize() + self.conversation_queue.qsize(),
-                "last_command": command}
+                "last_command": command,
+                "bridge": dict(self._bridge_health),
+                "bridge_status": self._bridge_health.get("status", "UNREACHABLE")}
 
     async def accept(self, payload: dict[str, Any], *, uploaded_audio: Path | None = None) -> dict[str, Any]:
         if not self.webhook_configured:

@@ -229,10 +229,11 @@ def api_base_url(values=None) -> str:
     values = os.environ if values is None else values
     configured = values.get("NOC_API_BASE_URL", "").strip()
     if not configured:
+        app_root = Path(os.getenv("JARVIS_APP_ROOT", Path(__file__).resolve().parent.parent)).resolve()
         try:
             enabled = all(Path(values.get(name, default)).is_file() for name, default in (
-                ("NOC_SSL_KEYFILE", "/opt/jarvis/certs/server.key"),
-                ("NOC_SSL_CERTFILE", "/opt/jarvis/certs/server.crt")))
+                ("NOC_SSL_KEYFILE", (app_root / "certs" / "server.key").as_posix()),
+                ("NOC_SSL_CERTFILE", (app_root / "certs" / "server.crt").as_posix())))
         except OSError:
             enabled = False
         configured = ("https" if enabled else "http") + "://127.0.0.1:5050"

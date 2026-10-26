@@ -188,7 +188,7 @@ class VisionEngine:
             "/usr/share/opencv/haarcascades/",
             "/usr/local/share/opencv4/haarcascades/",
             "/usr/local/share/opencv/haarcascades/",
-            "/opt/jarvis/venv/lib/python3.14/site-packages/cv2/data/",
+            str(Path(os.getenv("JARVIS_APP_ROOT", Path(__file__).resolve().parent)).resolve() / "venv" / "lib" / "python3.14" / "site-packages" / "cv2" / "data"),
         ])
 
         for cdir in candidate_dirs:

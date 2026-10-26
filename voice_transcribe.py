@@ -23,8 +23,8 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-APP_DIR = Path("/opt/jarvis")
-APP_DIRS = (Path("/opt/jarvis"), Path("/opt/noc-dashboard"))
+APP_DIR = Path(os.getenv("JARVIS_APP_ROOT", Path(__file__).resolve().parent)).resolve()
+APP_DIRS = (APP_DIR, Path("/opt/noc-dashboard"))
 MODEL_NAMES = ("base", "tiny")
 
 

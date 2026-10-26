@@ -8,8 +8,10 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/opt/jarvis
-EnvironmentFile=/opt/jarvis/.env
-Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 DISPLAY=:0
+# Le tiret '-' autorise le demarrage meme si .env est absent
+EnvironmentFile=-/opt/jarvis/.env
+# JARVIS_HEADLESS=auto detecte automatiquement l'absence de X11 ou de carte son sans erreur fatale
+Environment="PYTHONUNBUFFERED=1" "PYTHONDONTWRITEBYTECODE=1" "JARVIS_HEADLESS=auto" "DISPLAY=:0"
 ExecStart=/opt/jarvis/venv/bin/python /opt/jarvis/main.py
 Restart=always
 RestartSec=5
@@ -17,11 +19,10 @@ TimeoutStopSec=10
 UMask=0027
 
 # Permissions et écriture pour la mémoire SQLite et les logs
-ReadWritePaths=/opt/jarvis/data /opt/jarvis/logs /opt/jarvis/notes /opt/jarvis/screenshots
+ReadWritePaths=-/opt/jarvis/data -/opt/jarvis/logs -/opt/jarvis/notes -/opt/jarvis/screenshots
 
 MemoryAccounting=true
 LimitNOFILE=4096
 
 [Install]
 WantedBy=multi-user.target
-
