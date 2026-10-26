@@ -620,12 +620,50 @@ def handle_instant_local_command(text: str, memory: Any = None, client_device: s
     return reply
 
 
+_COMPLEX_ACTION_KEYWORDS = {
+    "aide", "aider", "ouvre", "ouvrir", "lance", "lancer", "ferme", "fermer",
+    "finis", "finir", "termine", "terminer", "rapport", "serveur", "vps", "panne",
+    "erreur", "probleme", "probl?me", "crash", "bug", "malheureux", "malheureuse",
+    "triste", "degoute", "verifie", "verifier", "cherche", "chercher", "trouve",
+    "execute", "executer", "supprime", "supprimer", "cree", "creer", "fais", "faire",
+    "relance", "relancer", "analyse", "analyser", "pourquoi", "quand",
+    "navigateur", "chrome", "vscode", "terminal", "fichier", "code", "git", "commit", "push",
+    "meteo", "musique", "todo", "tache", "taches", "relais", "programme", "calendrier"
+}
+
+
+def _is_compound_or_actionable_request(cleaned: str, normalized: str) -> bool:
+    """D?tecte si une phrase contient une demande d'action, un probl?me ou une formulation compos?e.
+
+    ?vite que les r?ponses sociales instantan?es (salut, merci, je suis fatigu?) n'interceptent
+    des requ?tes complexes ou compos?es.
+    """
+    if not cleaned:
+        return False
+
+    norm_words = set(re.findall(r"\b[\w-]+\b", normalized))
+    if any(k in norm_words for k in _COMPLEX_ACTION_KEYWORDS):
+        return True
+
+    # D?tection de propositions multiples via ponctuation (, ; ? !)
+    segments = [s.strip() for s in re.split(r"[,;?!]", cleaned) if s.strip()]
+    if len(segments) > 1:
+        if any(len(s.split()) >= 2 for s in segments[1:]):
+            return True
+
+    if len(cleaned.split()) > 6:
+        return True
+
+    return False
+
+
 def _handle_instant_local_command_logic(text: str, memory: Any = None, client_device: str | None = None) -> str | None:
     cleaned = (text or "").strip()
     if not cleaned:
         return None
     normalized = _strip_accents_1to1(cleaned).lower()
     device_label = (client_device or "terminal client").strip()
+    is_compound = _is_compound_or_actionable_request(cleaned, normalized)
 
     # 0a0. Reprise et confirmation / annulation d'actions supervis?es avec TTL
     if re.search(r"\b(?:confirme|valide)\s+(?:l['?]action|la\s+derni[?e]re\s+action)\b", normalized):
@@ -739,33 +777,55 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
     if re.search(r"\b(?:qui\s+t['’]a\s+(?:cr[ée][ée]|con[çc]u|d[ée]velopp[ée]|programm[ée])|qui\s+est\s+ton\s+cr[ée]ateur|c['’]est\s+qui\s+ton\s+cr[ée]ateur)\b", normalized):
         return "J'ai été conçu, programmé et entraîné sur mesure par Moctar pour être son copilote d'ingénierie autonome et système d'intelligence opérationnelle."
 
-    # 0a7. Coucher, Sommeil et Bonne Nuit ("bonne nuit", "je vais dormir", "je vais me coucher", "je suis fatigué")
-    if re.search(r"\b(?:bonne\s+nuit|je\s+vais\s+(?:dormir|me\s+coucher|au\s+lit|pioncer)|je\s+suis\s+fatigu[ée]|on\s+(?:arr[êe]te|[ée]teint|coupe)\s+(?:pour\s+ce\s+soir|pour\s+aujourd['’]hui)|[aà]\s+demain)\b", normalized):
-        return "Bonne nuit Moctar ! Repose-toi bien, tu as fait une grosse session. Tous les systèmes sont sous surveillance et je garde tout au chaud pour demain !"
 
-    # 0a8. Pauses bienveillantes ("je fais une pause", "pause café", "je prends l'air", "je souffle un peu")
-    if re.search(r"\b(?:je\s+fais\s+une\s+pause|pause\s+caf[ée]|je\s+prends\s+(?:l['’]air|une\s+pause)|je\s+vais\s+prendre\s+l['’]air|je\s+souffle\s+un\s+peu)\b", normalized):
-        return "Très bonne idée Moctar, souffle un peu et prends ton temps. Je garde un œil sur la machine pendant ta pause !"
+    # 0a7. Coucher, Sommeil et Bonne Nuit ("bonne nuit", "je vais dormir", "je vais me coucher", "je suis fatigu?")
+    if not is_compound and re.search(r"\b(?:bonne\s+nuit|je\s+vais\s+(?:dormir|me\s+coucher|au\s+lit|pioncer)|je\s+suis\s+fatigu[?e]|on\s+(?:arr[?e]te|[?e]teint|coupe)\s+(?:pour\s+ce\s+soir|pour\s+aujourd['?]hui)|[a?]\s+demain)\b", normalized):
+        return "Bonne nuit Moctar ! Repose-toi bien, tu as fait une grosse session. Tous les syst?mes sont sous surveillance et je garde tout au chaud pour demain !"
 
-    # 0a9. Comment ça va & Humeur complice ("comment tu vas", "ça va", "tu as la forme", "la forme")
-    if re.search(r"\b(?:comment\s+(?:vas?[- ]tu|tu\s+vas)|(?:[cç]a\s+va|la\s+forme)(?:\s+moctar|\s+jarvis)?$)\b", normalized) or normalized in ("ca va", "ça va", "la forme", "comment tu vas", "comment vas tu", "tu vas bien"):
+    # 0a8. Pauses bienveillantes ("je fais une pause", "pause caf?", "je prends l'air", "je souffle un peu")
+    if not is_compound and re.search(r"\b(?:je\s+fais\s+une\s+pause|pause\s+caf[?e]|je\s+prends\s+(?:l['?]air|une\s+pause)|je\s+vais\s+prendre\s+l['?]air|je\s+souffle\s+un\s+peu)\b", normalized):
+        return "Tr?s bonne id?e Moctar, souffle un peu et prends ton temps. Je garde un ?il sur la machine pendant ta pause !"
+
+    # 0a9. Comment ?a va & Humeur complice ("comment tu vas", "?a va", "tu as la forme", "la forme")
+    if not is_compound and (
+        re.search(r"\b(?:comment\s+(?:vas?[- ]tu|tu\s+vas)|(?:[c?]a\s+va|la\s+forme)(?:\s+moctar|\s+jarvis)?)\b", normalized)
+        or normalized.strip(" ?!,.") in ("ca va", "?a va", "la forme", "comment tu vas", "comment vas tu", "tu vas bien")
+    ):
+        has_issue = False
+        issue_detail = ""
+        try:
+            import psutil
+            cpu_val = psutil.cpu_percent(interval=None)
+            ram_val = psutil.virtual_memory().percent
+            if cpu_val > 90 or ram_val > 92:
+                has_issue = True
+                issue_detail = f"forte charge d?tect?e ({int(cpu_val)}% CPU, {int(ram_val)}% RAM)"
+        except Exception:
+            pass
+
+        if has_issue:
+            return f"Je reste op?rationnel Moctar, mais attention : {issue_detail} sur le serveur Dell. Souhaites-tu que j'optimise les ressources ?"
+
         if client_device and client_device != "Serveur local Dell M4800":
-            return f"Tout tourne comme une horloge Moctar ! Le serveur hôte Dell Precision M4800 est nominal, synchronisé avec votre {device_label}. Et toi, la forme ? Prêt à avancer ?"
-        return "Tout tourne comme une horloge Moctar ! Les systèmes sont nominaux sur le serveur Dell Precision M4800. Et toi, la forme ? Prêt à avancer ?"
+            return f"Tout tourne comme une horloge Moctar ! Le serveur h?te Dell Precision M4800 est nominal, synchronis? avec votre {device_label}. Et toi, la forme ? Pr?t ? avancer ?"
+        return "Tout tourne comme une horloge Moctar ! Les syst?mes sont nominaux sur le serveur Dell Precision M4800. Et toi, la forme ? Pr?t ? avancer ?"
 
-    # 0a10. Remerciements et Fraternité ("merci", "merci mon ami", "merci frérot", "super merci", "bien joué")
-    if re.search(r"\b(?:merci\s+(?:mon\s+ami|fr[ée]rot|infiniment|beaucoup|moctar|jarvis)|t['’]es\s+le\s+meilleur|super\s+boulot)\b", normalized) or normalized in ("merci", "super merci", "merci beaucoup", "merci bien", "bien joué", "merci mon ami", "merci frérot"):
-        return "Avec grand plaisir Moctar ! On forme une sacrée équipe. Toujours là pour toi !"
+    # 0a10. Remerciements et Fraternit? ("merci", "merci mon ami", "merci fr?rot", "super merci", "bien jou?")
+    if not is_compound and (
+        re.search(r"\b(?:merci\s+(?:mon\s+ami|fr[?e]rot|infiniment|beaucoup|moctar|jarvis)|t['?]es\s+le\s+meilleur|super\s+boulot)\b", normalized)
+        or normalized.strip(" ?!,.") in ("merci", "super merci", "merci beaucoup", "merci bien", "bien jou?", "merci mon ami", "merci fr?rot")
+    ):
+        return "Avec grand plaisir Moctar ! On forme une sacr?e ?quipe. Toujours l? pour toi !"
 
-    # 0b. Présence complice ("t'es là", "tu es là")
-    if re.search(r"\b(?:t['’]es\s+l[aà]|tu\s+es\s+l[aà]|es[- ]tu\s+l[aà])\b", normalized):
+    # 0b. Pr?sence complice ("t'es l?", "tu es l?")
+    if not is_compound and re.search(r"\b(?:t['?]es\s+l[a?]|tu\s+es\s+l[a?]|es[- ]tu\s+l[a?])\b", normalized):
         hour = datetime.now().hour
         if hour >= 23 or hour < 6:
-            return "Oui Moctar, je suis là ! Encore au travail ? Je reste avec toi, dis-moi ce qu'on boucle."
-        return "Oui Moctar, je suis là !"
+            return "Oui Moctar, je suis l? ! Encore au travail ? Je reste avec toi, dis-moi ce qu'on boucle."
+        return "Oui Moctar, je suis l? !"
 
-    # 0c. Salutations chaleureuses selon le moment de la journée & continuité épisodique
-    if normalized in ("bonjour", "salut", "bonjour moctar", "salut moctar", "moc", "yo moc", "yo mokti", "coucou", "hello", "bonjour mon ami", "salut mon ami"):
+    # 0c. Salutations chaleureuses selon le moment de la journ?e & continuit? ?pisodique
+    if not is_compound and normalized in ("bonjour", "salut", "bonjour moctar", "salut moctar", "moc", "yo moc", "yo mokti", "coucou", "hello", "bonjour mon ami", "salut mon ami"):
         hour = datetime.now().hour
         if memory and hasattr(memory, "build_episodic_greeting"):
             try:

@@ -23,53 +23,49 @@
 
 #neurovision-dialog {
   position: fixed !important;
-  inset: 20px auto auto 50% !important;
-  transform: translateX(-50%) !important;
-  width: min(1520px, calc(100vw - 32px)) !important;
-  max-width: calc(100vw - 32px) !important;
-  height: auto !important;
+  inset: 0 !important;
+  margin: auto !important;
+  width: min(1500px, calc(100vw - 36px)) !important;
+  max-width: calc(100vw - 36px) !important;
+  height: min(860px, calc(100vh - 40px)) !important;
   max-height: calc(100vh - 40px) !important;
-  overflow: hidden !important; /* Aucun ascenseur / deux pages */
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
   padding: 0 !important;
-  margin: 0 !important;
-  border: 1px solid var(--nv-border-active) !important;
+  border: 1.5px solid var(--nv-border-active) !important;
   border-radius: 18px !important;
   background: radial-gradient(ellipse at 50% 0%, rgba(0, 243, 255, 0.16) 0%, rgba(5, 10, 20, 0.98) 75%) !important;
-  box-shadow: 0 35px 120px rgba(0, 0, 0, 0.95), 0 0 55px rgba(0, 243, 255, 0.22) !important;
+  box-shadow: 0 35px 120px rgba(0, 0, 0, 0.95), 0 0 55px rgba(0, 243, 255, 0.25) !important;
   backdrop-filter: blur(28px) !important;
   -webkit-backdrop-filter: blur(28px) !important;
   color: #d8e5f5 !important;
   font-family: var(--sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif) !important;
-  z-index: 1000 !important;
-  transform-origin: top center !important;
+  z-index: 10000 !important;
+  transform: none !important;
 }
 
-/* Animation d'ouverture fluide en Rideau (Curtain Drop) */
+/* Animation d'ouverture fluide, propre et sans rognage */
 #neurovision-dialog[open] {
-  animation: nvCurtainDrop 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  display: flex !important;
+  flex-direction: column !important;
+  animation: nvFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
 }
 
-@keyframes nvCurtainDrop {
+@keyframes nvFadeIn {
   0% {
     opacity: 0;
-    transform: translateX(-50%) translateY(-100%) scaleY(0.4);
-    clip-path: inset(0 0 100% 0);
-  }
-  60% {
-    opacity: 1;
-    filter: brightness(1.2);
+    transform: scale(0.97);
   }
   100% {
     opacity: 1;
-    transform: translateX(-50%) translateY(0) scaleY(1);
-    clip-path: inset(0 0 0% 0);
+    transform: scale(1);
   }
 }
 
 #neurovision-dialog::backdrop {
-  background: rgba(2, 6, 14, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(2, 6, 14, 0.85) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
 }
 
 /* En-tête HUD Sobre & Futuriste */
@@ -654,45 +650,12 @@
   to { transform: rotate(360deg); }
 }
 
-#moctar-global-voice-toast {
+#moctar-global-voice-toast,
+#moctar-global-voice-toast[data-vstate] {
   display: none !important;
-  position: fixed;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 99999;
-  display: none;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 18px;
-  border-radius: 999px;
-  background: rgba(6, 16, 30, 0.94);
-  border: 1.5px solid #00f3ff;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.65), 0 0 22px rgba(0, 243, 255, 0.35);
-  color: #e9f7ff;
-  font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
-  font-size: 11.5px;
-  font-weight: 600;
-  max-width: min(820px, 92vw);
-  pointer-events: none;
-  backdrop-filter: blur(12px);
-}
-
-#moctar-global-voice-toast[data-vstate="listening"] {
-  display: inline-flex;
-  border-color: #00ff88;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.65), 0 0 24px rgba(0, 255, 136, 0.45);
-}
-
-#moctar-global-voice-toast[data-vstate="processing"] {
-  display: inline-flex;
-  border-color: #ffb700;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.65), 0 0 26px rgba(255, 183, 0, 0.5);
-}
-
-#moctar-global-voice-toast[data-vstate="speaking"] {
-  display: inline-flex;
-  border-color: #00f3ff;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 
@@ -704,27 +667,28 @@
   display: inline-flex !important;
   align-items: center;
   gap: 10px;
-  padding: 9px 18px;
+  padding: 8px 18px;
   border-radius: 999px;
   background: rgba(6, 16, 30, 0.94);
-  border: 1.5px solid rgba(94, 217, 236, 0.28);
+  border: 1.5px solid rgba(94, 217, 236, 0.35);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   color: #91a5c1;
   font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
   font-size: 11.5px;
   font-weight: 600;
   line-height: 1.35;
-  max-width: min(620px, calc(100% - 150px));
+  max-width: min(650px, calc(100% - 140px));
   min-width: 0;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  transition: border-color 0.22s ease, box-shadow 0.22s ease, color 0.22s ease;
+  transition: border-color 0.22s ease, box-shadow 0.22s ease, color 0.22s ease, background 0.22s ease;
 }
 
 #home-voice-status.moctar-noc-voice-pill[data-vstate="listening"] {
-  border-color: #00ff88;
-  color: #e9f7ff;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.65), 0 0 24px rgba(0, 255, 136, 0.45);
+  border-color: #00ff88 !important;
+  color: #ffffff !important;
+  background: rgba(4, 26, 18, 0.94) !important;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.65), 0 0 24px rgba(0, 255, 136, 0.55), inset 0 0 12px rgba(0, 255, 136, 0.2) !important;
 }
 
 #home-voice-status.moctar-noc-voice-pill[data-vstate="processing"] {

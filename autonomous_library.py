@@ -249,16 +249,23 @@ def execute_autonomous_task(
         w_text = f"{w_rep.get('description', 'ciel clair')}, {round(w_rep.get('temperature', 30))}°C à Niamey"
         now = datetime.now()
         date_str = now.strftime("%H:%M")
+        cpu = None
+        ram = None
         try:
             import psutil
             cpu = int(psutil.cpu_percent(interval=None))
             ram = int(psutil.virtual_memory().percent)
         except Exception:
-            cpu, ram = 12, 45
+            pass
         return {
             "handled": True,
-            "reply": f"Bonjour Moctar. Il est {date_str}. Météo : {w_text}. Serveur Dell stable à {cpu}% CPU et {ram}% RAM. Tous les paramètres sont nominaux.",
-            "tools_used": [{"tool": "get_system_telemetry", "arguments": {}, "success": True}],
+            "reply": (
+                f"Bonjour Moctar. Il est {date_str}. M?t?o : {w_text}. "
+                + (f"Serveur Dell stable ? {cpu}% CPU et {ram}% RAM. Tous les param?tres sont nominaux."
+                   if (cpu is not None and ram is not None)
+                   else "M?triques CPU/RAM [INDISPONIBLES / NON V?RIFI?ES]. Vigilance requise sur les sondes syst?me.")
+            ),
+            "tools_used": [{"tool": "get_system_telemetry", "arguments": {}, "success": (cpu is not None and ram is not None)}],
             "task_category": "telemetry",
         }
 
@@ -266,14 +273,16 @@ def execute_autonomous_task(
     if any(k in norm for k in ["optimise le systeme", "optimise le pc", "libere les ressources", "libere la ram", "purge la memoire", "nettoie la ram"]):
         import gc
         gc.collect()
+        ram = None
         try:
             import psutil
             ram = int(psutil.virtual_memory().percent)
         except Exception:
-            ram = 42
+            pass
+        ram_str = f"m?moire vive stabilis?e ? {ram}%" if ram is not None else "m?moire vive purg?e (mesure psutil indisponible)"
         return {
             "handled": True,
-            "reply": f"Optimisation terminée Moctar. Caches purgés et mémoire vive stabilisée à {ram}%.",
+            "reply": f"Optimisation termin?e Moctar. Caches purg?s et {ram_str}.",
             "tools_used": [{"tool": "optimize_system", "arguments": {}, "success": True}],
             "task_category": "system_tools",
         }

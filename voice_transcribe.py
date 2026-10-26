@@ -210,10 +210,12 @@ def read_wav_pcm(path: str | os.PathLike[str]) -> np.ndarray | None:
 
 
 HALLUCINATION_SUBSTRINGS = (
-    "sous-titres",
-    "sous titres",
-    "sous-titrage",
-    "sous titrage",
+    "sous-titres réalisés par",
+    "sous-titres par",
+    "sous-titrage réalisé",
+    "sous-titrage st",
+    "sous-titrage :",
+    "sous-titres :",
     "radio-canada",
     "société radio-canada",
     "societe radio-canada",
@@ -405,15 +407,25 @@ def filter_whisper_hallucinations(text: str, *, allow_short_confirmations: bool 
     lowered = cleaned.lower().strip(" .,!?:;\"'()-[]{}…")
     if not lowered or lowered in SINGLE_TOKEN_NOISE_PHRASES:
         return ""
-    if lowered in HALLUCINATION_EXACT_PHRASES:
-        if allow_short_confirmations and lowered in SHORT_CONFIRMATION_PHRASES:
-            return cleaned
-        return ""
-    for pattern in HALLUCINATION_SUBSTRINGS:
-        if pattern in lowered:
+
+    # Préservation impérative des demandes réelles contenant le nom de l'assistant ou un verbe d'action
+    USER_INTENT_EXCEPTION_PATTERN = re.compile(
+        r"\b(?:jarvis|moctar|mets|mettre|ajoute|ajouter|active|activer|g[ée]n[ée]re|genere|fais|faire|traduis|traduire|peux[- ]tu|aide|affiche|montre)\b",
+        re.IGNORECASE,
+    )
+    has_user_intent = bool(USER_INTENT_EXCEPTION_PATTERN.search(cleaned))
+
+    if not has_user_intent:
+        if lowered in HALLUCINATION_EXACT_PHRASES:
+            if allow_short_confirmations and lowered in SHORT_CONFIRMATION_PHRASES:
+                return cleaned
             return ""
-    if re.search(r"\b(?:is\s+that\s+you|thank\s+you|thanks|how\s+are\s+you|what\s+is|you\s+there|are\s+you|can\s+you|hello\s+world|goodbye)\b", lowered):
-        return ""
+        for pattern in HALLUCINATION_SUBSTRINGS:
+            if pattern in lowered:
+                return ""
+        if re.search(r"\b(?:is\s+that\s+you|thank\s+you|thanks|how\s+are\s+you|what\s+is|you\s+there|are\s+you|can\s+you|hello\s+world|goodbye)\b", lowered):
+            return ""
+
     # Rejeter uniquement les répétitions dégénérées d'un seul mot bruité ou symbole
     tokens = [tok for tok in re.split(r"\W+", lowered) if tok]
     if not tokens:

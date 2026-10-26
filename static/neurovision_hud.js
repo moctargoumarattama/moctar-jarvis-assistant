@@ -1094,11 +1094,44 @@
 
   const nvDialogEl = document.getElementById('neurovision-dialog');
   if (nvDialogEl) {
+    // Fermeture propre au clic sur le fond flouté (backdrop)
+    nvDialogEl.addEventListener('click', (e) => {
+      const rect = nvDialogEl.getBoundingClientRect();
+      const inDialog = (
+        rect.top <= e.clientY && e.clientY <= rect.bottom &&
+        rect.left <= e.clientX && e.clientX <= rect.right
+      );
+      if (!inDialog) {
+        closeNeuroVisionDialog();
+      }
+    });
+
     nvDialogEl.addEventListener('close', () => {
       stopClientCamera();
       if (pollInterval) {
         clearInterval(pollInterval);
         pollInterval = null;
+      }
+    });
+  }
+
+  // Liaison universelle du bouton NEUROVISION (NOC et HUD)
+  const navBtnNoc = document.getElementById('neurovision-nav-btn');
+  if (navBtnNoc) {
+    navBtnNoc.addEventListener('click', (e) => {
+      e.preventDefault();
+      const d = document.getElementById('neurovision-dialog');
+      if (d) {
+        if (typeof d.showModal === 'function') {
+          if (!d.open) d.showModal();
+        } else {
+          d.setAttribute('open', '');
+        }
+        setTimeout(resizeCanvases, 60);
+        init3DDigitalTwin();
+        initWaveOscilloscope();
+        startClientCamera();
+        if (!pollInterval) pollInterval = setInterval(pollMetrics, 1000);
       }
     });
   }

@@ -1396,12 +1396,13 @@ def execute_voice_semantic_turn(
     if llm_res and llm_res.get("tool_calls"):
         tool_calls = llm_res["tool_calls"]
         tools_used: list[dict[str, Any]] = []
+        tool_execution_details: list[dict[str, Any]] = []
         action_name: str | None = None
         action_url: str | None = None
         action_title: str | None = None
         tool_replies: list[str] = []
 
-        for call in tool_calls:
+        for call_idx, call in enumerate(tool_calls):
             func_name = call.get("name") or call.get("function", {}).get("name")
             raw_args = call.get("arguments") or call.get("function", {}).get("arguments") or {}
             if isinstance(raw_args, str):
@@ -1447,10 +1448,26 @@ def execute_voice_semantic_turn(
                 except Exception:
                     pass
 
+            call_id = call.get("id") or f"call_{func_name}_{call_idx}"
+            is_blocked = sec_state in ("blocked", "pending_confirmation")
+            has_error = bool(tool_res.get("error") or tool_res.get("status") in ("failed", "blocked", "error") or not tool_res.get("success", False))
+            tool_ok = bool(tool_res.get("success", False)) and not is_blocked and not has_error
+            tool_msg = tool_res.get("message") or ("Action effectu?e avec succ?s." if tool_ok else "?chec ou blocage de l'action.")
+
+            tool_execution_details.append({
+                "tool_call_id": call_id,
+                "name": func_name,
+                "arguments": args,
+                "success": tool_ok,
+                "status": "blocked" if sec_state == "blocked" else ("pending_confirmation" if sec_state == "pending_confirmation" else ("success" if tool_ok else "failed")),
+                "message": tool_msg,
+                "result": tool_res.get("data") if tool_res.get("data") is not None else tool_msg,
+            })
+
             tools_used.append({
                 "tool": func_name,
                 "arguments": args,
-                "success": bool(tool_res.get("success", False)),
+                "success": tool_ok,
                 "security_status": sec_state,
                 "requires_confirmation": bool(tool_res.get("requires_confirmation", False)),
                 "duration_ms": t_diff,
@@ -1576,15 +1593,21 @@ def execute_voice_semantic_turn(
                     "content": llm_res.get("content") or "",
                     "tool_calls": tool_calls,
                 })
-                for call in tool_calls:
-                    f_name = call.get("name") or call.get("function", {}).get("name")
-                    c_id = call.get("id") or f"call_{f_name}"
-                    matching_reply = next((r for r in tool_replies if r), "Action exécutée avec succès.")
+                for item in tool_execution_details:
+                    f_name = item["name"]
+                    c_id = item["tool_call_id"]
+                    t_ok = item["success"]
+                    t_status = item["status"]
+                    t_msg = item["message"]
                     synthesis_messages.append({
                         "role": "tool",
                         "name": f_name,
                         "tool_call_id": c_id,
-                        "content": json.dumps({"status": "success", "result": matching_reply}, ensure_ascii=False),
+                        "content": json.dumps({
+                            "status": t_status,
+                            "ok": t_ok,
+                            "result": t_msg,
+                        }, ensure_ascii=False),
                     })
                 all_tools_ok = all(t.get("success", False) for t in tools_used)
                 sourcing_rule = (

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b0f19">
   <meta name="description" content="Supervision en temps réel du serveur central, des applications et des VPS distants.">
   <title>Tour de contrôle · NOC</title>
-  <link rel="stylesheet" href="/static/neurovision_hud.css?v=6.5">
+  <link rel="stylesheet" href="/static/neurovision_hud.css?v=7.0">
   <style>
     :root{color-scheme:dark;--bg:#0b0f19;--panel:#111722;--panel-soft:#141c29;--line:#253043;--text:#e5edf8;--muted:#8694aa;--cyan:#5ed9ec;--green:#51dcaa;--amber:#f3bd65;--red:#ff738a;--mono:"Cascadia Code",Consolas,"Liberation Mono",monospace;--sans:Inter,"Segoe UI",Arial,sans-serif}
     *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:32px}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;-webkit-font-smoothing:antialiased}button,input{font:inherit}button,a,input{ -webkit-tap-highlight-color:transparent}button{cursor:pointer}a{color:inherit;text-decoration:none}button:disabled{cursor:not-allowed;opacity:.4}button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}svg{display:block}button svg{pointer-events:none}h1,h2,h3,p{margin:0}button{color:inherit}::selection{background:#236374;color:white}[hidden]{display:none!important}.icon{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.muted{color:var(--muted)}.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}.eyebrow{text-transform:uppercase;letter-spacing:.13em;font-size:10px;font-weight:700;color:var(--muted)}
@@ -710,7 +710,7 @@
       </button>
       <div class="browser-voice-controls home-voice-controls">
         <button type="button" class="browser-voice-toggle" id="home-voice-toggle" aria-pressed="false">Activer le micro</button>
-        <span id="home-voice-status" class="browser-voice-status moctar-noc-voice-pill" data-vstate="off" role="status" aria-live="polite"><span id="moctar-gvt-badge">??? MICRO</span><span id="moctar-gvt-text">Mains libres sur cet appareil</span></span>
+        <span id="home-voice-status" class="browser-voice-status moctar-noc-voice-pill" data-vstate="off" role="status" aria-live="polite"><span id="moctar-gvt-badge">🎙️ MICRO</span><span id="moctar-gvt-text">Mains libres sur cet appareil</span></span>
       </div>
       <form class="cosmos-ask" id="home-ask-form" autocomplete="off"><span class="ask-prompt" aria-hidden="true">›</span><input id="home-ask-input" type="text" maxlength="2000" placeholder="Demandez à MOCTAR : état du système, relance un service, programme un message…" aria-label="Question pour MOCTAR"><button type="submit" class="ask-send" aria-label="Envoyer à MOCTAR"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z"/></svg></button></form>
       <div class="cosmos-foot"><span class="footer-status" id="footer-status"><span class="led"></span><span id="collector-label">Collecteur en attente</span></span><span>Processus <span class="mono" id="process-memory">—</span></span></div>
@@ -2422,32 +2422,32 @@
         if (homeStatusNode) {
           const gvtBadge = $('moctar-gvt-badge');
           const gvtText = $('moctar-gvt-text');
-          const suffix = speechPlaybackBlocked ? ' (Son bloqu?)' : '';
+          const suffix = speechPlaybackBlocked ? ' (Son bloqué)' : '';
           if (['error', 'unsupported'].includes(phase)) {
             homeStatusNode.setAttribute('data-vstate', 'error');
-            if (gvtBadge) gvtBadge.textContent = '?? MICRO';
+            if (gvtBadge) gvtBadge.textContent = '⚠️ MICRO';
             if (gvtText) gvtText.textContent = (detail.message || messages[phase]) + suffix;
           } else if (phase === 'processing') {
             homeStatusNode.setAttribute('data-vstate', 'processing');
             if (detail.transcript) {
-              if (gvtBadge) gvtBadge.textContent = '?? ANALYSE IA';
-              if (gvtText) gvtText.textContent = 'Entendu : ? ' + detail.transcript + ' ?';
+              if (gvtBadge) gvtBadge.textContent = '🧠 ANALYSE IA';
+              if (gvtText) gvtText.textContent = 'Entendu : « ' + detail.transcript + ' »';
             } else {
-              if (gvtBadge) gvtBadge.textContent = '? AUDIO RE?U';
-              if (gvtText) gvtText.textContent = 'Transcription & r?flexion en cours...';
+              if (gvtBadge) gvtBadge.textContent = '⏳ AUDIO REÇU';
+              if (gvtText) gvtText.textContent = 'Transcription & réflexion en cours...';
             }
           } else if (phase === 'speaking') {
             homeStatusNode.setAttribute('data-vstate', 'speaking');
-            if (gvtBadge) gvtBadge.textContent = '?? M.O.C.T.A.R';
+            if (gvtBadge) gvtBadge.textContent = '🔊 M.O.C.T.A.R';
             const rep = detail.reply || detail.message || messages.speaking;
-            if (gvtText) gvtText.textContent = rep.slice(0, 110) + (rep.length > 110 ? '?' : '');
+            if (gvtText) gvtText.textContent = rep.slice(0, 110) + (rep.length > 110 ? '…' : '');
           } else if (active || ['starting', 'wake', 'listening'].includes(phase)) {
             homeStatusNode.setAttribute('data-vstate', 'listening');
-            if (gvtBadge) gvtBadge.textContent = '??? ?COUTE';
-            if (gvtText) gvtText.textContent = 'Parlez, je vous ?coute...' + suffix;
+            if (gvtBadge) gvtBadge.textContent = '🎙️ ÉCOUTE';
+            if (gvtText) gvtText.textContent = 'Parlez, je vous écoute...' + suffix;
           } else {
             homeStatusNode.setAttribute('data-vstate', 'off');
-            if (gvtBadge) gvtBadge.textContent = '??? MICRO';
+            if (gvtBadge) gvtBadge.textContent = '🎙️ MICRO';
             if (gvtText) gvtText.textContent = (detail.message || messages[phase] || messages.off) + suffix;
           }
           homeStatusNode.dataset.tone = ['error', 'unsupported'].includes(phase) ? 'error' :
@@ -2936,6 +2936,6 @@
     })();
     // CONTRÔLEUR 3D HOLOGRAPHIQUE NEUROVISION
   </script>
-  <script src="/static/neurovision_hud.js?v=6.5"></script>
+  <script src="/static/neurovision_hud.js?v=7.0"></script>
 </body>
 </html>

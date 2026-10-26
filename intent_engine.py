@@ -515,18 +515,26 @@ def detect_intent(raw_text):
             "slots": {},
         }
 
-    if "relais" in text and any(token in text for token in ["allume", "active", "ouvre", "demarre"]):
+    # Extinction / D?sactivation prioritaire avec fronti?res strictes \b
+    if "relais" in text and (
+        re.search(r"\b(?:d[?e]sactive|d[?e]sactiver|[?e]teins|[?e]teindre|coupe|couper|arr[?e]te|arreter|ferme|fermer|off|stop|disable)\b", raw_text, re.IGNORECASE)
+        or any(token in text for token in ["eteins", "coupe", "desactive", "desactiver", "eteindre", "ferme"])
+    ):
         return {
-            "intent": "iot_relay_on",
+            "intent": "iot_relay_off",
             "target": "",
             "confidence": 95,
             "raw": raw_text,
             "slots": {"relay_id": extract_relay_id(text)},
         }
 
-    if "relais" in text and any(token in text for token in ["eteins", "coupe", "desactive", "ferme"]):
+    # Allumage / Activation avec fronti?res strictes \b (ne matche jamais 'd?sactive')
+    if "relais" in text and (
+        re.search(r"\b(?:active|activer|allume|allumer|ouvre|ouvrir|d[?e]marre|demarrer|on|enable)\b", raw_text, re.IGNORECASE)
+        or any(token in text for token in ["allume", "active", "activer", "allumer", "ouvre", "demarre"])
+    ):
         return {
-            "intent": "iot_relay_off",
+            "intent": "iot_relay_on",
             "target": "",
             "confidence": 95,
             "raw": raw_text,
@@ -541,8 +549,21 @@ def detect_intent(raw_text):
     ):
         return {"intent": "iot_status", "target": "", "confidence": 95, "raw": raw_text, "slots": {}}
 
-    if any(token in text for token in ["heure", "quelle heure", "donne l heure"]):
-        return {"intent": "time", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
+    # Intention 'time' avec exclusion stricte des faux positifs ("malheureux", "heureux", "heureusement", etc.)
+    EXCLUDED_TIME_SUBSTRINGS = (
+        "malheureux", "malheureuse", "heureux", "heureuse",
+        "heureusement", "malheureusement", "tout a l heure", "tout a l'heure",
+        "tout ? l'heure", "de bonne heure", "a la bonne heure", "aux heures"
+    )
+    is_time_excluded = any(sub in text or sub in raw_text.lower() for sub in EXCLUDED_TIME_SUBSTRINGS)
+
+    if not is_time_excluded:
+        if (
+            re.search(r"\b(?:quelle\s+heure\s+est[- ]il|quelle\s+heure\s+il\s+est|donne[- ](?:moi\s+)?l['?]?\s*heure|il\s+est\s+quelle\s+heure|c['?]?est\s+quoi\s+l['?]?\s*heure|quelle\s+heure)\b", raw_text, re.IGNORECASE)
+            or any(token in text for token in ["quelle heure", "donne l heure", "donne moi l heure", "il est quelle heure"])
+            or text.strip() in ("heure", "l heure", "l'heure")
+        ):
+            return {"intent": "time", "target": "", "confidence": 100, "raw": raw_text, "slots": {}}
 
     if any(
         token in text

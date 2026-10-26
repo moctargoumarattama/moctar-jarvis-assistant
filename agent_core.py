@@ -873,18 +873,105 @@ class AgentCore:
                 "content": json.dumps(obs, ensure_ascii=False),
             })
 
-        # Exécuter les éventuels appels restants
-        for remaining in pending_action.remaining_tool_calls:
+                # Ex?cuter les ?ventuels appels restants avec contr?le de s?curit? individuel obligatoire
+        for idx_rem, remaining in enumerate(pending_action.remaining_tool_calls):
             r_name = remaining["name"]
             r_args = remaining["arguments"]
             r_id = remaining["id"]
-            obs_r = execute_tool(r_name, r_args)
-            state.messages.append({
-                "role": "tool",
-                "name": r_name,
-                "tool_call_id": r_id,
-                "content": json.dumps(obs_r, ensure_ascii=False),
-            })
+
+            # 1. Validation pr?ventive des arguments
+            if self.security is not None and hasattr(self.security, "validate_arguments"):
+                is_valid, sec_err = self.security.validate_arguments(r_name, r_args)
+                if not is_valid:
+                    logger.warning("[AGENT SECURITY BLOCKED] Action restante '%s' refus?e : %s", r_name, sec_err)
+                    if hasattr(self.security, "audit_log"):
+                        self.security.audit_log(
+                            tool_name=r_name,
+                            arguments=r_args,
+                            risk_level=3,
+                            confirmed=False,
+                            status="blocked",
+                            details=f"Argument invalide: {sec_err}",
+                        )
+                    obs_content = json.dumps({"ok": False, "status": "blocked", "result": f"S?curit? : {sec_err}"})
+                    state.messages.append({"role": "tool", "name": r_name, "tool_call_id": r_id, "content": obs_content})
+                    continue
+
+            # 2. Contr?le des permissions de domaine
+            route_r = self.registry.get(r_name) if self.registry and hasattr(self.registry, "get") else None
+            domain_r = getattr(route_r, "domain", None) if route_r else None
+            if self.security is not None and hasattr(self.security, "is_domain_allowed") and domain_r:
+                if not self.security.is_domain_allowed(domain_r):
+                    logger.warning("[AGENT SECURITY BLOCKED] Domaine '%s' non autoris? pour '%s'", domain_r, r_name)
+                    if hasattr(self.security, "audit_log"):
+                        self.security.audit_log(
+                            tool_name=r_name,
+                            arguments=r_args,
+                            risk_level=3,
+                            confirmed=False,
+                            status="blocked",
+                            details=f"Domaine {domain_r} d?sactiv?",
+                        )
+                    obs_content = json.dumps({"ok": False, "status": "domain_denied", "result": f"Permission refus?e pour le domaine {domain_r}."})
+                    state.messages.append({"role": "tool", "name": r_name, "tool_call_id": r_id, "content": obs_content})
+                    continue
+
+            # 3. Contr?le individuel de niveau de risque & confirmation
+            needs_conf_r = False
+            risk_r = 1
+            if self.security is not None:
+                risk_r = getattr(self.security, "get_risk_level", lambda t, a: 1)(r_name, r_args)
+                if hasattr(self.security, "requires_confirmation"):
+                    try:
+                        needs_conf_r = self.security.requires_confirmation(r_name, r_args)
+                    except TypeError:
+                        needs_conf_r = self.security.requires_confirmation(r_name)
+
+            if needs_conf_r or risk_r >= 3:
+                # Cette action restante n'a pas ?t? explicitement confirm?e par l'utilisateur
+                logger.info("Confirmation requise pour l'action sensible restante : %s", r_name)
+                pending_next = PendingAgentAction(
+                    state=state,
+                    tool_call=remaining,
+                    remaining_tool_calls=pending_action.remaining_tool_calls[idx_rem + 1:],
+                    tool_name=r_name,
+                    arguments=r_args,
+                )
+                if hasattr(self.security, "audit_log"):
+                    self.security.audit_log(
+                        tool_name=r_name,
+                        arguments=r_args,
+                        risk_level=risk_r,
+                        confirmed=False,
+                        status="pending_confirmation",
+                        details="En attente de confirmation individuelle de l'action",
+                    )
+                try:
+                    prompt_msg = self.security.confirmation_prompt(r_name, r_args)
+                except (TypeError, AttributeError):
+                    prompt_msg = f"Confirmez-vous l'ex?cution de l'action '{r_name}' ?"
+                return AgentResult(
+                    response=prompt_msg,
+                    status="confirmation_required",
+                    pending_action=pending_next,
+                )
+
+            # Ex?cution de l'action autoris?e
+            if route_r is not None:
+                try:
+                    handler_res = route_r.handler({"intent": r_name, "target": r_args.get("target", ""), "slots": r_args})
+                    obs_content = json.dumps({"ok": True, "status": "completed", "result": handler_res})
+                except Exception as e:
+                    obs_content = json.dumps({"ok": False, "status": "failed", "result": str(e)})
+                state.messages.append({"role": "tool", "name": r_name, "tool_call_id": r_id, "content": obs_content})
+            else:
+                obs_r = execute_tool(r_name, r_args)
+                state.messages.append({
+                    "role": "tool",
+                    "name": r_name,
+                    "tool_call_id": r_id,
+                    "content": json.dumps(obs_r, ensure_ascii=False),
+                })
 
         # Relancer un tour LLM pour conclure la réponse
         try:

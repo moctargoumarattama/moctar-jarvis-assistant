@@ -70,27 +70,51 @@ class ProactiveCompanion:
         if not runtime:
             return None
 
-        # 1. Vérification des VPS
-        vps_list = getattr(runtime, "vps", [])
-        if isinstance(vps_list, list):
-            for vps in vps_list:
-                if not isinstance(vps, dict):
-                    continue
-                vps_name = vps.get("name") or vps.get("ip") or "serveur"
-                status = str(vps.get("status") or "").lower()
-                cpu_load = vps.get("cpu")
-                
-                is_alert = status in ("error", "critical", "down", "unreachable") or (isinstance(cpu_load, (int, float)) and cpu_load >= 95.0)
-                if is_alert:
-                    alert_hash = f"vps_{vps_name}_{status}"
-                    if alert_hash not in self._seen_alert_hashes:
-                        self._seen_alert_hashes.add(alert_hash)
-                        return {
-                            "category": "infra_alert",
-                            "message": f"Moctar, j'ai vu une alerte sur le VPS {vps_name}, tu veux que je regarde ?",
-                            "target": vps_name,
-                            "priority": "high",
-                        }
+        # 1. Vérification des VPS (support format dictionnaire ou liste)
+        vps_data_source = getattr(runtime, "vps", None)
+        vps_items = []
+        if isinstance(vps_data_source, dict):
+            if "servers" in vps_data_source and isinstance(vps_data_source["servers"], list):
+                vps_items = vps_data_source["servers"]
+            else:
+                for k, v in vps_data_source.items():
+                    if isinstance(v, dict):
+                        item = dict(v)
+                        if "name" not in item and "hostname" not in item:
+                            item["name"] = k
+                        vps_items.append(item)
+        elif isinstance(vps_data_source, list):
+            vps_items = vps_data_source
+
+        for vps in vps_items:
+            if not isinstance(vps, dict):
+                continue
+            vps_name = vps.get("name") or vps.get("hostname") or vps.get("host") or vps.get("ip") or "serveur"
+            status = str(vps.get("status") or "").lower()
+            severity = str(vps.get("severity") or "").lower()
+            cpu_load = vps.get("cpu_percent") if vps.get("cpu_percent") is not None else vps.get("cpu")
+            ram_load = vps.get("ram_percent") if vps.get("ram_percent") is not None else vps.get("ram")
+            alerts = vps.get("alerts") or []
+            incidents = vps.get("incidents") or []
+
+            is_alert = (
+                status in ("error", "critical", "down", "unreachable", "alert")
+                or severity in ("critical", "high", "alert")
+                or (isinstance(cpu_load, (int, float)) and cpu_load >= 95.0)
+                or (isinstance(ram_load, (int, float)) and ram_load >= 95.0)
+                or bool(alerts)
+                or bool(incidents)
+            )
+            if is_alert:
+                alert_hash = f"vps_{vps_name}_{status}_{severity}"
+                if alert_hash not in self._seen_alert_hashes:
+                    self._seen_alert_hashes.add(alert_hash)
+                    return {
+                        "category": "infra_alert",
+                        "message": f"Moctar, j'ai vu une alerte sur le VPS {vps_name}, tu veux que je regarde ?",
+                        "target": vps_name,
+                        "priority": "high",
+                    }
 
         # 2. Vérification des anomalies Sentinel / Cyberdéfense
         cyber = getattr(runtime, "cyber", None)
@@ -218,15 +242,16 @@ class ProactiveCompanion:
 
     def evaluate_proactive_event(self, runtime: Any = None) -> Optional[Dict[str, Any]]:
         """Évalue l'ensemble des déclencheurs et retourne une suggestion proactive si légitime."""
+        # 0. Vérification prioritaire du mode silence / DND et cooldown avant toute consommation
+        if self.is_in_cooldown() or (time.monotonic() < self._dnd_until):
+            return None
+
         # Priorité 0 : Initiative explicite enregistrée (ex: tâche d'arrière-plan terminée)
         if self._pending_suggestion:
             event = self.pop_pending_suggestion()
             self._last_trigger_time = time.monotonic()
             LOGGER.info("⚡ [PROACTIVE EVENT POPPED]: %s", event.get("message"))
             return event
-
-        if self.is_in_cooldown():
-            return None
 
         # Priorité 1 : Alerte infrastructure / VPS
         infra_event = self.check_infrastructure_alert(runtime)
