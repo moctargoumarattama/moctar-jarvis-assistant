@@ -102,10 +102,10 @@
     trackCanvas.height = 120;
     const trackCtx = trackCanvas.getContext('2d', { willReadFrequently: true });
 
-    // Canvas secondaire pour snapshot JPEG envoyé à Gemini Vision (320x240)
+    // Canvas secondaire pour snapshot JPEG ultra-léger envoyé à Gemini Vision (240x180, ~6 Ko)
     const snapCanvas = document.createElement('canvas');
-    snapCanvas.width = 320;
-    snapCanvas.height = 240;
+    snapCanvas.width = 240;
+    snapCanvas.height = 180;
     const snapCtx = snapCanvas.getContext('2d');
 
     function pushTelemetryToServer(includeSnapshot) {
@@ -115,8 +115,8 @@
       });
       if (includeSnapshot && clientVideo && clientVideo.readyState >= 2) {
         try {
-          snapCtx.drawImage(clientVideo, 0, 0, 320, 240);
-          payload.image_b64 = snapCanvas.toDataURL('image/jpeg', 0.68);
+          snapCtx.drawImage(clientVideo, 0, 0, 240, 180);
+          payload.image_b64 = snapCanvas.toDataURL('image/jpeg', 0.62);
         } catch (e) {}
       }
       fetch('/api/vision/telemetry', {
@@ -413,11 +413,11 @@
     // Premier envoi rapide à 450ms (avec snapshot JPEG pour que Gemini Vision voie Moctar immédiatement)
     setTimeout(() => pushTelemetryToServer(true), 450);
 
-    // Synchronisation périodique toutes les 1.4s avec le serveur Jarvis + snapshot JPEG
+    // Synchronisation périodique toutes les 900ms avec le serveur Jarvis + snapshot JPEG léger
     if (syncInterval) clearInterval(syncInterval);
     syncInterval = setInterval(() => {
       pushTelemetryToServer(true);
-    }, 1400);
+    }, 900);
   }
 
   // =========================================================================
@@ -1054,6 +1054,113 @@
   // Lancement initial des animations de rendu 3D
   init3DDigitalTwin();
   initWaveOscilloscope();
+
+  // =========================================================================
+  // 8. BANDEAU D'ÉTAT VOCAL & COGNITIF TEMPS RÉEL (DANS NEUROVISION & GLOBAL)
+  // =========================================================================
+  function initVoiceFeedbackUI() {
+    let nvBar = document.getElementById('nv-voice-live-bar');
+    const nvGrid = document.querySelector('#neurovision-dialog .nv-grid, #hud-neurovision-overlay .nv-grid');
+    if (!nvBar && nvGrid && nvGrid.parentNode) {
+      nvBar = document.createElement('div');
+      nvBar.id = 'nv-voice-live-bar';
+      nvBar.className = 'nv-voice-live-bar';
+      nvBar.setAttribute('data-vstate', 'idle');
+      nvBar.innerHTML = [
+        '<div class="nv-voice-live-left">',
+        '  <span class="nv-voice-badge-pill"><span class="nv-voice-spinner" id="nv-voice-spin"></span><span id="nv-voice-badge-label">● CANAL VOCAL ACTIF</span></span>',
+        '  <span class="nv-voice-live-text" id="nv-voice-live-msg">Dites « Analyse mon visage » ou posez votre question à M.O.C.T.A.R...</span>',
+        '</div>'
+      ].join('');
+      nvGrid.parentNode.insertBefore(nvBar, nvGrid);
+    }
+
+    let globalToast = document.getElementById('moctar-global-voice-toast');
+    if (!globalToast && document.body) {
+      globalToast = document.createElement('div');
+      globalToast.id = 'moctar-global-voice-toast';
+      globalToast.setAttribute('data-vstate', 'idle');
+      globalToast.innerHTML = '<span id="moctar-gvt-badge">🎙️</span><span id="moctar-gvt-text"></span>';
+      document.body.appendChild(globalToast);
+    }
+
+    let lastHeardAck = '';
+    let hideToastTimer = null;
+
+    window.addEventListener('moctar:voice-state', (ev) => {
+      const d = (ev && ev.detail) || {};
+      const st = d.state || 'idle';
+      const badgeLbl = document.getElementById('nv-voice-badge-label');
+      const liveMsg = document.getElementById('nv-voice-live-msg');
+      const gvtBadge = document.getElementById('moctar-gvt-badge');
+      const gvtText = document.getElementById('moctar-gvt-text');
+
+      if (hideToastTimer) {
+        clearTimeout(hideToastTimer);
+        hideToastTimer = null;
+      }
+
+      if (st === 'listening' && d.isSpeaking) {
+        if (nvBar) nvBar.setAttribute('data-vstate', 'listening');
+        if (badgeLbl) badgeLbl.textContent = '🎙️ ÉCOUTE EN DIRECT';
+        if (liveMsg) liveMsg.textContent = 'Vous parlez — M.O.C.T.A.R vous écoute attentivement...';
+        if (globalToast) {
+          globalToast.setAttribute('data-vstate', 'listening');
+          if (gvtBadge) gvtBadge.textContent = '🎙️ ÉCOUTE';
+          if (gvtText) gvtText.textContent = 'Parlez, je vous écoute...';
+        }
+      } else if (st === 'processing') {
+        if (nvBar) nvBar.setAttribute('data-vstate', 'processing');
+        if (d.transcript) {
+          if (d.transcript !== lastHeardAck) {
+            lastHeardAck = d.transcript;
+            playSciFiTone(660, 'sine', 0.06);
+            setTimeout(() => playSciFiTone(990, 'sine', 0.07), 65);
+          }
+          if (badgeLbl) badgeLbl.textContent = '🧠 RÉFLEXION & ANALYSE IA';
+          if (liveMsg) liveMsg.textContent = '✅ Entendu : « ' + d.transcript + ' » — Analyse en cours...';
+          if (globalToast) {
+            globalToast.setAttribute('data-vstate', 'processing');
+            if (gvtBadge) gvtBadge.textContent = '🧠 ANALYSE IA';
+            if (gvtText) gvtText.textContent = 'Entendu : « ' + d.transcript + ' »';
+          }
+        } else {
+          lastHeardAck = '';
+          if (badgeLbl) badgeLbl.textContent = '⏳ TRANSCRIPTION AUDIO';
+          if (liveMsg) liveMsg.textContent = 'Réception audio terminée — Transcription et analyse en cours...';
+          if (globalToast) {
+            globalToast.setAttribute('data-vstate', 'processing');
+            if (gvtBadge) gvtBadge.textContent = '⏳ AUDIO REÇU';
+            if (gvtText) gvtText.textContent = 'Transcription & réflexion en cours...';
+          }
+        }
+      } else if (st === 'speaking') {
+        if (nvBar) nvBar.setAttribute('data-vstate', 'speaking');
+        if (badgeLbl) badgeLbl.textContent = '🔊 RÉPONSE M.O.C.T.A.R';
+        const rep = d.reply || d.message || '';
+        const prefix = d.transcript ? ('« ' + d.transcript + ' » ➔ ') : '';
+        if (liveMsg) liveMsg.textContent = prefix + rep;
+        if (globalToast) {
+          globalToast.setAttribute('data-vstate', 'speaking');
+          if (gvtBadge) gvtBadge.textContent = '🔊 M.O.C.T.A.R';
+          if (gvtText) gvtText.textContent = rep.slice(0, 110) + (rep.length > 110 ? '…' : '');
+          hideToastTimer = setTimeout(() => {
+            if (globalToast) globalToast.setAttribute('data-vstate', 'idle');
+          }, 5500);
+        }
+      } else {
+        if (nvBar && nvBar.getAttribute('data-vstate') !== 'speaking') {
+          nvBar.setAttribute('data-vstate', 'idle');
+          if (badgeLbl) badgeLbl.textContent = '● CANAL VOCAL ACTIF';
+        }
+        if (globalToast) {
+          globalToast.setAttribute('data-vstate', 'idle');
+        }
+      }
+    });
+  }
+
+  initVoiceFeedbackUI();
 
   // Export global pour interaction
   window.NeuroVision = {

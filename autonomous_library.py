@@ -899,7 +899,15 @@ def execute_autonomous_task(
         return {"handled": True, "reply": "Niveau audio ajusté, Moctar.", "tools_used": tools_used, "task_category": "system_tools"}
 
     # 8. TÉLÉMÉTRIE MATÉRIELLE, RÉSEAU & INFRASTRUCTURE
-    is_network_query = any(w in norm for w in ("reseau", "réseau", "connexion", "internet", "ping", "wifi", "debit", "débit", "debits"))
+    is_vision_or_face = bool(words.intersection({
+        "visage", "camera", "caméra", "webcam", "neurovision", "fatigue", "fatigué",
+        "clignement", "clignements", "baillement", "bâillement", "yeux", "tete", "tête",
+        "vois", "regarde", "scanner", "biometrie", "biométrie",
+    }))
+    if is_vision_or_face:
+        return {"handled": False, "tools_used": []}
+
+    is_network_query = len(words) <= 10 and any(w in norm for w in ("reseau", "réseau", "connexion", "internet", "ping", "wifi", "debit", "débit", "debits"))
     if is_network_query:
         import socket
         online = False
@@ -915,15 +923,18 @@ def execute_autonomous_task(
         return {"handled": True, "reply": rep, "tools_used": [{"tool": "check_network", "arguments": {}, "success": online}], "task_category": "network"}
 
     is_service_management = bool(words.intersection({"service", "services", "systemctl", "docker", "vps", "processus", "demon", "daemon", "restart", "redemarre", "redémarre"}))
+    is_explicit_hw_metric = bool(words.intersection({
+        "cpu", "ram", "disque", "stockage", "telemetrie", "télémétrie", "processeur",
+    }))
+    is_explicit_system_status = bool(re.search(
+        r"\b(?:[eé]tat\s+(?:du\s+)?(?:syst[eè]me|serveur|dell|pc)|statut\s+(?:du\s+)?(?:syst[eè]me|serveur|global)|bilan\s+(?:du\s+)?syst[eè]me|diagnostic\s+(?:du\s+)?syst[eè]me|comment\s+va\s+le\s+(?:syst[eè]me|serveur))\b",
+        norm,
+    )) or norm.strip(" ?!.") in ("statut", "status", "etat", "état", "infrastructure")
     is_telemetry = (
-        bool(words.intersection({
-            "cpu", "ram", "disque", "stockage", "telemetrie", "ressource", "ressources", "materiel",
-        }))
-        or (
-            bool(words.intersection({"etat", "statut", "status", "infrastructure", "systeme", "system"}))
-            and not is_service_management
-        )
-    ) and not is_service_management
+        len(words) <= 10
+        and (is_explicit_hw_metric or is_explicit_system_status)
+        and not is_service_management
+    )
     if is_telemetry:
         res = actions.execute_tool("get_system_telemetry", {})
         tools_used.append({"tool": "get_system_telemetry", "arguments": {}, "success": bool(res.get("success"))})

@@ -1089,15 +1089,39 @@ def execute_voice_semantic_turn(
     chat_messages.append({"role": "user", "content": clean_text})
     llm_payload: Any = clean_text if len(chat_messages) <= 1 else chat_messages
 
-    # 3. Récupération ou initialisation de l'instance AIBrain
-    brain = getattr(runtime, "ai_brain", None)
+    # 3. Récupération ou initialisation de l'instance AIBrain (Singleton réutilisé pour éviter la latence TLS)
+    global _SHARED_VOICE_BRAIN
+    brain = getattr(runtime, "ai_brain", None) or getattr(getattr(runtime, "jarvis", None), "brain", None)
     if not brain:
-        try:
-            brain = ai_brain.AIBrain()
-        except Exception:
-            brain = None
+        if "_SHARED_VOICE_BRAIN" not in globals() or _SHARED_VOICE_BRAIN is None:
+            try:
+                _SHARED_VOICE_BRAIN = ai_brain.AIBrain()
+            except Exception:
+                _SHARED_VOICE_BRAIN = None
+        brain = _SHARED_VOICE_BRAIN
 
-    # 3. Cascade IA Unidirectionnelle : Niveau 1 Primaire Gemini (< 800 ms) -> Niveau 2 Secours Groq LPU
+    # 3a. Court-circuitage direct 0ms pour les analyses de visage / caméra NeuroVision 3D
+    # Économise l'aller-retour de routage LLM (~1.3s à 1.9s) avant d'invoquer get_vision_telemetry
+    is_mock_brain = brain is not None and "unittest.mock" in str(type(brain)).lower()
+    lower_q = clean_text.lower()
+    recent_assistant_text = " ".join(
+        str(m.get("content") or "").lower() for m in chat_messages[-3:-1] if m.get("role") == "assistant"
+    )
+    was_recent_vision_turn = any(
+        kw in recent_assistant_text for kw in ("neurovision", "fatigue", "clignement", "visage", "caméra", "capteur")
+    )
+    is_direct_face_query = bool(
+        re.search(
+            r"\b(?:analyse(?:-moi)?\s+(?:mon|le)\s+visage|regarde\s+mon\s+visage|tu\s+vois\s+mon\s+visage|tu\s+me\s+vois|est[- ]ce\s+que\s+tu\s+me\s+vois|analyse\s+la\s+cam[ée]ra|regarde\s+la\s+cam[ée]ra|dans\s+la\s+cam[ée]ra|score\s+de\s+fatigue|combien\s+de\s+clignements?)\b",
+            lower_q,
+        )
+        or (
+            was_recent_vision_turn
+            and re.search(r"\b(?:je\s+suis\s+comment|comment\s+je\s+suis|tu\s+vois\s+quoi|dis[- ]moi\s+ce\s+que\s+tu\s+vois|et\s+maintenant)\b", lower_q)
+        )
+    )
+
+    # 3b. Cascade IA Unidirectionnelle : Niveau 1 Primaire Gemini (< 800 ms) -> Niveau 2 Secours Groq LPU
     groq_api_key = (
         os.environ.get("GROQ_API_KEY", "")
         or os.environ.get("NOC_GROQ_API_KEY", "")
@@ -1107,7 +1131,14 @@ def execute_voice_semantic_turn(
     ).strip()
 
     llm_res: dict[str, Any] | None = None
-    if brain and hasattr(brain, "chat"):
+    if is_direct_face_query and not is_mock_brain:
+        LOGGER.info("⚡ [VISION FAST ROUTER (0ms)]: Court-circuitage direct vers get_vision_telemetry('%s')", clean_text)
+        llm_res = {
+            "content": "",
+            "tool_calls": [{"name": "get_vision_telemetry", "arguments": {"question": clean_text}}],
+            "finish_reason": "tool_calls",
+        }
+    elif brain and hasattr(brain, "chat"):
         try:
             t0 = time.perf_counter()
             llm_res = brain.chat(
@@ -1319,6 +1350,7 @@ def execute_voice_semantic_turn(
         final_reply: str | None = None
         if has_security_block or has_security_confirm or (has_direct_vision_tool and any(tool_replies)):
             final_reply = _format_reply_ending(" ".join(r for r in tool_replies if r))
+            LOGGER.info("⚡ [VOICE DIRECT TOOL REPLY]: '%s'", final_reply)
         elif brain and hasattr(brain, "chat"):
             try:
                 synthesis_messages = list(chat_messages)

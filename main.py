@@ -2507,6 +2507,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else:
                 client_device = "Terminal client"
 
+        try:
+            hud_state_manager.set_hud_voice_status(
+                "thinking",
+                user_transcript=command_text if command_text != _WAKE_ONLY_SENTINEL else transcript,
+                assistant_reply="🧠 M.O.C.T.A.R a bien entendu — analyse en cours...",
+            )
+        except Exception:
+            pass
+
         agent_result: dict[str, Any] = {}
         memory_instance = getattr(getattr(runtime, "jarvis", None), "memory", None)
         instant_reply = handle_instant_local_command(command_text, memory=memory_instance, client_device=client_device)

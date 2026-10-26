@@ -165,9 +165,14 @@ def control_vision(action: str = "toggle") -> Dict[str, Any]:
         return format_action_result("control_vision", False, f"Erreur contrôle vision : {exc}", {"active": False, "error": str(exc)})
 
 
+_SHARED_VISION_BRAIN: Any = None
+
+
 def get_vision_telemetry(question: str = "") -> Dict[str, Any]:
     """Récupère la télémétrie biométrique NeuroVision 3D en temps réel (présence, clignements, bâillements, fatigue, posture Yaw/Roll) et analyse l'image de la caméra de Moctar si active."""
+    global _SHARED_VISION_BRAIN
     try:
+        import base64
         from vision_engine import VisionEngine
         v = VisionEngine.get_instance()
         metrics = v.get_metrics()
@@ -182,30 +187,38 @@ def get_vision_telemetry(question: str = "") -> Dict[str, Any]:
         roll = metrics.get("head_roll", 0.0)
         fps = metrics.get("measured_fps", 25.0)
 
+        q_norm = (question or "").lower()
+        is_pure_biometric_query = bool(q_norm) and any(
+            kw in q_norm for kw in ("combien de clignement", "score de fatigue", "niveau de fatigue", "bâillement", "baillement")
+        ) and not any(kw in q_norm for kw in ("visage", "vois", "regarde", "caméra", "camera", "analyse"))
+
         visual_desc = ""
-        jpg_bytes = v.get_latest_jpeg_frame()
+        jpg_bytes = v.get_latest_jpeg_frame() if not is_pure_biometric_query else None
         if jpg_bytes and len(jpg_bytes) > 200:
             try:
-                import config
                 import ai_brain
-                from datetime import datetime
-                config.ensure_runtime_directories()
-                snap_path = config.SCREENSHOTS_DIR / f"neurovision_live_{datetime.now().strftime('%H%M%S')}.jpg"
-                snap_path.write_bytes(jpg_bytes)
+                if _SHARED_VISION_BRAIN is None:
+                    _SHARED_VISION_BRAIN = ai_brain.AIBrain()
+                b64_img = base64.b64encode(jpg_bytes).decode("ascii")
                 prompt_q = question or "Décris brièvement Moctar devant sa caméra NeuroVision 3D (expression, posture, éclairage, état de forme)."
-                visual_desc = str(
-                    ai_brain.ask_ai(
-                        f"{prompt_q}\nDonnées biométriques mesurées en direct : fatigue={score}% ({level}), clignements={blinks} ({blink_rate}/min), bâillements={yawns}, inclinaison Yaw={yaw}°, Roll={roll}°.",
-                        images=[str(snap_path)],
-                        max_predict=180,
-                        temperature=0.2,
-                        system_prompt=(
-                            "Tu es M.O.C.T.A.R, l'assistant cybernétique de Moctar. "
-                            "Tu analyses l'image en direct de sa webcam NeuroVision 3D ainsi que ses capteurs biométriques. "
-                            "Réponds en 2 ou 3 phrases naturelles, précises et chaleureuses, en mentionnant ce que tu vois et ses constantes (fatigue, clignements, posture), et termine par 'Moctar'."
-                        ),
-                    )
-                ).strip()
+                sys_p = (
+                    "Tu es M.O.C.T.A.R, l'assistant cybernétique de Moctar. "
+                    "Tu analyses l'image en direct de sa webcam NeuroVision 3D ainsi que ses capteurs biométriques. "
+                    "Réponds en 2 phrases directes, naturelles et chaleureuses, en mentionnant ce que tu vois et ses constantes (fatigue, clignements, posture), et termine par 'Moctar'."
+                )
+                user_msg = {
+                    "role": "user",
+                    "content": (
+                        f"{prompt_q}\nDonnées biométriques mesurées en direct : fatigue={score}% ({level}), "
+                        f"clignements={blinks} ({blink_rate}/min), bâillements={yawns}, inclinaison Yaw={yaw}°, Roll={roll}°."
+                    ),
+                    "images": [b64_img],
+                }
+                reply_obj = _SHARED_VISION_BRAIN.chat(
+                    [{"role": "system", "content": sys_p}, user_msg],
+                    temperature=0.2,
+                )
+                visual_desc = str((reply_obj or {}).get("content") or "").strip()
             except Exception:
                 visual_desc = ""
 

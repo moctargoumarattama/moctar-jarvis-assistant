@@ -484,7 +484,15 @@
 
     function emit(next, detail) {
       state = next;
-      onState(next, detail || {});
+      const payload = detail || {};
+      onState(next, payload);
+      try {
+        if (win && typeof win.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+          win.dispatchEvent(new CustomEvent('moctar:voice-state', {
+            detail: Object.assign({ state: next }, payload),
+          }));
+        }
+      } catch {}
     }
 
     function clearFollowup() {
@@ -768,7 +776,36 @@
         if (requestController) {
           fetchOptions.signal = requestController.signal;
         }
-        const response = await fetchImpl(interactUrl, fetchOptions);
+        let liveThinkingPollTimer = null;
+        if (!opts.fetch && typeof win.fetch === 'function') {
+          let lastSeenTranscript = '';
+          liveThinkingPollTimer = setInterval(async () => {
+            if (requestId !== currentRequestId || !processingAudio) return;
+            try {
+              const stRes = await win.fetch('/api/hud/state', { cache: 'no-store' });
+              if (!stRes || !stRes.ok || requestId !== currentRequestId || !processingAudio) return;
+              const stData = await stRes.json();
+              if (stData && stData.voice_status === 'thinking' && stData.last_user_transcript && stData.last_user_transcript !== lastSeenTranscript) {
+                lastSeenTranscript = stData.last_user_transcript;
+                emit('processing', {
+                  rms: 0,
+                  isSpeaking: false,
+                  transcript: lastSeenTranscript,
+                  message: `✅ Entendu : « ${lastSeenTranscript} » · 🧠 M.O.C.T.A.R réfléchit...`,
+                });
+              }
+            } catch {}
+          }, 420);
+        }
+        let response;
+        try {
+          response = await fetchImpl(interactUrl, fetchOptions);
+        } finally {
+          if (liveThinkingPollTimer !== null) {
+            clearInterval(liveThinkingPollTimer);
+            liveThinkingPollTimer = null;
+          }
+        }
         if (requestId !== currentRequestId) {
           return;
         }
