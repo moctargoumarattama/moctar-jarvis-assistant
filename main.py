@@ -44,8 +44,8 @@ LOGGER = logging.getLogger("noc-dashboard")
 BASE_DIR = Path(__file__).resolve().parent
 
 DEFAULT_TTS_VOICE = os.getenv("JARVIS_TTS_VOICE", os.getenv("JARVIS_EDGE_TTS_VOICE", "fr-FR-RemyMultilingualNeural")).strip() or "fr-FR-RemyMultilingualNeural"
-DEFAULT_TTS_RATE = "+20%"
-DEFAULT_TTS_PITCH = "+2Hz"
+DEFAULT_TTS_RATE = os.getenv("JARVIS_TTS_RATE", "+4%").strip() or "+4%"
+DEFAULT_TTS_PITCH = os.getenv("JARVIS_TTS_PITCH", "+0Hz").strip() or "+0Hz"
 ALLOWED_TTS_VOICES = {
     "fr-FR-HenriNeural",
     "fr-FR-RemyMultilingualNeural",
@@ -558,7 +558,7 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
         "aide", "bonjour", "salut", "merci", "pause", "stop", "musique",
         "terre", "globe", "plasma", "quantum", "bureau", "code", "terminal",
     }
-    if len(words) >= 2 or norm_clean in common_short_commands or any(
+    if norm_clean in common_short_commands or any(
         norm_clean.startswith(prefix)
         for prefix in (
             "qui", "quoi", "comment", "pourquoi", "quand", "ou ", "où ",

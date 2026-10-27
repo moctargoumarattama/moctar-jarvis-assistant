@@ -687,6 +687,49 @@ class AssistantMemory:
         # Enregistrement persistant autonome
         self.update_moctar_profile(profile)
 
+    def get_episodic_continuity_hint(self) -> str:
+        """Génère un indice de continuité épisodique (< 24h) basé sur les interactions récentes,
+        les thèmes abordés ou la fatigue pour nourrir une complicité authentique de copilote et ami."""
+        profile = self.get_moctar_profile()
+        last_str = profile.get("last_interaction")
+        if not last_str:
+            return ""
+
+        try:
+            last_dt = datetime.fromisoformat(last_str)
+            delta = datetime.now() - last_dt
+            seconds = delta.total_seconds()
+            hours = seconds / 3600.0
+            minutes = int(seconds / 60.0)
+        except Exception:
+            return ""
+
+        recent_topics = profile.get("recent_topics", [])
+        top_topic = recent_topics[0] if recent_topics else None
+
+        if hours > 24.0:
+            days = int(hours // 24)
+            return (
+                f"[CONTINUITÉ ÉPISODIQUE] Dernier échange partagé il y a {days} jour(s). "
+                "Retrouvailles amicales : salue Moctar chaleureusement, prends de ses nouvelles naturellement comme un vrai ami."
+            )
+        elif hours >= 3.0:
+            topic_hint = f" autour de '{top_topic}'" if top_topic else ""
+            return (
+                f"[CONTINUITÉ ÉPISODIQUE] Dernier échange il y a environ {int(round(hours))} heures{topic_hint}. "
+                "Reprends le fil avec naturel et complicité sans formule formelle de salutation répétitive."
+            )
+        elif minutes >= 25:
+            topic_hint = f" sur '{top_topic}'" if top_topic else ""
+            return (
+                f"[CONTINUITÉ ÉPISODIQUE] Échange récent il y a {minutes} minutes{topic_hint}. "
+                "Enchaîne directement, complice et attentif à ses projets."
+            )
+        else:
+            return (
+                "[CONTINUITÉ ÉPISODIQUE] Session active en cours. Complicité maximale, ton direct, concis et réactif."
+            )
+
     def get_moctar_profile_prompt_snippet(self) -> str:
         """Génère un bloc textuel contextuel et vivant du profil de Moctar pour injection LLM."""
         profile = self.get_moctar_profile()
@@ -721,6 +764,9 @@ class AssistantMemory:
             f"- Volume d'échanges partagés : {turn_count} tours de conversation",
             "- Directive de posture : Tu es son ami et copilote de confiance. Ne sois jamais un valet ou serviteur ('À vos ordres' ou 'Monsieur' sont INTERDITS). Parle-lui comme un frère/ami proche, chaleureux, fier de ses origines nigériennes, vif et ultra-réactif.",
         ]
+        continuity_hint = self.get_episodic_continuity_hint()
+        if continuity_hint:
+            lines.append(f"- Continuité épisodique : {continuity_hint}")
         return "\n".join(lines)
 
     def search_facts(

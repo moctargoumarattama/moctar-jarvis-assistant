@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Set
 LOGGER = logging.getLogger("moctar.proactive_companion")
 
 _DEFAULT_COOLDOWN_SECONDS = 2700.0  # 45 minutes
+_HEALTH_BREAK_COOLDOWN_SECONDS = 10800.0  # 3 heures de cooldown
 _DEFAULT_FATIGUE_HOURS = 2.5        # Alerte après 2h30 de travail continu
 
 
@@ -33,6 +34,7 @@ class ProactiveCompanion:
         self.fatigue_threshold_seconds = float(os.getenv("MOCTAR_FATIGUE_HOURS", str(_DEFAULT_FATIGUE_HOURS))) * 3600.0
         
         self._last_trigger_time: float = 0.0
+        self._last_health_break_time: float = 0.0
         self._work_session_start: float = time.monotonic()
         self._last_activity_time: float = time.monotonic()
         self._seen_alert_hashes: Set[str] = set()
@@ -222,7 +224,7 @@ class ProactiveCompanion:
         return None
 
     def check_fatigue_alert(self) -> Optional[Dict[str, Any]]:
-        """Vérifie si Moctar est sur une session de code continue prolongée (basée sur la vision ou le temps)."""
+        """Vérifie si Moctar est sur une session de code continue prolongée (> 2h30 avec cooldown 3h)."""
         # Priorité aux métriques biométriques réelles si le capteur est actif
         vision_alert = self.check_vision_fatigue_alert()
         if vision_alert:
@@ -231,13 +233,14 @@ class ProactiveCompanion:
         now = time.monotonic()
         session_duration = now - self._work_session_start
         if session_duration >= self.fatigue_threshold_seconds:
-            # Réinitialise la session pour éviter la répétition immédiate
-            self._work_session_start = now
-            return {
-                "category": "wellbeing_break",
-                "message": "Moctar, ça fait un bon moment que tu es sur ce module, tout roule ? Un petit verre d'eau ou une pause ?",
-                "priority": "low",
-            }
+            if (now - self._last_health_break_time) >= _HEALTH_BREAK_COOLDOWN_SECONDS:
+                self._last_health_break_time = now
+                self._work_session_start = now
+                return {
+                    "category": "wellbeing_break",
+                    "message": "Moctar, tu es à fond sur ton code depuis plus de deux heures et demie. Pense à t'étirer et à boire un verre d'eau mon ami !",
+                    "priority": "low",
+                }
         return None
 
     def evaluate_proactive_event(self, runtime: Any = None) -> Optional[Dict[str, Any]]:
@@ -245,6 +248,14 @@ class ProactiveCompanion:
         # 0. Vérification prioritaire du mode silence / DND et cooldown avant toute consommation
         if self.is_in_cooldown() or (time.monotonic() < self._dnd_until):
             return None
+
+        # Respect absolu du verrou d'écoute et de parole active (zéro coupure intempestive)
+        if runtime:
+            voice_until = getattr(runtime, "voice_session_until", 0.0)
+            if voice_until and (voice_until > time.monotonic()):
+                return None
+            if getattr(runtime, "is_speaking", False) or getattr(runtime, "is_listening", False):
+                return None
 
         # Priorité 0 : Initiative explicite enregistrée (ex: tâche d'arrière-plan terminée)
         if self._pending_suggestion:

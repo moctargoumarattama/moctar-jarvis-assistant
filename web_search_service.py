@@ -446,7 +446,7 @@ def search_wikipedia_summary(query: str, timeout: float = 2.5) -> str | None:
     info = search_wikipedia_structured(query, timeout=timeout)
     if not info:
         return None
-    return _format_sourced_entry(info)
+    return info.get("snippet") or _format_sourced_entry(info)
 
 
 def search_web_sourced(query: str, max_results: int = 3) -> dict[str, Any]:

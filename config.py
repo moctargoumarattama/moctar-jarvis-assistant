@@ -290,7 +290,7 @@ TTS_SETTINGS = {
     "engine": os.getenv("JARVIS_TTS_ENGINE", "edge-tts").strip().lower() or "edge-tts",
     "voice": os.getenv("JARVIS_TTS_VOICE", os.getenv("JARVIS_EDGE_TTS_VOICE", "fr-FR-RemyMultilingualNeural")).strip() or "fr-FR-RemyMultilingualNeural",
     "fallback_voice": "fr-FR-HenriNeural",
-    "rate": os.getenv("JARVIS_TTS_RATE", "+0%").strip() or "+0%",
+    "rate": os.getenv("JARVIS_TTS_RATE", "+4%").strip() or "+4%",
     "pitch": os.getenv("JARVIS_TTS_PITCH", "+0Hz").strip() or "+0Hz",
     "fallback_to_pyttsx3": True,
 }

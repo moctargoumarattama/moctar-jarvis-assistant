@@ -394,6 +394,28 @@ def deduplicate_repetitive_text(text: str) -> str:
     return cleaned.strip()
 
 
+# Prompt d'amorce d'élite et de biasing acoustique contextuel pour Moctar
+MOCTAR_STT_INITIAL_PROMPT = (
+    "Moctar, Jarvis, Klasora, Babamarket, Mercamarket, Heliantha, "
+    "Noor Express, SupMTI, NeuroVision, Sentinel, Rabat, Salé, Niamey, "
+    "Real Madrid, VS Code, FastAPI, Flutter."
+)
+
+PROMPT_PROPER_NOUNS = {
+    "moctar", "jarvis", "klasora", "babamarket", "mercamarket",
+    "heliantha", "noor", "express", "supmti", "neurovision",
+    "sentinel", "rabat", "sale", "salé", "niamey", "real", "madrid",
+    "vscode", "fastapi", "flutter",
+}
+
+ACTION_AND_CONVERSATIONAL_VERBS = re.compile(
+    r"\b(?:ouvre|ouvrir|active|activer|lance|lancer|arr[eê]te|arr[eê]ter|ferme|fermer|mets|mettre|montre|montrer|"
+    r"affiche|afficher|fais|faire|dis|dire|donne|donner|cherche|chercher|supprime|supprimer|relance|relancer|"
+    r"aide|regarde|regarder|analyse|analyser|optimise|optimiser|peux|comment|pourquoi|combien|quand|est|sont|suis|es|va|vas)\b",
+    re.IGNORECASE,
+)
+
+
 def filter_whisper_hallucinations(text: str, *, allow_short_confirmations: bool = False) -> str:
     """Élimine les hallucinations récurrentes de Whisper sur du silence ou du bruit de fond sans détruire la parole réelle."""
     cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
@@ -406,6 +428,17 @@ def filter_whisper_hallucinations(text: str, *, allow_short_confirmations: bool 
 
     lowered = cleaned.lower().strip(" .,!?:;\"'()-[]{}…")
     if not lowered or lowered in SINGLE_TOKEN_NOISE_PHRASES:
+        return ""
+
+    tokens = [tok for tok in re.split(r"\W+", lowered) if tok]
+    if not tokens:
+        return ""
+
+    # Protection Anti-Écho / Hallucination du prompt :
+    # Si Whisper renvoie en silence une sous-suite de >= 3 noms propres du prompt sans verbe d'action, rejeter.
+    matched_prompt_nouns = [tok for tok in tokens if tok in PROMPT_PROPER_NOUNS]
+    if len(matched_prompt_nouns) >= 3 and not ACTION_AND_CONVERSATIONAL_VERBS.search(cleaned):
+        logger.info(f"🚫 [WHISPER ANTI-ECHO]: Écho suspect du prompt détecté ({matched_prompt_nouns}) sans verbe d'action. Rejet.")
         return ""
 
     # Préservation impérative des demandes réelles contenant le nom de l'assistant ou un verbe d'action
@@ -466,6 +499,7 @@ def build_dynamic_stt_prompt(
     de l'environnement Dell Precision M4800 et des fenêtres/outils actifs.
     """
     base_anchors = [
+        MOCTAR_STT_INITIAL_PROMPT,
         "Bonjour Moctar, ici M.O.C.T.A.R sur Dell Precision M4800. JARVIS.",
         "Tu me reçois ? Fort et clair, 5 sur 5, test micro, tu m'entends, tu es là, comment tu vas, la forme,",
         "qu'est-ce que tu peux faire, de quoi es-tu capable, c'est quoi le programme, aide-moi, dis-moi tout,",

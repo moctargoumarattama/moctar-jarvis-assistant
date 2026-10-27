@@ -73,7 +73,7 @@ def _speak_with_edge_tts(text: str) -> bool:
 
     primary_voice = config.TTS_SETTINGS.get("voice", "fr-FR-RemyMultilingualNeural")
     fallback_voice = config.TTS_SETTINGS.get("fallback_voice", "fr-FR-HenriNeural")
-    rate = config.TTS_SETTINGS.get("rate", "+0%")
+    rate = config.TTS_SETTINGS.get("rate", "+4%")
     pitch = config.TTS_SETTINGS.get("pitch", "+0Hz")
 
     clean_text = text.strip()

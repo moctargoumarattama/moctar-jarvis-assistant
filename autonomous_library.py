@@ -314,7 +314,7 @@ def execute_autonomous_task(
         ram_str = f"m?moire vive stabilis?e ? {ram}%" if ram is not None else "m?moire vive purg?e (mesure psutil indisponible)"
         return {
             "handled": True,
-            "reply": f"Optimisation termin?e Moctar. Caches purg?s et {ram_str}.",
+            "reply": f"Optimisation terminée Moctar. Caches purgés et {ram_str}.",
             "tools_used": [{"tool": "optimize_system", "arguments": {}, "success": True}],
             "task_category": "system_tools",
         }

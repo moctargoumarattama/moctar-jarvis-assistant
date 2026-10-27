@@ -871,7 +871,7 @@
     jarvisVoice = window.MoctarVoice.create({
       followupMs: 60000,
       vadThreshold: 0.0075,
-      vadSilenceMs: 850,
+      vadSilenceMs: 900,
       micGain: 1.0,
       minRecordingMs: 300,
       mediaDevices: window.navigator ? window.navigator.mediaDevices : null,

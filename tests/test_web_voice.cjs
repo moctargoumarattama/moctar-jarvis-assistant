@@ -245,7 +245,7 @@ function createWebAudioFixture(t, overrides = {}) {
     timers: time.timers,
     requestAnimationFrame: time.requestAnimationFrame,
     cancelAnimationFrame: time.cancelAnimationFrame,
-    vadSilenceMs: 850,
+    vadSilenceMs: 900,
     vadThreshold: 0.035,
     minRecordingMs: 1200,
     maxSpeechMs: 3500,

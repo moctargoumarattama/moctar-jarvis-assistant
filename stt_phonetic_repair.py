@@ -51,6 +51,13 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     (re.compile(r"\b(?:guite|gite)\s*(?:heub|hub|eub)\b", re.I), "GitHub", "github_typo"),
     (re.compile(r"\bbaba\s+mark[eé]\b", re.I), "baba market", "babamarket_typo"),
     
+        # 2b. Écosystème & Projets Moctar (Klasora, Babamarket, Heliantha, Noor Express, SupMTI)
+    (re.compile(r"\b(?:classe\s+aura|class\s+aura|clasora|clazora)\b", re.I), "Klasora", "klasora_repair"),
+    (re.compile(r"\b(?:baba\s*market|baba\s+mark[eé]|baba\s+marqu[eé]s?|babam\s*market)\b", re.I), "Babamarket", "babamarket_repair"),
+    (re.compile(r"\b(?:h[eé]lianthe|eliantha|h[eé]liantha|elianthe)\b", re.I), "Heliantha", "heliantha_repair"),
+    (re.compile(r"\b(?:nour|noor)\s+express\b", re.I), "Noor Express", "noor_express_repair"),
+    (re.compile(r"\b(?:sup|sub)\s*m\s*t\s*i\b", re.I), "SupMTI", "supmti_repair"),
+
     # 3. CPU, RAM & Matériel
     (re.compile(r"\b(?:la|de\s+la)\s+rame\b", re.I), "la RAM", "ram_repair"),
     (re.compile(r"\b(?:le|du)\s+(?:ces?\s*p[uù]|c['’]?est\s*p[uù]|c['’]?est\s*plus|s[ée]pu)\b", re.I), "le CPU", "cpu_repair"),
@@ -137,7 +144,13 @@ _PHONETIC_WORD_MAP: Dict[str, str] = {
     "journalctl": "journalctl",
     "terminaux": "terminal",
     "eude": "HUD",
-    "ude": "HUD",
+        "ude": "HUD",
+    "klasora": "Klasora",
+    "babamarket": "Babamarket",
+    "heliantha": "Heliantha",
+    "supmti": "SupMTI",
+    "mokhtar": "Moctar",
+    "moktar": "Moctar",
 }
 
 
