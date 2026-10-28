@@ -197,3 +197,42 @@ def test_autonomous_library_anaphora_and_whatsapp_flow():
     assert res_anaphora.get("task_category") == "services"
     assert "WhatsApp" in res_anaphora.get("reply", "")
 
+
+def test_voice_micro_mute_sleep_and_wake_protocol():
+    """Vérifie le protocole de mise en veille silencieuse et réactivation du micro sans déranger la nuit."""
+    import main
+    import dynamic_attention_engine
+
+    # 1. Ordres explicites de coupure micro
+    res_mute1 = main.handle_instant_local_command("coupe ton micro")
+    assert "Micro coupé Moctar" in res_mute1
+
+    res_mute2 = main.handle_instant_local_command("coupe le micro")
+    assert "Micro coupé Moctar" in res_mute2
+
+    res_mute3 = main.handle_instant_local_command("et stop")
+    assert "Micro coupé Moctar" in res_mute3
+
+    res_night = main.handle_instant_local_command("bonne nuit")
+    assert "Bonne nuit Moctar" in res_night
+    assert "Micro coupé" in res_night
+
+    # 2. Désengagement dans DynamicAttentionEngine
+    att1 = dynamic_attention_engine.classify_utterance_attention("coupe ton micro", is_session_active=True)
+    assert att1["should_disengage"] is True
+    assert att1["intent"] == "disengage"
+
+    att2 = dynamic_attention_engine.classify_utterance_attention("coupe le micro", is_session_active=True)
+    assert att2["should_disengage"] is True
+
+    att3 = dynamic_attention_engine.classify_utterance_attention("et stop", is_session_active=True)
+    assert att3["should_disengage"] is True
+
+    # 3. Réactivation / Rallumage micro ("allume ton micro", "tu peux reprendre")
+    res_wake1 = main.handle_instant_local_command("allume ton micro")
+    assert "Micro réactivé Moctar" in res_wake1
+
+    res_wake2 = main.handle_instant_local_command("tu peux reprendre")
+    assert "Micro réactivé Moctar" in res_wake2
+
+

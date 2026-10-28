@@ -100,6 +100,9 @@ _DISENGAGE_PHRASES = {
     "on s arrete la", "fini pour aujourd'hui", "c'est bon pour aujourd'hui",
     "c est bon pour aujourd'hui", "je pense que c'est tout", "je pense que c est tout",
     "bonne soirée", "bonne soiree", "le point est fait",
+    "coupe ton micro", "coupe le micro", "coupe micro", "mute micro",
+    "et stop", "silence radio", "sourdine", "en veille", "mets toi en veille",
+    "mets-toi en veille", "passe en veille", "dors", "va dormir",
 }
 
 _DISENGAGE_REGEX = re.compile(
@@ -108,6 +111,15 @@ _DISENGAGE_REGEX = re.compile(
     r"on\s+(?:a\s+fini|s['’]arr[êe]te\s+l[aà])(?:\s+pour\s+aujourd['’]hui)?|"
     r"fini\s+pour\s+aujourd['’]hui|"
     r"c['’]?est\s+bon(?:\s+pour\s+(?:moi|aujourd['’]hui))?|"
+    r"coupe(?:\s+ton|\s+le|\s+ce)?\s+micro(?:\s+stop)?|"
+    r"mute(?:\s+ton|\s+le)?\s+micro|"
+    r"arr[êe]te\s+d['’][ée]couter|"
+    r"mets[- ]toi\s+en\s+(?:veille|sourdine)|"
+    r"passe\s+en\s+(?:veille|sourdine)|"
+    r"en\s+veille|"
+    r"silence\s+radio|"
+    r"va\s+dormir|dors(?:\s+bien)?|"
+    r"(?:et\s+)?stop(?:\s+l['’][ée]coute)?|"
     r"merci\s+(?:c['’]?est\s+tout|repose[- ]toi|tu\s+peux\s+te\s+reposer|pour\s+aujourd['’]hui|fin\s+de\s+session)|"
     r"bonne\s+(?:nuit|soir[ée]e)|"
     r"[aà]\s+plus(?:\s+tard)?|"
@@ -177,7 +189,7 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
     norm = clean.lower().strip(" ,.:;!?-'\u2019")
 
     # 1. Formules de clôture / désengagement explicite
-    if norm in _DISENGAGE_PHRASES or _DISENGAGE_REGEX.search(norm) or any(norm.startswith(dp) for dp in ("merci moctar", "c'est bon moctar", "bonne nuit", "voilà tout")):
+    if norm in _DISENGAGE_PHRASES or _DISENGAGE_REGEX.search(norm) or any(norm.startswith(dp) for dp in ("merci moctar", "c'est bon moctar", "bonne nuit", "voilà tout", "coupe ton micro", "coupe le micro", "coupe micro")):
         return {
             "intent": "disengage",
             "is_directed": True,

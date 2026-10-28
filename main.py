@@ -443,7 +443,10 @@ def is_direct_voice_command(text: str) -> bool:
     if re.search(r"\b(?:coupe\s+le\s+son|mute|remets\s+le\s+son|monte\s+le\s+son|baisse\s+le\s+son|diminue\s+le\s+son|augmente\s+le\s+son|diminue\s+le\s+volume|augmente\s+le\s+volume|baisse\s+le\s+volume|monte\s+le\s+volume|coupe\s+le\s+volume|laisse\s+le\s+volume|r[èe]gle\s+le\s+volume|mets\s+le\s+volume)\b", norm):
         return True
     # 5. Gestion Système, Contexte & Organisation
-    if re.search(r"\b(?:briefing|o[uù]\s+en\s+est[- ]on|optimise\s+le\s+syst[èe]me|mode\s+optimisation|fin\s+de\s+journ[ée]e|bonne\s+nuit|liste\s+mes\s+t[aâ]ches|mes\s+todos)\b", norm):
+    if re.search(r"\b(?:briefing|o[uù]\s+en\s+est[- ]on|optimise\s+le\s+syst[èe]me|mode\s+optimisation|fin\s+de\s+journ[ée]e|bonne\s+nuit|dors|va\s+dormir|liste\s+mes\s+t[aâ]ches|mes\s+todos)\b", norm):
+        return True
+    # 5b. Coupure et Réactivation Micro explicite ("coupe ton micro", "allume ton micro", "en veille")
+    if re.search(r"\b(?:coupe(?:\s+ton|\s+le|\s+ce)?\s+micro|allume(?:\s+ton|\s+le)?\s+micro|r[ée]active(?:\s+ton|\s+le)?\s+micro|active(?:\s+ton|\s+le)?\s+micro|tu\s+peux\s+reprendre|reprends?\s+l['’][ée]coute|r[ée]veille[- ]toi|mets[- ]toi\s+en\s+(?:veille|sourdine)|mise\s+en\s+veille|en\s+veille|silence\s+radio)\b", norm) or norm.strip(" .,:;!?'\"") in ("stop", "et stop", "coupe micro", "mute micro", "coupe le micro", "coupe ton micro", "silence radio"):
         return True
     # 6. Contrôle de fenêtres & actions sur pronoms ("ferme ça", "mets-le à droite", "plein écran")
     if re.search(r"\b(?:ferme|quitte)\s+(?:[cç]a|le|la|cette\s+fen[êe]tre|l['’]appli?)\b", norm) or norm in (
@@ -714,6 +717,22 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
         except Exception:
             pass
 
+    # 0a0. Commandes de coupure micro / mise en sommeil explicite ("coupe ton micro", "coupe le micro", "en veille", "sourdine")
+    is_mute_cmd = bool(re.search(
+        r"\b(?:coupe(?:\s+ton|\s+le|\s+ce)?\s+micro|mute(?:\s+ton|\s+le)?\s+micro|arr[êe]te\s+d['’][ée]couter|mets[- ]toi\s+en\s+(?:veille|sourdine)|passe\s+en\s+(?:veille|sourdine)|mise\s+en\s+veille|en\s+veille|silence\s+radio|stop\s+l['’][ée]coute|sourdine)\b",
+        normalized
+    )) or normalized in ("et stop", "coupe micro", "mute micro", "coupe le micro", "coupe ton micro", "silence radio")
+    if is_mute_cmd:
+        return "Micro coupé Moctar. Je passe en veille silencieuse. Dis « Jarvis » ou « allume ton micro » dès que tu as besoin de moi."
+
+    # 0a0b. Commandes de réactivation micro ("allume ton micro", "tu peux reprendre", "réveille-toi")
+    is_unmute_cmd = bool(re.search(
+        r"\b(?:allume(?:\s+ton|\s+le)?\s+micro|r[ée]active(?:\s+ton|\s+le)?\s+micro|active(?:\s+ton|\s+le)?\s+micro|tu\s+peux\s+reprendre|reprends?\s+l['’][ée]coute|r[ée]veille[- ]toi|debout)\b",
+        normalized
+    ))
+    if is_unmute_cmd:
+        return "Micro réactivé Moctar ! 5 sur 5, je t'écoute et je suis prêt."
+
     # 0a. Commandes d'interruption vocale (Barge-In)
     if re.search(r"\b(?:tais[- ]toi|ferme[- ]la|chut|silence)\b", normalized) or normalized in ("tais-toi", "tais toi", "stop", "chut", "silence"):
         return "Pardon, je t'écoute Moctar."
@@ -795,9 +814,9 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
     if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague)\b", normalized):
         return "Il y a 10 types de personnes dans le monde : ceux qui comprennent le binaire, et ceux qui ne le comprennent pas !"
 
-    # 0a5. Test Micro, Radio & Écoute ("tu me reçois", "tu me captes", "tu m'entends", "tu nous entends", "test micro", "tu me testes")
+    # 0a5. Test Micro, Radio & Écoute ("tu me reçois", "tu me captes", "tu m'entends", "tu nous entends", "test micro", "tu me testes", "tu es là")
     if re.search(r"\b(?:tu\s+(?:me\s+)?r[ée][cç]ois|t['’]es\s+r[ée][cç]ois|tu\s+m['’][ée]revois|tu\s+m['’][ée]loignes?\s+de\s+(?:soi|toi)|tu\s+(?:me\s+)?captes?|tu\s+m['’]entends|tu\s+nous\s+entends|m['’]entends[- ]tu|test\s+micro|tu\s+m['’][ée]coutes|tu\s+es\s+l[aà]|t['’]es\s+l[aà]|tu\s+me\s+testes?|tu\s+me\s+restes?|tu\s+m['’]entends\s+ou\s+pas)\b", normalized):
-        return "5 sur 5 Moctar ! Je te reçois fort et clair, liaison parfaite. Je suis là avec toi mon ami !"
+        return "Oui Moctar, je suis là ! 5 sur 5, je te reçois fort et clair, liaison parfaite avec toi mon ami !"
 
     # 0a5b. Réassurance empathique immédiate ("tu ne me réponds pas", "tu ne me répondais pas", "tu ne me comprends pas", "je te parle depuis")
     if re.search(r"\b(?:je\s+te\s+parle\s+depuis|tu\s+ne\s+me\s+r[ée]pond(?:s|ais|ait|u)?\s+pas|tu\s+(?:ne\s+)?me\s+comprends?\s+pas|pourquoi\s+tu\s+(?:ne\s+)?(?:me\s+)?r[ée]pond(?:s|ais|ait|u)?\s+pas|pourquoi\s+tu\s+(?:ne\s+)?(?:me\s+)?r[ée]compenses\s+depuis|tu\s+m['’]ignores?)\b", normalized):
@@ -808,9 +827,9 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
         return "J'ai été conçu, programmé et entraîné sur mesure par Moctar pour être son copilote d'ingénierie autonome et système d'intelligence opérationnelle."
 
 
-    # 0a7. Coucher, Sommeil et Bonne Nuit ("bonne nuit", "je vais dormir", "je vais me coucher", "je suis fatigué")
-    if not is_compound and re.search(r"\b(?:bonne\s+nuit|je\s+vais\s+(?:dormir|me\s+coucher|au\s+lit|pioncer)|je\s+suis\s+fatigu[ée]|on\s+(?:arr[êe]te|[ée]teint|coupe)\s+(?:pour\s+ce\s+soir|pour\s+aujourd['’]hui)|[aà]\s+demain)\b", normalized):
-        return "Bonne nuit Moctar ! Repose-toi bien, tu as fait une grosse session. Tous les systèmes sont sous surveillance et je garde tout au chaud pour demain !"
+    # 0a7. Coucher, Sommeil et Bonne Nuit ("bonne nuit", "je vais dormir", "je vais me coucher", "dors", "va dormir")
+    if not is_compound and re.search(r"\b(?:bonne\s+nuit|va\s+dormir|dors(?:\s+bien)?|fais\s+dodo|je\s+vais\s+(?:dormir|me\s+coucher|au\s+lit|pioncer)|je\s+suis\s+fatigu[ée]|on\s+(?:arr[êe]te|[ée]teint|coupe)\s+(?:pour\s+ce\s+soir|pour\s+aujourd['’]hui)|[aà]\s+demain)\b", normalized):
+        return "Bonne nuit Moctar ! Repose-toi bien, tu as fait une grosse session. Micro coupé, je veille en silence et tout sera prêt pour demain !"
 
     # 0a8. Pauses bienveillantes ("je fais une pause", "pause café", "je prends l'air", "je souffle un peu")
     if not is_compound and re.search(r"\b(?:je\s+fais\s+une\s+pause|pause\s+caf[ée]|je\s+prends\s+(?:l['’]air|une\s+pause)|je\s+vais\s+prendre\s+l['’]air|je\s+souffle\s+un\s+peu)\b", normalized):
@@ -2878,6 +2897,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     action_name = "toggle_fullscreen"
                     action_tools = [{"tool": "toggle_fullscreen", "arguments": {"enable": True}, "success": True}]
 
+            # Métadonnées action Sommeil / Coupure Micro
+            if any(k in norm_cmd for k in ("coupe", "sourdine", "veille", "stop", "bonne nuit", "dors", "silence radio")):
+                if any(k in norm_cmd for k in ("micro", "sourdine", "veille", "stop", "bonne nuit", "dors", "ecoute", "écoute")):
+                    action_name = "mute_mic"
+                    runtime.voice_session_until = 0.0
+            elif any(k in norm_cmd for k in ("allume ton micro", "allume le micro", "active ton micro", "active le micro", "reprends", "reveille", "réveille")):
+                action_name = "unmute_mic"
+                runtime.voice_session_until = time.monotonic() + 45.0
+
             agent_result = {
                 **instant_local_status(instant_reply),
                 "reply": reply_text,
@@ -3075,9 +3103,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "pulse_speed": current_hud.get("pulse_speed", 1.0),
                 "circadian_phase": current_hud.get("circadian_phase", "afternoon"),
                 "session_active": bool(
-                    (runtime.voice_session_until > time.monotonic() and (session_duration > 0 or reply_text.strip().endswith("?")))
-                    or (header_session and not attention.get("should_disengage"))
-                    or (header_barge_in and not attention.get("should_disengage"))
+                    agent_result.get("action") != "mute_mic"
+                    and not attention.get("should_disengage")
+                    and (
+                        (runtime.voice_session_until > time.monotonic() and (session_duration > 0 or reply_text.strip().endswith("?")))
+                        or header_session
+                        or header_barge_in
+                    )
                 ),
                 "wake_word_detected": wake_detected,
                 "action": agent_result.get("action"),

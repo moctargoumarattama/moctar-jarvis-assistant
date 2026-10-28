@@ -27,7 +27,12 @@
     value: normalize(match[0]), index: match.index, end: match.index + match[0].length,
   }));
   const phrase = (text) => words(text).map((word) => word.value).join(' ');
-  const STOP_PHRASES = new Set(['merci moctar', 'merci elmo', 'tu peux te reposer', 'fin de conversation']);
+  const STOP_PHRASES = new Set([
+    'merci moctar', 'merci elmo', 'tu peux te reposer', 'fin de conversation',
+    'stop', 'et stop', 'coupe ton micro', 'coupe le micro', 'coupe micro', 'mute micro',
+    'silence', 'silence radio', 'tais toi', 'tais-toi', 'chut', 'en veille',
+    'mets toi en veille', 'mets-toi en veille', 'passe en veille', 'sourdine', 'bonne nuit', 'dors', 'va dormir'
+  ]);
 
   function create(options) {
     const opts = options || {};
@@ -776,7 +781,7 @@
           method: 'POST',
           headers: {
             'Content-Type': (blob && blob.type) || mimeType || 'audio/wav',
-            'X-Voice-Session-Active': (enabled || manual || phase === 'listening' || isBargeInSend) ? 'true' : 'false',
+            'X-Voice-Session-Active': ((phase === 'listening' || manual || isBargeInSend) && phase !== 'wake') ? 'true' : 'false',
             'X-Voice-Barge-In': isBargeInSend ? 'true' : 'false',
           },
           credentials: 'include',
@@ -936,7 +941,25 @@
           }
           releaseEchoLock();
           if (requestId !== currentRequestId || generation !== current.generation || destroyed || suspended) return;
-          openFollowup();
+          if (payload && (payload.session_active === false || payload.action === 'mute_mic' || payload.action === 'disengage')) {
+            phase = 'wake';
+            manual = false;
+            clearFollowup();
+            updateSolarVoiceState('idle');
+            if (wanted()) {
+              emit('wake', {
+                rms: 0,
+                isSpeaking: false,
+                message: '💤 VEILLE SILENCIEUSE · Micro en sommeil (Dites « Jarvis » pour réveiller)',
+              });
+            }
+          } else if (payload && payload.action === 'unmute_mic') {
+            phase = 'listening';
+            openFollowup();
+            updateSolarVoiceState('listening');
+          } else {
+            openFollowup();
+          }
         } finally {
           if (job === current) job = null;
           processingAudio = false;
