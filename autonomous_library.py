@@ -180,6 +180,11 @@ def execute_autonomous_task(
             ) or re.search(r"^(?:oui|valide|confirme|vas[- ]y|d['’]accord|envoie)\b", norm_conf):
                 res = project_actions.confirm_pending_git_action()
                 tools_used.append({"tool": "confirm_git_action", "arguments": {}, "success": bool(res.get("success", True))})
+                try:
+                    import smart_command_cache
+                    smart_command_cache.get_command_cache().invalidate_category("git")
+                except Exception:
+                    pass
                 return {
                     "handled": True,
                     "reply": str(res.get("message") or "Opération Git validée et exécutée."),
@@ -1062,6 +1067,11 @@ def execute_autonomous_task(
         task_text = add_todo_match.group(1).strip()
         res = actions.execute_tool("add_todo", {"content": task_text})
         tools_used.append({"tool": "add_todo", "arguments": {"content": task_text}, "success": bool(res.get("success"))})
+        try:
+            import smart_command_cache
+            smart_command_cache.get_command_cache().invalidate_category("tasks")
+        except Exception:
+            pass
         msg = res.get("message") if isinstance(res, dict) else str(res)
         return {"handled": True, "reply": f"✅ {msg}", "tools_used": tools_used, "task_category": "productivity"}
 

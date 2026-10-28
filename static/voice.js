@@ -806,14 +806,44 @@
             } catch {}
           }, 420);
         }
-        let response;
-        try {
-          response = await fetchImpl(interactUrl, fetchOptions);
-        } finally {
-          if (liveThinkingPollTimer !== null) {
-            clearInterval(liveThinkingPollTimer);
-            liveThinkingPollTimer = null;
+        let response = null;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            response = await fetchImpl(interactUrl, fetchOptions);
+            if (response && response.ok) {
+              break;
+            }
+            if (response && (response.status === 502 || response.status === 503 || response.status === 504)) {
+              if (attempt < 2 && !destroyed && !suspended) {
+                emit('processing', {
+                  rms: 0,
+                  isSpeaking: false,
+                  transcript: '⚡ Reconnexion IA...',
+                  message: '⚡ Reconnexion IA en cours...',
+                });
+                try { await fetchImpl('/api/ai/reconnect', { method: 'POST', cache: 'no-store' }); } catch {}
+                await new Promise((resolve) => setTimeout(resolve, 600));
+                continue;
+              }
+            }
+            break;
+          } catch (netErr) {
+            if (attempt < 2 && !destroyed && !suspended) {
+              emit('processing', {
+                rms: 0,
+                isSpeaking: false,
+                transcript: '⚡ Reconnexion...',
+                message: '⚡ Micro-coupure détectée, reconnexion automatique...',
+              });
+              await new Promise((resolve) => setTimeout(resolve, 600));
+            } else {
+              break;
+            }
           }
+        }
+        if (liveThinkingPollTimer !== null) {
+          clearInterval(liveThinkingPollTimer);
+          liveThinkingPollTimer = null;
         }
         if (requestId !== currentRequestId) {
           return;

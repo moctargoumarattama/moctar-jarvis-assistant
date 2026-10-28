@@ -1372,6 +1372,36 @@ class AIBrain:
             self.timeout,
         )
 
+    def reconnect_client(self, force: bool = False) -> bool:
+        """Réinitialise et reconnecte le client IA en cas de crash, déconnexion ou expiration de socket."""
+        if not force and self.gemini_client is not None and self._provider_online.get("gemini") is not False:
+            return True
+        load_dotenv()
+        gemini_key = (
+            self.api_key
+            or os.getenv("GEMINI_API_KEY", "")
+            or getattr(config, "GEMINI_API_KEY", "")
+        ).strip()
+        if not gemini_key or genai is None or genai_types is None:
+            logger.warning("Échec reconnexion IA : clé d'API absente ou google-genai non disponible")
+            return False
+        try:
+            self.gemini_client = genai.Client(
+                api_key=gemini_key,
+                http_options=genai_types.HttpOptions(
+                    timeout=max(10000, int(self.gemini_timeout * 1000)),
+                    retry_options=genai_types.HttpRetryOptions(attempts=1),
+                ),
+            )
+            self._provider_online["gemini"] = None
+            self._provider_checked_at["gemini"] = 0
+            self.last_provider = "gemini"
+            logger.info("🔄 [AI AUTO-RECONNECT]: Client Gemini réinitialisé et reconnecté avec succès.")
+            return True
+        except Exception as exc:
+            logger.warning("Échec de reconnexion du client Gemini: %s", exc)
+            return False
+
     def _record_provider_result(self, provider, result):
         if isinstance(result, dict) and result.get("fallback_courtesy"):
             online = False
@@ -1581,6 +1611,10 @@ class AIBrain:
             )
         except Exception as exc:
             logger.warning("Échec appel Gemini: %s", exc, exc_info=True)
+            try:
+                self.reconnect_client(force=True)
+            except Exception:
+                pass
             if _is_gemini_503_or_server_error(exc) or isinstance(exc, TimeoutError):
                 state_info = format_ai_health_state("DEGRADE", DEGRADED_UNAVAILABLE_REPLY)
                 result = {
@@ -1620,6 +1654,8 @@ class AIBrain:
             "reason": state_unavailable["reason"],
         }
         try:
+            if self.gemini_client is None:
+                self.reconnect_client(force=True)
             if self.gemini_client is None or genai_types is None:
                 raise RuntimeError(
                     "Client Gemini non initialisé : vérifier GEMINI_API_KEY et google-genai"
@@ -1874,6 +1910,10 @@ class AIBrain:
             return result
         except Exception as exc:
             logger.warning("Échec appel Gemini: %s", exc, exc_info=True)
+            try:
+                self.reconnect_client(force=True)
+            except Exception:
+                pass
             if _is_gemini_503_or_server_error(exc) or isinstance(exc, TimeoutError):
                 degraded_state = format_ai_health_state("DEGRADE", DEGRADED_UNAVAILABLE_REPLY)
                 return {

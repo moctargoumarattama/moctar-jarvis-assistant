@@ -2857,97 +2857,134 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "fast_path": True,
             }
         else:
-            is_devops_service = any(w in command_text.lower() for w in ("service", "services", "docker", "vps", "systemctl", "redemarre", "redémarre", "journalctl"))
+            db_path = getattr(getattr(runtime, "jarvis", None), "db_path", None)
+            session_id = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
+
+            # A) Vérification du Cache Intelligent Sémantique (< 1ms)
+            cached_entry = None
             try:
-                db_path = getattr(getattr(runtime, "jarvis", None), "db_path", None)
-                session_id = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
-                if is_devops_service:
-                    autonomous_res = {"handled": False}
-                else:
-                    autonomous_res = autonomous_library.execute_autonomous_task(
-                        command_text,
-                        session_id=session_id,
-                        db_path=db_path,
-                    )
-            except Exception as auto_exc:
-                LOGGER.warning("Erreur lors de l'exécution de la tâche autonome : %s", auto_exc)
-                autonomous_res = {"handled": False}
+                import smart_command_cache
+                cache_instance = smart_command_cache.get_command_cache(db_path)
+                cached_entry = cache_instance.get(command_text)
+            except Exception as cache_err:
+                LOGGER.debug("Erreur vérification SmartCommandCache : %s", cache_err)
+                cached_entry = None
 
-            if autonomous_res.get("handled") is True:
+            if cached_entry:
                 display_user_text = command_text
-                reply_text = str(autonomous_res.get("reply") or "").strip()
-                cat = autonomous_res.get("task_category") or "locale"
+                reply_text = str(cached_entry["reply"]).strip()
+                cat = cached_entry.get("category") or "general"
+                hit_cnt = cached_entry.get("hit_count", 1)
                 LOGGER.info(
-                    "⚡ [VOICE AUTONOMOUS ACTION (0ms)]: '%s' -> '%s' (cat=%s, action=%s, url=%s)",
-                    command_text,
-                    reply_text,
-                    cat,
-                    autonomous_res.get("action"),
-                    autonomous_res.get("url"),
+                    "⚡ [SMART CACHE HIT (0ms)]: '%s' (cat=%s, hit #%d) -> '%s'",
+                    command_text, cat, hit_cnt, reply_text,
                 )
-                agent_result = {
-                    "status": "success",
-                    "reply": reply_text,
-                    "action": autonomous_res.get("action"),
-                    "url": autonomous_res.get("url"),
-                    "title": autonomous_res.get("title"),
-                    "tools_used": autonomous_res.get("tools_used", []),
-                    "thought_chain": [f"Action locale autonome exécutée ({cat}) (0ms)"],
-                    "fast_path": True,
-                }
-                if runtime.jarvis and getattr(runtime.jarvis, "memory", None) and not agent_result.get("memory_persisted"):
-                    try:
-                        runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
-                        runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
-                        if hasattr(runtime.jarvis.memory, "record_conversation_turn_for_profile"):
-                            runtime.jarvis.memory.record_conversation_turn_for_profile(command_text, reply_text)
-                    except Exception:
-                        pass
-            elif (is_devops_service or is_system_command(command_text)) and getattr(runtime, "jarvis", None) and hasattr(runtime.jarvis, "execute_prompt_async"):
-                display_user_text = command_text
-                try:
-                    agent_result = await runtime.jarvis.execute_prompt_async(
-                        user_input=command_text,
-                        source="web_voice",
-                    )
-                except Exception as exc:
-                    LOGGER.warning("Erreur AgentCore lors de /api/voice/interact : %s", exc)
-                    agent_result = {
-                        "status": "error",
-                        "reply": "Je suis à l'écoute, mais une erreur interne est survenue sur l'infrastructure.",
-                    }
-                reply_text = str(
-                    agent_result.get("reply")
-                    or agent_result.get("response")
-                    or "Bien reçu."
-                ).strip()
-            else:
-                # Cœur Sémantique Natif LLM avec Tool Calling & Mémoire Multi-Tours (< 500 ms)
-                display_user_text = command_text
-                session_id = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
-                agent_result = await asyncio.to_thread(
-                    execute_voice_semantic_turn,
-                    command_text,
-                    runtime,
-                    session_id,
-                    None,
-                    VOICE_FAST_SYSTEM_PROMPT,
-                )
-                reply_text = str(
-                    agent_result.get("reply")
-                    or agent_result.get("response")
-                    or "À vos ordres."
-                ).strip()
+                agent_result = dict(cached_entry.get("agent_result") or {})
+                agent_result["status"] = "success"
                 agent_result["reply"] = reply_text
+                agent_result["fast_path"] = True
+                agent_result["from_cache"] = True
+                agent_result["thought_chain"] = [f"Réponse instantanée servie depuis le cache intelligent ({cat}) (< 1ms)"]
+            else:
+                is_devops_service = any(w in command_text.lower() for w in ("service", "services", "docker", "vps", "systemctl", "redemarre", "redémarre", "journalctl"))
+                try:
+                    if is_devops_service:
+                        autonomous_res = {"handled": False}
+                    else:
+                        autonomous_res = autonomous_library.execute_autonomous_task(
+                            command_text,
+                            session_id=session_id,
+                            db_path=db_path,
+                        )
+                except Exception as auto_exc:
+                    LOGGER.warning("Erreur lors de l'exécution de la tâche autonome : %s", auto_exc)
+                    autonomous_res = {"handled": False}
 
-                if runtime.jarvis and getattr(runtime.jarvis, "memory", None) and not agent_result.get("memory_persisted"):
+                if autonomous_res.get("handled") is True:
+                    display_user_text = command_text
+                    reply_text = str(autonomous_res.get("reply") or "").strip()
+                    cat = autonomous_res.get("task_category") or "locale"
+                    LOGGER.info(
+                        "⚡ [VOICE AUTONOMOUS ACTION (0ms)]: '%s' -> '%s' (cat=%s, action=%s, url=%s)",
+                        command_text,
+                        reply_text,
+                        cat,
+                        autonomous_res.get("action"),
+                        autonomous_res.get("url"),
+                    )
+                    agent_result = {
+                        "status": "success",
+                        "reply": reply_text,
+                        "action": autonomous_res.get("action"),
+                        "url": autonomous_res.get("url"),
+                        "title": autonomous_res.get("title"),
+                        "tools_used": autonomous_res.get("tools_used", []),
+                        "thought_chain": [f"Action locale autonome exécutée ({cat}) (0ms)"],
+                        "fast_path": True,
+                    }
+                    if runtime.jarvis and getattr(runtime.jarvis, "memory", None) and not agent_result.get("memory_persisted"):
+                        try:
+                            runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
+                            runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
+                            if hasattr(runtime.jarvis.memory, "record_conversation_turn_for_profile"):
+                                runtime.jarvis.memory.record_conversation_turn_for_profile(command_text, reply_text)
+                        except Exception:
+                            pass
+                elif (is_devops_service or is_system_command(command_text)) and getattr(runtime, "jarvis", None) and hasattr(runtime.jarvis, "execute_prompt_async"):
+                    display_user_text = command_text
                     try:
-                        runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
-                        runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
-                        if hasattr(runtime.jarvis.memory, "record_conversation_turn_for_profile"):
-                            runtime.jarvis.memory.record_conversation_turn_for_profile(command_text, reply_text)
-                    except Exception:
-                        pass
+                        agent_result = await runtime.jarvis.execute_prompt_async(
+                            user_input=command_text,
+                            source="web_voice",
+                        )
+                    except Exception as exc:
+                        LOGGER.warning("Erreur AgentCore lors de /api/voice/interact : %s", exc)
+                        agent_result = {
+                            "status": "error",
+                            "reply": "Je suis à l'écoute, mais une erreur interne est survenue sur l'infrastructure.",
+                        }
+                    reply_text = str(
+                        agent_result.get("reply")
+                        or agent_result.get("response")
+                        or "Bien reçu."
+                    ).strip()
+                else:
+                    # Cœur Sémantique Natif LLM avec Tool Calling & Mémoire Multi-Tours (< 500 ms)
+                    display_user_text = command_text
+                    session_id = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
+                    agent_result = await asyncio.to_thread(
+                        execute_voice_semantic_turn,
+                        command_text,
+                        runtime,
+                        session_id,
+                        None,
+                        VOICE_FAST_SYSTEM_PROMPT,
+                    )
+                    reply_text = str(
+                        agent_result.get("reply")
+                        or agent_result.get("response")
+                        or "À vos ordres."
+                    ).strip()
+                    agent_result["reply"] = reply_text
+
+                    if runtime.jarvis and getattr(runtime.jarvis, "memory", None) and not agent_result.get("memory_persisted"):
+                        try:
+                            runtime.jarvis.memory.add_message(session_id=session_id, role="user", content=command_text)
+                            runtime.jarvis.memory.add_message(session_id=session_id, role="assistant", content=reply_text)
+                            if hasattr(runtime.jarvis.memory, "record_conversation_turn_for_profile"):
+                                runtime.jarvis.memory.record_conversation_turn_for_profile(command_text, reply_text)
+                        except Exception:
+                            pass
+
+                # Indexation et mise en cache intelligente des requêtes réussies
+                try:
+                    import smart_command_cache
+                    cache_inst = smart_command_cache.get_command_cache(db_path)
+                    cache_inst.record_query(command_text)
+                    if agent_result.get("status") == "success" and reply_text:
+                        cache_inst.set(command_text, reply_text, agent_result=agent_result)
+                except Exception as cache_save_err:
+                    LOGGER.debug("Erreur enregistrement SmartCommandCache: %s", cache_save_err)
 
         # Raccordement des initiatives proactives dans la boucle vocale
         try:
@@ -3014,6 +3051,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "tools_used": agent_result.get("tools_used", []),
                 "thought_chain": agent_result.get("thought_chain", []),
                 "fast_path": bool(agent_result.get("fast_path")),
+                "from_cache": bool(agent_result.get("from_cache")),
                 "fallback_mode": bool(agent_result.get("fallback_mode")),
                 "model_offline": bool(agent_result.get("model_offline")),
             }
@@ -3040,6 +3078,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "message": event["message"],
             "audio_url": audio_url,
         }
+
+    @application.post("/api/ai/reconnect")
+    async def ai_reconnect_endpoint(request: Request):
+        """Force la réinitialisation et la reconnexion automatique du moteur IA Gemini / Groq."""
+        require_local_or_admin(request, settings)
+        reconnected = False
+        runtime = getattr(application.state, "runtime", None)
+        brain = getattr(runtime, "ai_brain", None) or getattr(getattr(runtime, "jarvis", None), "brain", None)
+        if brain and hasattr(brain, "reconnect_client"):
+            reconnected = brain.reconnect_client(force=True)
+        else:
+            try:
+                import ai_brain
+                temp_brain = ai_brain.AIBrain()
+                reconnected = temp_brain.reconnect_client(force=True)
+            except Exception as exc:
+                LOGGER.warning("Échec création/reconnexion temporaire AIBrain: %s", exc)
+                reconnected = False
+
+        LOGGER.info("🔄 [API AI RECONNECT] Moteur IA reconnecté=%s", reconnected)
+        return {
+            "ok": True,
+            "reconnected": reconnected,
+            "message": "Client IA réinitialisé et reconnecté avec succès." if reconnected else "Reconnexion effectuée (mode dégradé ou hors ligne).",
+        }
+
+    @application.get("/api/ai/cache/stats")
+    async def ai_cache_stats_endpoint(request: Request):
+        """Retourne les métriques d'indexation, de fréquence quotidienne et d'utilisation du cache."""
+        require_local_or_admin(request, settings)
+        try:
+            import smart_command_cache
+            cache = smart_command_cache.get_command_cache()
+            return {
+                "ok": True,
+                "stats": cache.get_stats(),
+                "top_queries_today": cache.get_daily_frequencies(limit=10),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     @application.post("/api/voice/trigger")
     async def native_voice_trigger(request: Request):
