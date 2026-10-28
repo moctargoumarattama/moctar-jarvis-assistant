@@ -1,6 +1,6 @@
 'use strict';
 
-const SW_VERSION = 'v5.0';
+const SW_VERSION = 'v8.0';
 
 // Installation metadata only: pages, scripts, telemetry and API responses are never cached.
 self.addEventListener('install', event => {
@@ -23,7 +23,7 @@ self.addEventListener('activate', event => {
             requests
               .filter(req => {
                 const pathname = new URL(req.url).pathname;
-                return pathname.endsWith('.js') || pathname.startsWith('/api/voice/');
+                return pathname.endsWith('.js') || pathname.endsWith('.css') || pathname.startsWith('/api/voice/');
               })
               .map(req => cache.delete(req))
           );

@@ -630,7 +630,7 @@
       font-family: var(--font-sans);
     }
   </style>
-  <link rel="stylesheet" href="/static/neurovision_hud.css?v=7.0">
+  <link rel="stylesheet" href="/static/neurovision_hud.css?v=8.0">
 </head>
 <body>
   <!-- Conteneur 3D WebGL (Three.js) -->
@@ -774,12 +774,12 @@
         <div class="nv-grid">
           <!-- ================= COLONNE 1 : VIEWPORT VIDÉO & CONTRÔLES ================= -->
           <div class="nv-col">
-            <div class="nv-viewport-card">
+            <div class="nv-viewport-card" style="position: relative !important; display: block !important; width: 100% !important; aspect-ratio: 16/10 !important; overflow: hidden !important;">
               <!-- Flux Vidéo Local (PC Client de Moctar) -->
-              <video id="nv-client-video" class="nv-media-element" autoplay playsinline muted style="display:none;"></video>
+              <video id="nv-client-video" class="nv-media-element" autoplay playsinline muted style="display:none; position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; object-fit: cover !important; transform: scaleX(-1) !important; z-index: 5 !important;"></video>
               <!-- Flux Vidéo de Secours Serveur -->
-              <img id="nv-server-feed" class="nv-media-element" src="" alt="Flux NeuroVision" style="display:none;" />
-              <canvas id="nv-sim-canvas" class="nv-media-element" style="display:block;"></canvas>
+              <img id="nv-server-feed" class="nv-media-element" src="" alt="Flux NeuroVision" style="display:none; position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; object-fit: cover !important; z-index: 4 !important;" />
+              <canvas id="nv-sim-canvas" class="nv-media-element" style="display:block; position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; z-index: 1 !important;"></canvas>
 
 
               <!-- Overlays Holographiques 3D Sci-Fi -->
@@ -900,6 +900,6 @@
         </div>
   </dialog>
 
-  <script src="/static/neurovision_hud.js?v=7.0"></script>
+  <script src="/static/neurovision_hud.js?v=8.0"></script>
 </body>
 </html>

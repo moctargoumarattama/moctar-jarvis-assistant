@@ -165,39 +165,47 @@
 
 /* Viewport Caméra 3D & Reticules */
 .nv-viewport-card {
-  position: relative;
+  position: relative !important;
+  display: block !important;
   border-radius: 12px;
-  overflow: hidden;
+  overflow: hidden !important;
   border: 1px solid var(--nv-border-active);
   background: #030710;
   box-shadow: inset 0 0 35px rgba(0, 0, 0, 0.85), 0 10px 30px rgba(0, 0, 0, 0.6);
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 16 / 10 !important;
   max-height: 380px;
-  width: 100%;
+  width: 100% !important;
 }
 
 .nv-media-element {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  position: absolute !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
   display: block;
 }
 
 #nv-sim-canvas {
-  z-index: 1;
+  z-index: 1 !important;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 #nv-server-feed {
-  z-index: 2;
+  z-index: 2 !important;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 #nv-client-video {
-  z-index: 3;
-  transform: scaleX(-1);
-  transform-origin: center center;
+  z-index: 5 !important;
+  width: 100% !important;
+  height: 100% !important;
+  transform: scaleX(-1) !important;
+  transform-origin: center center !important;
 }
 
 /* Overlays Sci-Fi HUD sur la vidéo */

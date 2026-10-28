@@ -165,3 +165,4 @@ def test_cache_stats(temp_cache: SmartCommandCache):
     assert stats["misses"] == 1
     assert stats["hit_rate_percent"] == 66.67
     assert stats["categories"].get("git") == 1
+

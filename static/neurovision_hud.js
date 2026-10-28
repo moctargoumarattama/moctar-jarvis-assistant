@@ -562,6 +562,12 @@
         stopRadarStandby();
         clientVideo.srcObject = stream;
         clientVideo.style.display = 'block';
+        clientVideo.style.position = 'absolute';
+        clientVideo.style.inset = '0';
+        clientVideo.style.width = '100%';
+        clientVideo.style.height = '100%';
+        clientVideo.style.objectFit = 'cover';
+        clientVideo.style.zIndex = '5';
         await clientVideo.play();
       }
       if (mySessionToken !== cameraSessionToken || !isNeuroVisionModalOpen()) {
@@ -570,6 +576,8 @@
       }
       if (simCanvas) {
         simCanvas.style.display = 'none';
+        simCanvas.style.visibility = 'hidden';
+        simCanvas.style.zIndex = '0';
       }
       if (serverImg) {
         serverImg.style.display = 'none';
@@ -642,6 +650,16 @@
       try { clientVideo.pause(); } catch (e) {}
       clientVideo.srcObject = null;
       clientVideo.style.display = 'none';
+      clientVideo.style.zIndex = '0';
+    }
+    if (simCanvas) {
+      simCanvas.style.display = 'block';
+      simCanvas.style.visibility = 'visible';
+      simCanvas.style.position = 'absolute';
+      simCanvas.style.inset = '0';
+      simCanvas.style.width = '100%';
+      simCanvas.style.height = '100%';
+      simCanvas.style.zIndex = '1';
     }
     if (serverImg) {
       serverImg.src = '';
