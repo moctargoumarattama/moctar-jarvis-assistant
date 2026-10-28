@@ -116,3 +116,4 @@ def test_groq_fallback_models_include_qwen_and_llama():
     assert "llama-3.3-70b-versatile" in ai_brain.GROQ_MODELS_PRIORITY
     assert "llama-3.1-8b-instant" in ai_brain.GROQ_MODELS_PRIORITY
     assert "qwen/qwen3.8-27b" in ai_brain.GROQ_MODELS_PRIORITY
+

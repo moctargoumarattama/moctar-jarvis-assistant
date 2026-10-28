@@ -1162,7 +1162,7 @@ def _call_groq_voice_semantic(
         for active_tools in tools_options:
             # 1. Via SDK Groq si disponible
             try:
-                from groq import Groq
+                from groq import Groq  # type: ignore[import-not-found, import-untyped]
                 client = Groq(api_key=groq_api_key, timeout=3.5, max_retries=0)
                 kwargs: dict[str, Any] = {
                     "model": model_name,
