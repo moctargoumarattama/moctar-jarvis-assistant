@@ -508,7 +508,22 @@ def _resolve_app_executable(executable: str, search_path: str) -> str:
             resolved = candidate if os.path.isfile(candidate) else None
         else:
             resolved = None
+    if not resolved and os.name != "nt":
+        # Chemins standards Ubuntu/Debian pour applications Linux (snap, apt, flatpak)
+        linux_candidates = [
+            f"/snap/bin/{executable}",
+            f"/usr/bin/{executable}",
+            f"/usr/local/bin/{executable}",
+            f"/usr/share/code/bin/{executable}" if executable == "code" else "",
+            f"/var/lib/snapd/snap/bin/{executable}",
+        ]
+        for c in linux_candidates:
+            if c and os.path.isfile(c) and os.access(c, os.X_OK):
+                resolved = c
+                break
     if not resolved:
+        if executable == "code":
+            raise FileNotFoundError("Visual Studio Code n'est pas encore installé sur ce système. Tu peux l'installer en exécutant : sudo snap install code --classic")
         raise FileNotFoundError(f"Exécutable natif introuvable : {executable}.")
     return resolved
 

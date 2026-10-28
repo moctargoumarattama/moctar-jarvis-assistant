@@ -470,9 +470,9 @@ def is_direct_voice_command(text: str) -> bool:
     # 12. Interface HUD 3D, NOC & Globe Terrestre ("mode hud 3d", "retourne en mode noc", "affiche la terre", "je suis où dans le monde", "mode plasma", "mode quantum")
     if (
         re.search(r"\b(?:mode\s+)?hud(?:\s*3\s*d)?\b", norm)
-        or re.search(r"\b(?:mode\s+)?(?:hope|hop|up|hot|hub)\s*3\s*d\b", norm)
+        or re.search(r"\b(?:mode\s+)?(?:hope|hop|up|hot|hub|top)\s*3\s*d\b", norm)
         or re.search(r"\b(?:retourne?\s+(?:en\s+|au\s+)?mode\s+noc|retour\s+(?:en\s+mode\s+|au\s+)?noc|mode\s+noc|ouvre\s+le\s+noc|quitte\s+le\s+hud|ferme\s+le\s+hud)\b", norm)
-        or re.search(r"\b(?:affiche\s+(?:la\s+terre|le\s+globe|ma\s+position|l['’]orbe|le\s+hud)|montre\s+(?:la\s+terre|le\s+globe|ma\s+position|le\s+hud)|globe\s+terrestre|localise[- ]moi|je\s+suis\s+o[uù]|o[uù]\s+suis[- ]je|o[uù]\s+je\s+suis|dans\s+le\s+monde|ma\s+position|mode\s+orbe|mode\s+globe|mode\s+plasma|mode\s+quantum|ferme\s+le\s+globe|retourne\s+[aà]\s+l['’]orbe|ouvre\s+(?:le\s+)?hud)\b", norm)
+        or re.search(r"\b(?:affiche\s+(?:la\s+terre|le\s+globe|ma\s+position|l['’]orbe|le\s+hud)|montre\s+(?:la\s+terre|le\s+globe|ma\s+position|le\s+hud)|globe\s+terrestre|localise[- ]moi|je\s+suis\s+o[uù]|o[uù]\s+suis[- ]je|o[uù]\s+je\s+suis|dans\s+le\s+monde|ma\s+position|mode\s+orbe|mode\s+globe|mode\s+plasma|mode\s+quantum|ferme\s+le\s+globe|retourne\s+[aà]\s+l['’]orbe|ouvre\s+(?:le\s+)?(?:hud|top\s*3\s*d))\b", norm)
     ):
         return True
     # 12b. Git & Projets ("git commit", "git push", "git pull", "git status", "papa market", "baba market")
@@ -480,9 +480,9 @@ def is_direct_voice_command(text: str) -> bool:
         return True
     # 12c. NeuroVision & Scanner Visuel / Fatigue Cognitive ("mets le mode neurovision", "active la vision", "ferme neurovision")
     if (
-        re.search(r"\b(?:mode\s+)?neurovision\b", norm)
-        or re.search(r"\b(?:scanner\s+(?:visuel|cognitif|biom[ée]trique|neurovision))\b", norm)
-        or re.search(r"\b(?:active|allume|lance|ouvre|affiche|coupe|arr[êe]te|ferme|d[ée]sactive|eteins|[ée]teins|quitte)\s+(?:le\s+mode\s+|la\s+|le\s+|l['’])?(?:vision|cam[ée]ra|webcam|scanner|neurovision)\b", norm)
+        re.search(r"\b(?:mode\s+)?(?:neurovision|neovision)\b", norm)
+        or re.search(r"\b(?:scanner\s+(?:visuel|cognitif|biom[ée]trique|neurovision|neovision))\b", norm)
+        or re.search(r"\b(?:active|allume|lance|ouvre|affiche|coupe|arr[êe]te|ferme|d[ée]sactive|eteins|[ée]teins|quitte)\s+(?:le\s+mode\s+|la\s+|le\s+|l['’])?(?:vision|cam[ée]ra|webcam|scanner|neurovision|neovision)\b", norm)
         or re.search(r"\b(?:[ée]tat|score|niveau)\s+de\s+fatigue\b|\banalyse\s+(?:ma\s+fatigue|mon\s+visage)\b", norm)
     ):
         return True
@@ -795,8 +795,8 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
     if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague)\b", normalized):
         return "Il y a 10 types de personnes dans le monde : ceux qui comprennent le binaire, et ceux qui ne le comprennent pas !"
 
-    # 0a5. Test Micro, Radio & Écoute ("tu me reçois", "tu me captes", "tu m'entends", "tu nous entends", "test micro")
-    if re.search(r"\b(?:tu\s+(?:me\s+)?r[ée][cç]ois|t['’]es\s+r[ée][cç]ois|tu\s+m['’][ée]revois|tu\s+m['’][ée]loignes?\s+de\s+(?:soi|toi)|tu\s+(?:me\s+)?captes?|tu\s+m['’]entends|tu\s+nous\s+entends|m['’]entends[- ]tu|test\s+micro|tu\s+m['’][ée]coutes|tu\s+es\s+l[aà]|t['’]es\s+l[aà])\b", normalized):
+    # 0a5. Test Micro, Radio & Écoute ("tu me reçois", "tu me captes", "tu m'entends", "tu nous entends", "test micro", "tu me testes")
+    if re.search(r"\b(?:tu\s+(?:me\s+)?r[ée][cç]ois|t['’]es\s+r[ée][cç]ois|tu\s+m['’][ée]revois|tu\s+m['’][ée]loignes?\s+de\s+(?:soi|toi)|tu\s+(?:me\s+)?captes?|tu\s+m['’]entends|tu\s+nous\s+entends|m['’]entends[- ]tu|test\s+micro|tu\s+m['’][ée]coutes|tu\s+es\s+l[aà]|t['’]es\s+l[aà]|tu\s+me\s+testes?|tu\s+me\s+restes?|tu\s+m['’]entends\s+ou\s+pas)\b", normalized):
         return "5 sur 5 Moctar ! Je te reçois fort et clair, liaison parfaite. Je suis là avec toi mon ami !"
 
     # 0a5b. Réassurance empathique immédiate ("tu ne me réponds pas", "tu ne me répondais pas", "tu ne me comprends pas", "je te parle depuis")
@@ -816,10 +816,10 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
     if not is_compound and re.search(r"\b(?:je\s+fais\s+une\s+pause|pause\s+caf[ée]|je\s+prends\s+(?:l['’]air|une\s+pause)|je\s+vais\s+prendre\s+l['’]air|je\s+souffle\s+un\s+peu)\b", normalized):
         return "Très bonne idée Moctar, souffle un peu et prends ton temps. Je garde un œil sur la machine pendant ta pause !"
 
-    # 0a9. Comment ça va & Humeur complice ("comment tu vas", "ça va", "tu as la forme", "la forme")
+    # 0a9. Comment ça va, Humeur complice & Salutations Africaines ("c'est comment", "comment tu vas", "ça va", "tu as la forme", "la forme")
     if not is_compound and (
-        re.search(r"\b(?:comment\s+(?:vas?[- ]tu|tu\s+vas)|(?:[cç]a\s+va|la\s+forme)(?:\s+moctar|\s+jarvis)?)\b", normalized)
-        or normalized.strip(" ?!,.") in ("ca va", "ça va", "la forme", "comment tu vas", "comment vas tu", "tu vas bien")
+        re.search(r"\b(?:c['’]est\s+comment|dis[- ]le[- ]comment|uvac\s+c['’]est\s+comment|comment\s+c['’]est|quoi\s+de\s+neuf|comment\s+(?:vas?[- ]tu|tu\s+vas)|(?:[cç]a\s+va|la\s+forme)(?:\s+moctar|\s+jarvis)?)\b", normalized)
+        or normalized.strip(" ?!,.") in ("ca va", "ça va", "la forme", "comment tu vas", "comment vas tu", "tu vas bien", "c'est comment", "c est comment", "dis le comment", "dis-le-comment")
     ):
         has_issue = False
         issue_detail = ""
@@ -1009,8 +1009,8 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
 
     is_neuro_start = bool(re.search(
         r"\b(?:"
-        r"(?:mets?(?:\s+toi)?\s+(?:en\s+)?)?mode\s+neurovision|"
-        r"(?:active|activer|allume|allumer|lance|lancer|ouvre|ouvrir|affiche|afficher|d[ée]marre|d[ée]marrer|mets|mettre)\s+(?:le\s+mode\s+|la\s+|le\s+|l['’])?(?:vision|cam[ée]ra|webcam|scanner\s+neurovision|neurovision)\b|"
+        r"(?:mets?(?:\s+toi)?\s+(?:en\s+)?)?mode\s+(?:neurovision|neovision)|"
+        r"(?:active|activer|allume|allumer|lance|lancer|ouvre|ouvrir|affiche|afficher|d[ée]marre|d[ée]marrer|mets|mettre)\s+(?:le\s+mode\s+|la\s+|le\s+|l['’])?(?:vision|cam[ée]ra|webcam|scanner\s+neurovision|neurovision|neovision)\b|"
         r"mode\s+(?:vision|cam[ée]ra|webcam)\b"
         r")",
         normalized,
@@ -2848,7 +2848,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             action_tools = []
 
             # Métadonnées action NeuroVision
-            if any(k in norm_cmd for k in ("neurovision", "vision", "camera", "caméra", "webcam")):
+            if any(k in norm_cmd for k in ("neurovision", "neovision", "vision", "camera", "caméra", "webcam")):
                 if any(k in norm_cmd for k in ("active", "allume", "lance", "ouvre", "affiche", "mets", "mode", "demarre", "démarre")):
                     action_name = "open_modal"
                     action_target = "neurovision-dialog"
@@ -2861,6 +2861,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     action_modal_id = "neurovision-dialog"
                     action_title = "Scanner NeuroVision 3D"
                     action_tools = [{"tool": "control_vision", "arguments": {"action": "stop"}, "success": True}]
+
+            # Métadonnées action HUD 3D
+            if any(k in norm_cmd for k in ("hud", "3d", "top 3d", "hope 3d", "hot 3d", "orbe", "plasma", "quantum")):
+                if any(k in norm_cmd for k in ("active", "lance", "ouvre", "affiche", "mets", "mode", "passe", "bascule")):
+                    action_name = "open_hud_3d"
+                    action_target = "/hud"
+                    action_title = "HUD 3D Cybernétique"
 
             # Métadonnées action Plein écran
             if "plein ecran" in norm_cmd or "plein écran" in norm_cmd:
@@ -2942,6 +2949,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "status": "success",
                         "reply": reply_text,
                         "action": autonomous_res.get("action"),
+                        "target": autonomous_res.get("target"),
+                        "modal_id": autonomous_res.get("modal_id"),
                         "url": autonomous_res.get("url"),
                         "title": autonomous_res.get("title"),
                         "tools_used": autonomous_res.get("tools_used", []),
@@ -3072,6 +3081,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ),
                 "wake_word_detected": wake_detected,
                 "action": agent_result.get("action"),
+                "target": agent_result.get("target"),
+                "modal_id": agent_result.get("modal_id"),
                 "url": agent_result.get("url"),
                 "title": agent_result.get("title"),
                 "tools_used": agent_result.get("tools_used", []),

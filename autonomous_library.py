@@ -382,6 +382,8 @@ def execute_autonomous_task(
     if any(k in norm for k in [
         "mode hud 3d", "hud 3d", "ouvre le hud 3d", "active le hud 3d", "lance le hud 3d",
         "mode hud", "ouvre le hud", "active le hud", "mode hope 3d", "mode hot trading", "mode hot-trading",
+        "top 3d", "ouvre le top 3d", "mode top 3d", "active le top 3d", "lance le top 3d", "ouvre top 3d",
+        "hot 3d", "up 3d", "hop 3d",
     ]):
         actions.execute_tool("switch_hud_view", {"view": "plasma", "locate": False})
         tools_used.append({"tool": "switch_hud_view", "arguments": {"view": "plasma", "locate": False}, "success": True})
@@ -501,6 +503,8 @@ def execute_autonomous_task(
         "lance neurovision", "affiche neurovision", "scanner neurovision", "active le mode neurovision",
         "mets le mode neurovision", "mets-toi en mode neurovision", "ouvre le mode neurovision",
         "allume la camera", "allume la caméra", "active la camera", "active la caméra", "active la vision",
+        "neovision", "mode neovision", "ouvre neovision", "active neovision", "lance neovision", "affiche neovision",
+        "ouvre la camera", "ouvre la caméra", "ouvre la vision", "ouvre camera", "ouvre caméra",
     ]) and not any(k in norm for k in ["ferme", "desactive", "désactive", "coupe", "quitte", "arrete", "arrête", "eteins", "éteins"]):
         actions.execute_tool("control_vision", {"action": "start"})
         tools_used.append({"tool": "control_vision", "arguments": {"action": "start"}, "success": True})
@@ -869,6 +873,34 @@ def execute_autonomous_task(
                 target = raw_query[len(v):].strip()
                 target_norm = _normalize(target)
 
+                # Écrans système & modules internes (NeuroVision, HUD 3D) -> Ne JAMAIS rediriger vers une recherche Google
+                if any(nv in target_norm for nv in ("neurovision", "neovision", "camera", "caméra", "vision", "scanner")):
+                    actions.execute_tool("control_vision", {"action": "start"})
+                    tools_used.append({"tool": "control_vision", "arguments": {"action": "start"}, "success": True})
+                    return {
+                        "handled": True,
+                        "reply": "Caméra et vision cognitive NeuroVision activées, Moctar. Je veille sur ton poste.",
+                        "action": "open_modal",
+                        "target": "neurovision-dialog",
+                        "modal_id": "neurovision-dialog",
+                        "title": "Scanner NeuroVision 3D",
+                        "tools_used": tools_used,
+                        "task_category": "neurovision",
+                    }
+
+                if any(h in target_norm for h in ("hud", "3d", "top 3d", "hot 3d", "up 3d", "hop 3d", "orbe", "plasma", "quantum")):
+                    actions.execute_tool("switch_hud_view", {"view": "plasma", "locate": False})
+                    tools_used.append({"tool": "switch_hud_view", "arguments": {"view": "plasma", "locate": False}, "success": True})
+                    return {
+                        "handled": True,
+                        "reply": "Interface HUD 3D cybernétique activée, Moctar.",
+                        "action": "open_app",
+                        "url": "/hud",
+                        "title": "HUD 3D Cybernétique",
+                        "tools_used": tools_used,
+                        "task_category": "hud_3d",
+                    }
+
                 # Projet de développement ("ouvre le projet Baba Market", "ouvre Baba Market dans VS Code")
                 if "projet" in target_norm or any(p in target_norm for p in ("baba market", "papa market", "noor express", "edumanage", "audit energetique")):
                     proj_key = "jarvis"
@@ -880,7 +912,7 @@ def execute_autonomous_task(
                         proj_key = "edumanage"
                     elif "audit" in target_norm or "monitoring" in target_norm:
                         proj_key = "audit_energetique"
-                    in_vscode = any(c in target_norm for c in ("vscode", "vs code", "code", "visual studio", "visuel studio"))
+                    in_vscode = any(c in target_norm for c in ("vscode", "vs code", "code", "visual studio", "visuel studio", "vsitio"))
                     proj_res = actions.execute_tool("open_project", {"project_key": proj_key, "open_in_vscode": in_vscode})
                     tools_used.append({"tool": "open_project", "arguments": {"project_key": proj_key, "open_in_vscode": in_vscode}, "success": bool(proj_res.get("success"))})
                     msg = proj_res.get("message") if isinstance(proj_res, dict) else str(proj_res)
@@ -897,9 +929,9 @@ def execute_autonomous_task(
                 # Application locale
                 if any(app in target_norm for app in [
                     "terminal", "cmd", "invite de commande", "powershell", "calculatrice", "notepad", "bloc notes", "bloc-notes",
-                    "vscode", "vs code", "code", "visual studio", "visuel studio", "vscod", "studio code",
+                    "vscode", "vs code", "code", "visual studio", "visuel studio", "vscod", "studio code", "vsitio", "vsit",
                 ]):
-                    canonical = "vscode" if any(c in target_norm for c in ["code", "visual", "visuel", "vscod"]) else target
+                    canonical = "vscode" if any(c in target_norm for c in ["code", "visual", "visuel", "vscod", "vsitio", "vsit"]) else target
                     app_res = actions.execute_tool("open_app", {"app_name": canonical})
                     tools_used.append({"tool": "open_app", "arguments": {"app_name": canonical}, "success": bool(app_res.get("success"))})
                     msg = app_res.get("message") if isinstance(app_res, dict) else str(app_res)
@@ -1114,6 +1146,22 @@ def execute_autonomous_task(
             "clignement", "clignements", "baillement", "bâillement", "biometrie", "biométrie",
         }))
     )
+    # Exclusion stricte : si la phrase est un ordre d'ouverture ou de fermeture, traiter comme action
+    if any(k in norm for k in ("ouvre", "lance", "active", "affiche", "mets", "allume", "demarre", "demarrer")):
+        if any(nv in norm for nv in ("neurovision", "neovision", "camera", "caméra", "vision", "scanner")):
+            actions.execute_tool("control_vision", {"action": "start"})
+            tools_used.append({"tool": "control_vision", "arguments": {"action": "start"}, "success": True})
+            return {
+                "handled": True,
+                "reply": "Caméra et vision cognitive NeuroVision activées, Moctar. Je veille sur ton poste.",
+                "action": "open_modal",
+                "target": "neurovision-dialog",
+                "modal_id": "neurovision-dialog",
+                "title": "Scanner NeuroVision 3D",
+                "tools_used": tools_used,
+                "task_category": "neurovision",
+            }
+
     # Exclusion stricte : si la phrase parle de musique, youtube, fenêtre, réseau, port, etc., ce n'est PAS de la biométrie faciale
     if any(k in norm for k in (
         "musique", "playlist", "chanson", "youtube", "morceau", "son",

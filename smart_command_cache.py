@@ -71,6 +71,13 @@ UNCACHEABLE_PATTERNS = (
     "reprise de la lecture",
     "niveau audio ajusté",
     "capteur neurovision",
+    "pardon",
+    "m'échappe",
+    "m'echappe",
+    "m echappe",
+    "de quoi tu parles",
+    "impossible d'ouvrir",
+    "impossible d ouvrir",
 )
 
 
@@ -449,7 +456,11 @@ class SmartCommandCache:
         low_reply = reply_clean.lower()
 
         # Ne jamais mettre en cache les réponses d'erreur, indisponibilité ou incompréhension
-        if any(bad in low_reply for bad in UNCACHEABLE_PATTERNS):
+        if (
+            any(bad in low_reply for bad in UNCACHEABLE_PATTERNS)
+            or low_reply.startswith("pardon")
+            or ("?" in low_reply and any(w in low_reply for w in ("redire", "repeter", "parles", "capte", "compris")))
+        ):
             return False
 
         canonical_key, deduced_cat, _ = canonicalize_query(query)

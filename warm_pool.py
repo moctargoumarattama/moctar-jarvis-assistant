@@ -140,3 +140,4 @@ def start_warm_pool() -> WarmConnectionPool:
 def stop_warm_pool() -> None:
     pool = WarmConnectionPool.get_instance()
     pool.stop()
+

@@ -1251,7 +1251,7 @@ def _call_groq_voice_semantic(
                         "tool_calls": tool_calls,
                         "finish_reason": "tool_calls" if tool_calls else "stop",
                     }
-                elif res.status_code in (400, 404) or "model_not_found" in res.text.lower() or "decommissioned" in res.text.lower():
+                elif res.status_code == 404 or "model_not_found" in res.text.lower() or "decommissioned" in res.text.lower():
                     if hasattr(ai_brain, "mark_groq_model_dead"):
                         ai_brain.mark_groq_model_dead(model_name)
                     LOGGER.warning("⚡ [GROQ HTTP %s] indisponible/décommissionné (blacklisté)", model_name)

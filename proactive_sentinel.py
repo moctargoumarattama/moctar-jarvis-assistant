@@ -137,3 +137,4 @@ class ProactiveSentinel:
 
 def get_proactive_sentinel() -> ProactiveSentinel:
     return ProactiveSentinel.get_instance()
+

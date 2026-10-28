@@ -13,29 +13,12 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
-import threading
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 LOGGER = logging.getLogger("jarvis.hedging")
 
 DEFAULT_HEDGE_DELAY_SEC = 0.55  # 550 ms
-
-
-_HEDGE_EXECUTOR: Optional[concurrent.futures.ThreadPoolExecutor] = None
-_HEDGE_LOCK = threading.Lock()
-
-
-def get_hedge_executor() -> concurrent.futures.ThreadPoolExecutor:
-    """Retourne l'executor persistant pour éviter l'overhead de création de threads."""
-    global _HEDGE_EXECUTOR
-    if _HEDGE_EXECUTOR is None:
-        with _HEDGE_LOCK:
-            if _HEDGE_EXECUTOR is None:
-                _HEDGE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-                    max_workers=4, thread_name_prefix="JarvisHedge"
-                )
-    return _HEDGE_EXECUTOR
 
 
 def execute_hedged_call(
@@ -52,7 +35,7 @@ def execute_hedged_call(
         (result, winner_name, duration_ms)
     """
     t0 = time.perf_counter()
-    executor = get_hedge_executor()
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="JarvisHedge")
 
     def _is_valid(res: Any) -> bool:
         if res is None:
@@ -67,57 +50,62 @@ def execute_hedged_call(
             return bool(content and not str(content).startswith("Mode dégradé"))
         return True
 
-    primary_future = executor.submit(primary_fn)
-
-    # Attente bornée du premier moteur
     try:
-        res1 = primary_future.result(timeout=hedge_delay)
-        if _is_valid(res1):
-            elapsed_ms = (time.perf_counter() - t0) * 1000.0
-            LOGGER.info("⚡ [HEDGING WINNER: %s] (%.0fms): réponse immédiate", primary_name, elapsed_ms)
-            return res1, primary_name, elapsed_ms
-    except concurrent.futures.TimeoutError:
-        # Le primaire tarde : déclenchement immédiat du secours en parallèle
-        LOGGER.info(
-            "⚡ [HEDGING TRIGGERED]: %s n'a pas répondu sous %.0fms. Lancement immédiat de %s en parallèle...",
-            primary_name,
-            hedge_delay * 1000.0,
-            secondary_name,
-        )
-    except Exception as exc1:
-        LOGGER.warning("⚡ [HEDGING %s FAILED]: %s. Bascule directe sur %s...", primary_name, exc1, secondary_name)
+        primary_future = executor.submit(primary_fn)
 
-    # Second moteur lancé (soit suite à timeout, soit suite à échec précoce)
-    secondary_future = executor.submit(secondary_fn)
-
-    # Course entre les deux (ou attente du secondaire)
-    done, not_done = concurrent.futures.wait(
-        [primary_future, secondary_future],
-        return_when=concurrent.futures.FIRST_COMPLETED,
-    )
-
-    for fut in done:
-        if fut.exception() is None:
-            val = fut.result()
-            if _is_valid(val):
-                winner = primary_name if fut is primary_future else secondary_name
-                elapsed_ms = (time.perf_counter() - t0) * 1000.0
-                LOGGER.info("⚡ [HEDGING WINNER: %s] (%.0fms)", winner, elapsed_ms)
-                return val, winner, elapsed_ms
-
-    # Si le premier fini n'était pas valide ou a échoué, on attend le second
-    for fut in not_done:
+        # Attente bornée du premier moteur
         try:
-            val = fut.result(timeout=4.0)
-            if _is_valid(val):
-                winner = primary_name if fut is primary_future else secondary_name
+            res1 = primary_future.result(timeout=hedge_delay)
+            if _is_valid(res1):
                 elapsed_ms = (time.perf_counter() - t0) * 1000.0
-                LOGGER.info("⚡ [HEDGING LATE WINNER: %s] (%.0fms)", winner, elapsed_ms)
-                return val, winner, elapsed_ms
-        except Exception:
-            pass
+                LOGGER.info("⚡ [HEDGING WINNER: %s] (%.0fms): réponse immédiate", primary_name, elapsed_ms)
+                return res1, primary_name, elapsed_ms
+        except concurrent.futures.TimeoutError:
+            # Le primaire tarde : déclenchement immédiat du secours en parallèle
+            LOGGER.info(
+                "⚡ [HEDGING TRIGGERED]: %s n'a pas répondu sous %.0fms. Lancement immédiat de %s en parallèle...",
+                primary_name,
+                hedge_delay * 1000.0,
+                secondary_name,
+            )
+        except Exception as exc1:
+            LOGGER.warning("⚡ [HEDGING %s FAILED]: %s. Bascule directe sur %s...", primary_name, exc1, secondary_name)
 
-    # Si aucun n'a réussi
-    elapsed_ms = (time.perf_counter() - t0) * 1000.0
-    LOGGER.warning("⚡ [HEDGING EXHAUSTED]: Les deux moteurs ont échoué après %.0fms", elapsed_ms)
-    return None, "none", elapsed_ms
+        # Second moteur lancé (soit suite à timeout, soit suite à échec précoce)
+        secondary_future = executor.submit(secondary_fn)
+
+        # Course entre les deux (ou attente du secondaire)
+        done, not_done = concurrent.futures.wait(
+            [primary_future, secondary_future],
+            return_when=concurrent.futures.FIRST_COMPLETED,
+        )
+
+        for fut in done:
+            if fut.exception() is None:
+                val = fut.result()
+                if _is_valid(val):
+                    winner = primary_name if fut is primary_future else secondary_name
+                    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                    LOGGER.info("⚡ [HEDGING WINNER: %s] (%.0fms)", winner, elapsed_ms)
+                    return val, winner, elapsed_ms
+
+        # Si le premier fini n'était pas valide ou a échoué, on attend le second
+        for fut in not_done:
+            try:
+                val = fut.result(timeout=4.0)
+                if _is_valid(val):
+                    winner = primary_name if fut is primary_future else secondary_name
+                    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                    LOGGER.info("⚡ [HEDGING LATE WINNER: %s] (%.0fms)", winner, elapsed_ms)
+                    return val, winner, elapsed_ms
+            except Exception:
+                pass
+
+        # Si aucun n'a réussi
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        LOGGER.warning("⚡ [HEDGING EXHAUSTED]: Les deux moteurs ont échoué après %.0fms", elapsed_ms)
+        return None, "none", elapsed_ms
+
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+

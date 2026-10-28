@@ -37,11 +37,11 @@ def test_warm_connection_pool_lifecycle():
 def test_dual_engine_hedging_fast_primary():
     """Quand le moteur primaire répond avant le hedge_delay, il gagne immédiatement."""
     def primary():
-        time.sleep(0.02)
+        time.sleep(0.05)
         return "Réponse rapide Gemini"
 
     def secondary():
-        time.sleep(0.4)
+        time.sleep(0.3)
         return "Réponse Groq"
 
     res, winner, elapsed = dual_engine_hedging.execute_hedged_call(
@@ -49,11 +49,11 @@ def test_dual_engine_hedging_fast_primary():
         secondary_fn=secondary,
         primary_name="Gemini",
         secondary_name="Groq",
-        hedge_delay=0.25,
+        hedge_delay=0.15,
     )
     assert res == "Réponse rapide Gemini"
     assert winner == "Gemini"
-    assert elapsed < 250.0
+    assert elapsed < 150.0
 
 
 def test_dual_engine_hedging_slow_primary_triggers_secondary():
@@ -196,3 +196,4 @@ def test_autonomous_library_anaphora_and_whatsapp_flow():
     assert res_anaphora.get("handled") is True
     assert res_anaphora.get("task_category") == "services"
     assert "WhatsApp" in res_anaphora.get("reply", "")
+
