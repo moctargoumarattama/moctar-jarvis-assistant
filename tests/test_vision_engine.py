@@ -53,15 +53,37 @@ def test_hud_state_contains_vision():
 
 
 def test_voice_instant_commands_vision():
-    # Activation
-    resp_on = main.handle_instant_local_command("active la vision")
-    assert resp_on is not None
-    assert "activées" in resp_on.lower() or "active" in resp_on.lower()
+    # Activation variations
+    for phrase in [
+        "active la vision",
+        "mets le mode neurovision",
+        "mets-toi en mode neurovision",
+        "mode neurovision",
+        "active neurovision",
+        "active le mode neurovision",
+        "ouvre neurovision",
+        "affiche neurovision",
+        "lance neurovision",
+        "allume la caméra",
+    ]:
+        resp_on = main.handle_instant_local_command(phrase)
+        assert resp_on is not None, f"Failed on: {phrase}"
+        assert "activées" in resp_on.lower() or "active" in resp_on.lower(), f"Unexpected reply: {resp_on}"
 
-    # Coupure
-    resp_off = main.handle_instant_local_command("coupe la caméra")
-    assert resp_off is not None
-    assert "désactivés" in resp_off.lower() or "desactive" in resp_off.lower()
+    # Coupure variations
+    for phrase in [
+        "coupe la caméra",
+        "désactive neurovision",
+        "désactive le mode neurovision",
+        "ferme neurovision",
+        "ferme le mode neurovision",
+        "quitte le mode neurovision",
+        "arrête la vision",
+        "éteins la caméra",
+    ]:
+        resp_off = main.handle_instant_local_command(phrase)
+        assert resp_off is not None, f"Failed on: {phrase}"
+        assert "désactivés" in resp_off.lower() or "desactive" in resp_off.lower(), f"Unexpected reply: {resp_off}"
 
     # État de fatigue
     resp_fatigue = main.handle_instant_local_command("niveau de fatigue")

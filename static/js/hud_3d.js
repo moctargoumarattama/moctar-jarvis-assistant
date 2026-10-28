@@ -967,6 +967,43 @@
       recordHudConversationTurn(rawUser && !isHallucination ? rawUser : '', reply);
     }
 
+    // Notification d'actions globales (Modales NeuroVision, Plein écran, etc.)
+    window.dispatchEvent(new CustomEvent('jarvis-action', { detail: data }));
+
+    if (data.action === 'open_modal' || data.action === 'open_neurovision') {
+      if (data.target === 'neurovision-dialog' || data.modal_id === 'neurovision-dialog' || data.action === 'open_neurovision') {
+        if (window.NeuroVision && typeof window.NeuroVision.open === 'function') {
+          window.NeuroVision.open();
+        } else {
+          const d = document.getElementById('neurovision-dialog');
+          if (d && !d.open) {
+            if (typeof d.showModal === 'function') d.showModal();
+            else d.setAttribute('open', '');
+          }
+        }
+      }
+    } else if (data.action === 'close_modal' || data.action === 'close_neurovision') {
+      if (data.target === 'neurovision-dialog' || data.modal_id === 'neurovision-dialog' || data.action === 'close_neurovision') {
+        if (window.NeuroVision && typeof window.NeuroVision.close === 'function') {
+          window.NeuroVision.close();
+        } else {
+          const d = document.getElementById('neurovision-dialog');
+          if (d && d.open) {
+            if (typeof d.close === 'function') d.close();
+            else d.removeAttribute('open');
+          }
+        }
+      }
+    } else if (data.action === 'toggle_fullscreen') {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.().catch(() => {});
+      }
+    } else if (data.action === 'exit_fullscreen') {
+      if (document.fullscreenElement) {
+        document.exitFullscreen?.().catch(() => {});
+      }
+    }
+
     // Ouverture d'URL externe si demandée (ex: YouTube, Google)
     let targetUrl = data.url;
     if (!targetUrl && Array.isArray(data.tools_used)) {
@@ -1030,6 +1067,13 @@
       } else if (textToCheck.includes('quantique') || textToCheck.includes('quantum') || textToCheck.includes('core') || textToCheck.includes('noyau')) {
         applyView('quantum', true);
       } else if (textToCheck.includes('plasma') || textToCheck.includes('réacteur') || textToCheck.includes('arc') || textToCheck.includes('orbe')) {
+        applyView('plasma', true);
+      } else if (textToCheck.includes('neurovision') || textToCheck.includes('vision cognitive')) {
+        if (textToCheck.includes('active') || textToCheck.includes('ouvre') || textToCheck.includes('lance') || textToCheck.includes('mode') || textToCheck.includes('affiche') || textToCheck.includes('allume')) {
+          if (window.NeuroVision && typeof window.NeuroVision.open === 'function') window.NeuroVision.open();
+        } else if (textToCheck.includes('ferme') || textToCheck.includes('desactive') || textToCheck.includes('désactive') || textToCheck.includes('coupe') || textToCheck.includes('arrete') || textToCheck.includes('arrête') || textToCheck.includes('quitte')) {
+          if (window.NeuroVision && typeof window.NeuroVision.close === 'function') window.NeuroVision.close();
+        }
         applyView('plasma', true);
       }
     }

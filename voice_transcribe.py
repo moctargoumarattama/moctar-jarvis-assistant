@@ -443,7 +443,9 @@ def filter_whisper_hallucinations(text: str, *, allow_short_confirmations: bool 
 
     # Préservation impérative des demandes réelles contenant le nom de l'assistant ou un verbe d'action
     USER_INTENT_EXCEPTION_PATTERN = re.compile(
-        r"\b(?:jarvis|moctar|mets|mettre|ajoute|ajouter|active|activer|g[ée]n[ée]re|genere|fais|faire|traduis|traduire|peux[- ]tu|aide|affiche|montre)\b",
+        r"\b(?:jarvis|moctar|salut|bonjour|coucou|hello|re[çc]ois|recois|entends|m['’]entends|vois|m['’]vois|"
+        r"mets|mettre|ajoute|ajouter|active|activer|d[ée]sactive|desactiver|coupe|couper|ferme|fermer|arr[êe]te|arreter|quitte|quitter|"
+        r"g[ée]n[ée]re|genere|fais|faire|traduis|traduire|peux[- ]tu|aide|affiche|montre|scanner|cam[ée]ra|camera|webcam|neurovision|fatigue)\b",
         re.IGNORECASE,
     )
     has_user_intent = bool(USER_INTENT_EXCEPTION_PATTERN.search(cleaned))

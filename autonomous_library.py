@@ -471,6 +471,45 @@ def execute_autonomous_task(
             "task_category": "hud_3d",
         }
 
+    # 2.3d. NEUROVISION & SCANNER COGNITIF 3D ("mets le mode neurovision", "active la vision", "ferme neurovision")
+    if any(k in norm for k in [
+        "ferme neurovision", "ferme le mode neurovision", "desactive neurovision", "désactive neurovision",
+        "desactive le mode neurovision", "désactive le mode neurovision", "quitte neurovision", "quitte le mode neurovision",
+        "coupe neurovision", "coupe la neurovision", "arrete neurovision", "arrête neurovision",
+        "coupe la camera", "coupe la caméra", "eteins la camera", "éteins la caméra", "coupe la vision", "arrete la vision", "arrête la vision",
+    ]):
+        actions.execute_tool("control_vision", {"action": "stop"})
+        tools_used.append({"tool": "control_vision", "arguments": {"action": "stop"}, "success": True})
+        return {
+            "handled": True,
+            "reply": "Caméra et moteur NeuroVision désactivés, Moctar.",
+            "action": "close_modal",
+            "target": "neurovision-dialog",
+            "modal_id": "neurovision-dialog",
+            "title": "Scanner NeuroVision 3D",
+            "tools_used": tools_used,
+            "task_category": "neurovision",
+        }
+
+    if any(k in norm for k in [
+        "mode neurovision", "ouvre neurovision", "active neurovision", "active la neurovision",
+        "lance neurovision", "affiche neurovision", "scanner neurovision", "active le mode neurovision",
+        "mets le mode neurovision", "mets-toi en mode neurovision", "ouvre le mode neurovision",
+        "allume la camera", "allume la caméra", "active la camera", "active la caméra", "active la vision",
+    ]) and not any(k in norm for k in ["ferme", "desactive", "désactive", "coupe", "quitte", "arrete", "arrête", "eteins", "éteins"]):
+        actions.execute_tool("control_vision", {"action": "start"})
+        tools_used.append({"tool": "control_vision", "arguments": {"action": "start"}, "success": True})
+        return {
+            "handled": True,
+            "reply": "Caméra et vision cognitive NeuroVision activées, Moctar. Je veille sur ton poste.",
+            "action": "open_modal",
+            "target": "neurovision-dialog",
+            "modal_id": "neurovision-dialog",
+            "title": "Scanner NeuroVision 3D",
+            "tools_used": tools_used,
+            "task_category": "neurovision",
+        }
+
     # 2.4. FIN DE JOURNÉE & CLÔTURE DE SESSION
     if any(k in norm for k in ["fin de journee", "fin de journée", "je m'arrete la", "je m'arrête là", "je coupe pour ce soir", "bonne soiree"]):
         actions.execute_tool("control_playback", {"action": "pause"})
@@ -951,7 +990,14 @@ def execute_autonomous_task(
         "vois", "regarde", "scanner", "biometrie", "biométrie",
     }))
     if is_vision_or_face:
-        return {"handled": False, "tools_used": []}
+        res = actions.execute_tool("get_vision_telemetry", {})
+        tools_used.append({"tool": "get_vision_telemetry", "arguments": {}, "success": bool(res.get("success"))})
+        return {
+            "handled": True,
+            "reply": res.get("message", "Capteur NeuroVision interrogé, Moctar."),
+            "tools_used": tools_used,
+            "task_category": "neurovision",
+        }
 
     is_network_query = len(words) <= 10 and any(w in norm for w in ("reseau", "réseau", "connexion", "internet", "ping", "wifi", "debit", "débit", "debits"))
     if is_network_query:

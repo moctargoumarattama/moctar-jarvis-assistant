@@ -1438,10 +1438,27 @@
   initVoiceFeedbackUI();
 
   // Export global pour interaction
+  // Écouteur global d'actions vocales / WebSocket M.O.C.T.A.R
+  window.addEventListener('jarvis-action', (e) => {
+    const detail = e.detail || {};
+    if (detail.action === 'open_modal' || detail.action === 'open_neurovision') {
+      if (detail.target === 'neurovision-dialog' || detail.modal_id === 'neurovision-dialog' || detail.action === 'open_neurovision') {
+        openNeuroVisionDialog();
+      }
+    } else if (detail.action === 'close_modal' || detail.action === 'close_neurovision') {
+      if (detail.target === 'neurovision-dialog' || detail.modal_id === 'neurovision-dialog' || detail.action === 'close_neurovision') {
+        closeNeuroVisionDialog();
+      }
+    }
+  });
+
   window.NeuroVision = {
     start: startClientCamera,
     stop: stopClientCamera,
     toggle: toggleCamera,
-    switchSource: switchSource
+    switchSource: switchSource,
+    open: openNeuroVisionDialog,
+    close: closeNeuroVisionDialog,
+    isOpen: isNeuroVisionModalOpen
   };
 })();

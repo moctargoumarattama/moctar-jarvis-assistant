@@ -335,7 +335,7 @@ async def _prewarm_common_voice_tts() -> None:
             pass
 
 
-VOICE_SESSION_DURATION_SECONDS = float(os.getenv("VOICE_SESSION_DURATION_SECONDS", "45.0"))
+VOICE_SESSION_DURATION_SECONDS = float(os.getenv("VOICE_SESSION_DURATION_SECONDS", "0.0"))
 VOICE_BUTLER_GREETINGS = (
     "Salut Moctar ! Comment tu vas mon ami ? Je suis là, dis-moi tout !",
     "Salut Moctar ! Tout roule ? Qu'est-ce qu'on fait de beau aujourd'hui ?",
@@ -413,7 +413,7 @@ def is_direct_voice_command(text: str) -> bool:
     if re.search(r"\b(?:raconte(?:[- ]moi)?\s+(?:une\s+)?blague|fais[- ](?:nous|moi)\s+rire|une\s+blague|blague|fais\s+une\s+blague|qui\s+t['’\s]?a\s+(?:cr[ée][ée]|con[çc]u)|tu\s+(?:me\s+)?r[ée][cç]ois|t['’]es\s+r[ée][cç]ois|tu\s+m['’][ée]revois|tu\s+m['’][ée]loignes?\s+de\s+soi|tu\s+(?:me\s+)?captes?|tu\s+m['’\s]?entends|tu\s+nous\s+entends|tu\s+es\s+l[aà]|t['’\s]?es\s+l[aà]|tu\s+peux\s+parler|parle\s+un\s+peu|parle[- ]nous|test\s+micro|qui\s+est\s+l[aà]|fais\s+voir|actualit[ée]s?|c['’\s]?est\s+quoi\s+le\s+programme|programme)\b", norm):
         return True
     # Questions ouvertes directes
-    if re.search(r"^(?:comment|pourquoi|qu['’]est[- ]ce|c['’]est\s+quoi|qui\s+est|qui\s+a|quel|quelle|combien|est[- ]ce\s+que|peux[- ]tu|tu\s+peux|sais[- ]tu|tu\s+sais|dis[- ]moi|donne[- ]moi|raconte|explique|cherche|fais[- ]moi|montre[- ]moi)\b", norm):
+    if re.search(r"^(?:comment|pourquoi|qu['’]est[- ]ce|c['’]est\s+quoi|qui\s+est|qui\s+a|quel|quelle|combien|est[- ]ce\s+que|peux[- ]tu|tu\s+peux|sais[- ]tu|tu\s+sais|tu\s+es|t['’]es|dis[- ]moi|donne[- ]moi|raconte|explique|cherche|fais[- ]moi|montre[- ]moi)\b", norm):
         return True
 
     # 1. Bureau, VS Code & Lancement d'Applications
@@ -477,6 +477,14 @@ def is_direct_voice_command(text: str) -> bool:
         return True
     # 12b. Git & Projets ("git commit", "git push", "git pull", "git status", "papa market", "baba market")
     if re.search(r"\b(?:git\s+(?:commit|push|pull|status|log)|statut\s+git|papa\s+market|baba\s+market)\b", norm):
+        return True
+    # 12c. NeuroVision & Scanner Visuel / Fatigue Cognitive ("mets le mode neurovision", "active la vision", "ferme neurovision")
+    if (
+        re.search(r"\b(?:mode\s+)?neurovision\b", norm)
+        or re.search(r"\b(?:scanner\s+(?:visuel|cognitif|biom[ée]trique|neurovision))\b", norm)
+        or re.search(r"\b(?:active|allume|lance|ouvre|affiche|coupe|arr[êe]te|ferme|d[ée]sactive|eteins|[ée]teins|quitte)\s+(?:le\s+mode\s+|la\s+|le\s+|l['’])?(?:vision|cam[ée]ra|webcam|scanner|neurovision)\b", norm)
+        or re.search(r"\b(?:[ée]tat|score|niveau)\s+de\s+fatigue\b|\banalyse\s+(?:ma\s+fatigue|mon\s+visage)\b", norm)
+    ):
         return True
     try:
         from actions import project_actions
@@ -575,7 +583,7 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
         "aide", "bonjour", "salut", "merci", "pause", "stop", "musique",
         "terre", "globe", "plasma", "quantum", "bureau", "code", "terminal",
     }
-    if len(words) >= 2 or norm_clean in common_short_commands or any(
+    if norm_clean in common_short_commands or any(
         norm_clean.startswith(prefix)
         for prefix in (
             "qui", "quoi", "comment", "pourquoi", "quand", "ou ", "où ",
@@ -982,22 +990,38 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
             cpu, ram = 12, 45
         return f"Processeur à {cpu}%, mémoire vive à {ram}%, tous les systèmes sont nominaux, Moctar."
 
-    # 5b. NeuroVision & Fatigue Cognitive ("active la vision", "coupe la caméra", "niveau de fatigue")
-    if re.search(r"\b(?:active|allume|lance|demarre|d[ée]marre)\s+(?:la\s+)?(?:vision|cam[ée]ra|webcam|neurovision)\b", normalized):
-        try:
-            from vision_engine import VisionEngine
-            VisionEngine.get_instance().start()
-            return "Caméra et vision cognitive NeuroVision activées, Moctar. Je veille sur ton poste."
-        except Exception as exc:
-            return f"Impossible d'activer la vision Moctar : {exc}"
-
-    if re.search(r"\b(?:coupe|arr[êe]te|ferme|d[ée]sactive|eteins|[ée]teins)\s+(?:la\s+)?(?:vision|cam[ée]ra|webcam|neurovision)\b", normalized):
+    # 5b. NeuroVision & Fatigue Cognitive ("mets le mode neurovision", "active la vision", "coupe la caméra", "niveau de fatigue")
+    is_neuro_stop = bool(re.search(
+        r"\b(?:"
+        r"(?:quitte|quitter|ferme|fermer|d[ée]sactive|d[ée]sactiver|arr[êe]te|arr[êe]ter|coupe|couper|eteins|[ée]teins|[ée]teindre)\s+(?:le\s+mode\s+|la\s+|le\s+|l['’])?(?:vision|cam[ée]ra|webcam|scanner\s+neurovision|neurovision)\b|"
+        r"(?:sort|sortir)\s+du\s+mode\s+neurovision\b|"
+        r"(?:quitte|quitter|ferme|fermer|d[ée]sactive|d[ée]sactiver|arr[êe]te|arr[êe]ter|coupe|couper)\s+neurovision\b"
+        r")",
+        normalized,
+    ))
+    if is_neuro_stop:
         try:
             from vision_engine import VisionEngine
             VisionEngine.get_instance().stop()
             return "Caméra et moteur NeuroVision désactivés, Moctar."
         except Exception as exc:
             return f"Erreur lors de la désactivation de la vision Moctar : {exc}"
+
+    is_neuro_start = bool(re.search(
+        r"\b(?:"
+        r"(?:mets?(?:\s+toi)?\s+(?:en\s+)?)?mode\s+neurovision|"
+        r"(?:active|activer|allume|allumer|lance|lancer|ouvre|ouvrir|affiche|afficher|d[ée]marre|d[ée]marrer|mets|mettre)\s+(?:le\s+mode\s+|la\s+|le\s+|l['’])?(?:vision|cam[ée]ra|webcam|scanner\s+neurovision|neurovision)\b|"
+        r"mode\s+(?:vision|cam[ée]ra|webcam)\b"
+        r")",
+        normalized,
+    )) and not bool(re.search(r"\b(?:quitte|ferme|d[ée]sactive|arr[êe]te|coupe|eteins|[ée]teins|sort)\b", normalized))
+    if is_neuro_start:
+        try:
+            from vision_engine import VisionEngine
+            VisionEngine.get_instance().start()
+            return "Caméra et vision cognitive NeuroVision activées, Moctar. Je veille sur ton poste."
+        except Exception as exc:
+            return f"Impossible d'activer la vision Moctar : {exc}"
 
     if not is_compound and re.search(r"\b(?:[ée]tat|niveau|score)\s+de\s+fatigue\b|\b(?:analyse\s+(?:ma\s+)?fatigue)\b|\b(?:regarde|analyse)\s+mon\s+visage\b", normalized):
         try:
@@ -2790,10 +2814,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             display_user_text = command_text
             reply_text = instant_reply
             LOGGER.info("⚡ [VOICE LOCAL COMMAND (0ms)]: '%s' -> '%s'", command_text, reply_text)
+            norm_cmd = _strip_accents_1to1(command_text).lower()
+            action_name = None
+            action_target = None
+            action_modal_id = None
+            action_title = None
+            action_tools = []
+
+            # Métadonnées action NeuroVision
+            if any(k in norm_cmd for k in ("neurovision", "vision", "camera", "caméra", "webcam")):
+                if any(k in norm_cmd for k in ("active", "allume", "lance", "ouvre", "affiche", "mets", "mode", "demarre", "démarre")):
+                    action_name = "open_modal"
+                    action_target = "neurovision-dialog"
+                    action_modal_id = "neurovision-dialog"
+                    action_title = "Scanner NeuroVision 3D"
+                    action_tools = [{"tool": "control_vision", "arguments": {"action": "start"}, "success": True}]
+                elif any(k in norm_cmd for k in ("coupe", "arrête", "arrete", "ferme", "désactive", "desactive", "éteins", "eteins", "quitte", "sort")):
+                    action_name = "close_modal"
+                    action_target = "neurovision-dialog"
+                    action_modal_id = "neurovision-dialog"
+                    action_title = "Scanner NeuroVision 3D"
+                    action_tools = [{"tool": "control_vision", "arguments": {"action": "stop"}, "success": True}]
+
+            # Métadonnées action Plein écran
+            if "plein ecran" in norm_cmd or "plein écran" in norm_cmd:
+                if any(k in norm_cmd for k in ("quitte", "sort", "ferme", "desactive", "désactive")):
+                    action_name = "exit_fullscreen"
+                    action_tools = [{"tool": "toggle_fullscreen", "arguments": {"enable": False}, "success": True}]
+                else:
+                    action_name = "toggle_fullscreen"
+                    action_tools = [{"tool": "toggle_fullscreen", "arguments": {"enable": True}, "success": True}]
+
             agent_result = {
                 **instant_local_status(instant_reply),
                 "reply": reply_text,
-                "tools_used": [],
+                "action": action_name,
+                "target": action_target,
+                "modal_id": action_modal_id,
+                "title": action_title,
+                "tools_used": action_tools,
                 "thought_chain": ["Commande locale instantanée sans LLM (0ms)"],
                 "fast_path": True,
             }

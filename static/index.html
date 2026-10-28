@@ -2507,6 +2507,43 @@
 
       window.handleVoiceInteractResult = function(data) {
         if (!data || data.ignored) return;
+        // Notification d'actions globales (Modales NeuroVision, Plein écran, etc.)
+        window.dispatchEvent(new CustomEvent('jarvis-action', { detail: data }));
+
+        if (data.action === 'open_modal' || data.action === 'open_neurovision') {
+          if (data.target === 'neurovision-dialog' || data.modal_id === 'neurovision-dialog' || data.action === 'open_neurovision') {
+            if (window.NeuroVision && typeof window.NeuroVision.open === 'function') {
+              window.NeuroVision.open();
+            } else {
+              const d = document.getElementById('neurovision-dialog');
+              if (d && !d.open) {
+                if (typeof d.showModal === 'function') d.showModal();
+                else d.setAttribute('open', '');
+              }
+            }
+          }
+        } else if (data.action === 'close_modal' || data.action === 'close_neurovision') {
+          if (data.target === 'neurovision-dialog' || data.modal_id === 'neurovision-dialog' || data.action === 'close_neurovision') {
+            if (window.NeuroVision && typeof window.NeuroVision.close === 'function') {
+              window.NeuroVision.close();
+            } else {
+              const d = document.getElementById('neurovision-dialog');
+              if (d && d.open) {
+                if (typeof d.close === 'function') d.close();
+                else d.removeAttribute('open');
+              }
+            }
+          }
+        } else if (data.action === 'toggle_fullscreen') {
+          if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen?.().catch(() => {});
+          }
+        } else if (data.action === 'exit_fullscreen') {
+          if (document.fullscreenElement) {
+            document.exitFullscreen?.().catch(() => {});
+          }
+        }
+
         if (data.user_text) {
           appendChatMessage('user', data.user_text, null, null);
         }
