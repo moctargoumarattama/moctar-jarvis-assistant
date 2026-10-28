@@ -17,11 +17,16 @@ Traite les formulations naturelles, informelles ou complexes :
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
 import json
 import logging
 import os
 import re
+import threading
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 import actions
@@ -46,6 +51,7 @@ _SAFE_ROUTINE_VOICE_TOOLS = {
     "control_music",
     "get_project_context",
     "optimize_system",
+    "diagnose_linux_service",
     "add_todo",
     "list_todos",
     "schedule_reminder",
@@ -83,15 +89,17 @@ _SAFE_BG_COMMAND_PREFIXES = (
 
 def _resolve_security_engine(runtime: Any = None) -> SecurityPolicyEngine:
     """Récupère l'instance SecurityPolicyEngine active du runtime ou le moteur par défaut."""
-    jarvis = getattr(runtime, "jarvis", None) if runtime else None
-    agent = getattr(jarvis, "agent", None) if jarvis else None
-    sec = getattr(agent, "security", None) if agent else None
-    if isinstance(sec, SecurityPolicyEngine):
-        return sec
+    # HTTP runtimes wrap the bridge under .jarvis; the bridge passes itself.
+    for owner in (getattr(runtime, "jarvis", None), runtime):
+        agent = getattr(owner, "agent", None)
+        sec = getattr(agent, "security", None)
+        if isinstance(sec, SecurityPolicyEngine):
+            return sec
     return _DEFAULT_SECURITY_ENGINE
 
 
 _TOOL_TO_DOMAIN: Dict[str, str] = {
+    "diagnose_linux_service": "system",
     "open_app": "system",
     "close_active_window": "system",
     "snap_active_window": "system",
@@ -152,38 +160,106 @@ def _infer_tool_domain(tool_name: str) -> str:
     return "system"
 
 
+MAX_PENDING_VOICE_ACTIONS = 64
+_PENDING_VOICE_TTL_SECONDS = 180.0
+_DEFAULT_VOICE_SESSION = "default_voice_session"
 _pending_voice_actions: Dict[str, Dict[str, Any]] = {}
+_pending_voice_lock = threading.RLock()
+_voice_session_context: ContextVar[Optional[str]] = ContextVar("voice_session_id", default=None)
+
+
+@contextmanager
+def voice_session_scope(session_id: Optional[str]):
+    """Bind one request's session without changing public handler signatures."""
+    trusted_session = str(session_id or "").strip() or _DEFAULT_VOICE_SESSION
+    token = _voice_session_context.set(trusted_session)
+    try:
+        yield
+    finally:
+        _voice_session_context.reset(token)
+
+
+def _voice_session_id(runtime: Any = None) -> str:
+    """Use trusted conversation context, never an LLM-supplied tool argument."""
+    context_session = _voice_session_context.get()
+    if context_session:
+        return context_session
+    jarvis = getattr(runtime, "jarvis", None) if runtime is not None else None
+    for value in (getattr(runtime, "session_id", None), getattr(jarvis, "active_session_id", None)):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return _DEFAULT_VOICE_SESSION
+
+
+def _purge_pending_voice_actions_locked() -> None:
+    """The caller holds _pending_voice_lock for the entire lookup or mutation."""
+    now = time.time()
+    for action_id, action in list(_pending_voice_actions.items()):
+        if action.get("expires_at", 0) <= now:
+            _pending_voice_actions.pop(action_id, None)
+
+
+def _find_pending_voice_action_locked(
+    action_id_or_session: Optional[str], runtime: Any = None, *, consume: bool = False,
+) -> Optional[Dict[str, Any]]:
+    _purge_pending_voice_actions_locked()
+    target = str(action_id_or_session or "").strip() or _voice_session_id(runtime)
+    action = _pending_voice_actions.get(target)
+    if action is not None:
+        # Knowing an action UUID does not establish ownership of its conversation.
+        if action.get("session_id") != _voice_session_id(runtime):
+            return None
+    else:
+        if (_voice_session_context.get() is not None or runtime is not None) and target != _voice_session_id(runtime):
+            return None
+        action = next((
+            value for value in reversed(list(_pending_voice_actions.values()))
+            if value.get("session_id") == target
+        ), None)
+    if action is None:
+        return None
+    if consume:
+        action = _pending_voice_actions.pop(action["action_id"])
+    return deepcopy(action)
+
+
+def _register_pending_voice_action(
+    session_id: str, tool_name: str, arguments: Dict[str, Any], risk_level: int, prompt: str,
+) -> Dict[str, Any]:
+    now = time.time()
+    action = {
+        "action_id": f"act_{uuid.uuid4().hex}",
+        "session_id": session_id,
+        "tool_name": tool_name,
+        "arguments": deepcopy(arguments),
+        "risk_level": risk_level,
+        "created_at": now,
+        "expires_at": now + _PENDING_VOICE_TTL_SECONDS,
+        "prompt": prompt,
+    }
+    with _pending_voice_lock:
+        _purge_pending_voice_actions_locked()
+        while len(_pending_voice_actions) >= MAX_PENDING_VOICE_ACTIONS:
+            _pending_voice_actions.pop(next(iter(_pending_voice_actions)))
+        _pending_voice_actions[action["action_id"]] = action
+    return deepcopy(action)
 
 
 def get_pending_voice_action(action_id_or_session: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """Recupere la derniere action vocale en attente valide ou celle correspondant a l'ID/session."""
-    now = time.time()
-    expired = [k for k, v in list(_pending_voice_actions.items()) if v.get("expires_at", 0) < now]
-    for k in expired:
-        _pending_voice_actions.pop(k, None)
-
-    if not _pending_voice_actions:
-        return None
-
-    if action_id_or_session:
-        target = str(action_id_or_session).strip()
-        if target in _pending_voice_actions:
-            return _pending_voice_actions[target]
-        for v in reversed(list(_pending_voice_actions.values())):
-            if str(v.get("session_id") or "").strip() == target:
-                return v
-
-    return list(_pending_voice_actions.values())[-1]
+    """Return a detached action from the exact session; never fall back globally."""
+    with _pending_voice_lock:
+        return _find_pending_voice_action_locked(action_id_or_session)
 
 
 def clear_pending_voice_action(action_id: Optional[str] = None) -> bool:
-    """Efface une action en attente ou vide le registre."""
-    if action_id:
-        return _pending_voice_actions.pop(action_id, None) is not None
-    if _pending_voice_actions:
+    """Administrative cleanup, serialized with registration and consumption."""
+    with _pending_voice_lock:
+        _purge_pending_voice_actions_locked()
+        if action_id:
+            return _pending_voice_actions.pop(action_id, None) is not None
+        had_actions = bool(_pending_voice_actions)
         _pending_voice_actions.clear()
-        return True
-    return False
+        return had_actions
 
 
 def has_pending_voice_action(session_id: Optional[str] = None) -> bool:
@@ -193,7 +269,8 @@ def has_pending_voice_action(session_id: Optional[str] = None) -> bool:
 
 def confirm_pending_voice_action(action_id_or_session: Optional[str] = None, runtime: Any = None) -> Dict[str, Any]:
     """Execute et valide l'action vocale en attente dans le registre."""
-    action = get_pending_voice_action(action_id_or_session)
+    with _pending_voice_lock:
+        action = _find_pending_voice_action_locked(action_id_or_session, runtime, consume=True)
     if not action:
         return {
             "success": False,
@@ -207,31 +284,49 @@ def confirm_pending_voice_action(action_id_or_session: Optional[str] = None, run
     security_engine = _resolve_security_engine(runtime)
 
     try:
+        # Permissions and arguments may have changed while the user was deciding.
+        domain = _infer_tool_domain(tool_name)
+        valid, reason = security_engine.validate_arguments(tool_name, args)
+        if not security_engine.is_domain_allowed(domain) or not valid:
+            reason = reason or f"Domaine '{domain}' desactive."
+            security_engine.audit_log(
+                tool_name=tool_name, arguments=args, risk_level=action.get("risk_level", 2),
+                confirmed=True, status="blocked", details=reason,
+            )
+            return {
+                "success": False, "status": "blocked", "security_status": "blocked",
+                "requires_confirmation": False, "pending_action_id": act_id,
+                "verification_status": "not_verified", "message": f"Action bloquee : {reason}",
+            }
         tool_res = execute_tool(tool_name, args)
         if not isinstance(tool_res, dict):
             tool_res = {"success": bool(tool_res), "action": tool_name, "message": str(tool_res or "")}
 
-        clear_pending_voice_action(act_id)
+        succeeded = bool(tool_res.get("success", False)) and tool_res.get("status") not in {
+            "error", "failed", "blocked", "degraded_fallback",
+        }
         security_engine.audit_log(
             tool_name=tool_name,
             arguments=args,
             risk_level=action.get("risk_level", 2),
             confirmed=True,
-            status="allowed" if tool_res.get("success", False) else "failed",
+            status="allowed" if succeeded else "failed",
             details="Action validee et confirmee par l'utilisateur.",
         )
-        msg = tool_res.get("message") or f"Action {tool_name} executee avec succes."
+        msg = tool_res.get("message") or (f"Action {tool_name} executee avec succes." if succeeded else f"Echec de l'action {tool_name}.")
         return {
-            "success": True,
-            "status": "success",
+            "success": succeeded,
+            "status": "success" if succeeded else "error",
+            "security_status": "allowed" if succeeded else "failed",
+            "requires_confirmation": False,
+            "verification_status": tool_res.get("verification_status", "not_verified"),
             "action": tool_name,
             "pending_action_id": act_id,
             "data": tool_res,
-            "message": f"Action confirmee Moctar : {msg}",
+            "message": f"Action confirmee Moctar : {msg}" if succeeded else str(msg),
         }
     except Exception as exc:
         LOGGER.exception("Erreur lors de l'execution de l'action confirmee '%s': %s", tool_name, exc)
-        clear_pending_voice_action(act_id)
         return {
             "success": False,
             "status": "error",
@@ -242,7 +337,8 @@ def confirm_pending_voice_action(action_id_or_session: Optional[str] = None, run
 
 def cancel_pending_voice_action(action_id_or_session: Optional[str] = None, runtime: Any = None) -> Dict[str, Any]:
     """Annule expressement l'action vocale en attente."""
-    action = get_pending_voice_action(action_id_or_session)
+    with _pending_voice_lock:
+        action = _find_pending_voice_action_locked(action_id_or_session, runtime, consume=True)
     if not action:
         return {
             "success": False,
@@ -251,7 +347,6 @@ def cancel_pending_voice_action(action_id_or_session: Optional[str] = None, runt
         }
     act_id = action["action_id"]
     tool_name = action["tool_name"]
-    clear_pending_voice_action(act_id)
     security_engine = _resolve_security_engine(runtime)
     security_engine.audit_log(
         tool_name=tool_name,
@@ -268,6 +363,31 @@ def cancel_pending_voice_action(action_id_or_session: Optional[str] = None, runt
         "pending_action_id": act_id,
         "message": f"Entendu Moctar, j'ai annule l'action '{tool_name}'.",
     }
+
+
+def resolve_pending_voice_command(
+    command_text: str, session_id: Optional[str] = None, runtime: Any = None,
+) -> Optional[Dict[str, Any]]:
+    """Handle a confirmation before routing a turn to a model or local intent."""
+    text = re.sub(r"\s+", " ", str(command_text or "").lower().replace("’", "'")).strip(" .!?")
+    confirmations = {"oui", "confirme", "je confirme", "confirme l'action", "confirmer l'action", "valide l'action"}
+    cancellations = {"non", "annule", "annuler", "annule l'action", "annuler l'action"}
+    if text not in confirmations | cancellations:
+        return None
+    with voice_session_scope(session_id or _voice_session_id(runtime)):
+        if text in {"oui", "non"} and not has_pending_voice_action():
+            return None
+        result = (
+            confirm_pending_voice_action(runtime=runtime)
+            if text in confirmations else cancel_pending_voice_action(runtime=runtime)
+        )
+    result["reply"] = result.get("message", "")
+    result.setdefault("requires_confirmation", False)
+    result.setdefault("security_status", "allowed" if result.get("success") else "failed")
+    result.setdefault("verification_status", "not_verified")
+    result.setdefault("pending_action_id", None)
+    result.setdefault("tools_used", [])
+    return result
 
 
 def execute_voice_tool_securely(
@@ -354,18 +474,10 @@ def execute_voice_tool_securely(
 
     if needs_confirmation or risk_level >= 3:
         confirm_prompt = security_engine.confirmation_prompt(tool_clean, args)
-        session_id = str(args.get("session_id") or getattr(runtime, "session_id", "default_voice_session") or "default_voice_session")
-        action_id = f"act_{int(time.time())}_{tool_clean[:12]}"
-        _pending_voice_actions[action_id] = {
-            "action_id": action_id,
-            "session_id": session_id,
-            "tool_name": tool_clean,
-            "arguments": args,
-            "risk_level": risk_level,
-            "expires_at": time.time() + 180.0,
-            "created_at": time.time(),
-            "prompt": confirm_prompt,
-        }
+        action = _register_pending_voice_action(
+            _voice_session_id(runtime), tool_clean, args, risk_level, confirm_prompt,
+        )
+        action_id = action["action_id"]
         LOGGER.warning(
             "[VOICE SECURITY CONFIRMATION REQUIRED] Outil '%s' (risque=%d, id=%s) bloque en attente de validation (TTL 180s) : %s",
             tool_clean,
@@ -1432,10 +1544,13 @@ def execute_voice_semantic_turn(
                 )
                 tool_res = {"success": True, "action": "update_active_task", "data": state, "message": "Mémoire de travail active mise à jour"}
             else:
-                tool_res = execute_voice_tool_securely(func_name, args, runtime=runtime)
+                with voice_session_scope(sess_key):
+                    tool_res = execute_voice_tool_securely(func_name, args, runtime=runtime)
             t_diff = int((time.perf_counter() - t_exec) * 1000)
 
             sec_state = tool_res.get("security_status") or ("allowed" if tool_res.get("success", False) else "failed")
+            if tool_res.get("status") == "blocked" or sec_state == "domain_disabled":
+                sec_state = "blocked"
 
             # Enregistrement automatique dans la mémoire de travail active uniquement si autorisé et réussi
             if tool_res.get("success", False):
@@ -1472,6 +1587,7 @@ def execute_voice_semantic_turn(
                 "success": tool_ok,
                 "security_status": sec_state,
                 "requires_confirmation": bool(tool_res.get("requires_confirmation", False)),
+                "pending_action_id": tool_res.get("pending_action_id"),
                 "duration_ms": t_diff,
             })
 
@@ -1672,12 +1788,16 @@ def execute_voice_semantic_turn(
         turn_status = (
             "blocked"
             if has_security_block
-            else ("pending_confirmation" if has_security_confirm else "success")
+            else ("pending_confirmation" if has_security_confirm else (
+                "success" if all(t.get("success", False) for t in tools_used) else "failed"
+            ))
         )
         return {
             "status": turn_status,
             "security_status": turn_status if (has_security_block or has_security_confirm) else "allowed",
             "requires_confirmation": has_security_confirm,
+            "pending_action_id": next((t.get("pending_action_id") for t in tools_used if t.get("requires_confirmation")), None),
+            "verification_status": "pending_confirmation" if has_security_confirm else "not_verified",
             "reply": final_reply,
             "action": action_name,
             "url": action_url,

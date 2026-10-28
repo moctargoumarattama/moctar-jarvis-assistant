@@ -133,6 +133,20 @@ function attachMessageSendAlias(app, options = {}) {
     if (!jid || !text || text.length > 4096) {
       return response.status(400).json({ ok: false, error: 'message_recipient_or_text_invalid' });
     }
+    let voiceAudio = null;
+    if (body.voice_reply_b64 !== undefined) {
+      // Bounded, canonical base64 only; never download a client-supplied URL.
+      const encoded = body.voice_reply_b64;
+      if (body.voice_mime_type !== 'audio/mpeg' || typeof encoded !== 'string' ||
+          !encoded.length || encoded.length > 1398104 || encoded.length % 4 !== 0 ||
+          !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+        return response.status(400).json({ ok: false, error: 'voice_reply_invalid' });
+      }
+      voiceAudio = Buffer.from(encoded, 'base64');
+      if (!voiceAudio.length || voiceAudio.length > 1024 * 1024 || voiceAudio.toString('base64') !== encoded) {
+        return response.status(400).json({ ok: false, error: 'voice_reply_invalid' });
+      }
+    }
     const expires = Date.now() + timeoutMs;
     try {
       const operation = Promise.resolve().then(async () => {
@@ -140,7 +154,14 @@ function attachMessageSendAlias(app, options = {}) {
         if (Date.now() >= expires) throw new SendAliasError(504, 'whatsapp_send_timeout');
         if (sending.has(socket)) throw new SendAliasError(503, 'whatsapp_send_in_progress');
         sending.add(socket);
-        const sent = Promise.resolve().then(() => socket.sendMessage(jid, { text }));
+        const sent = Promise.resolve().then(async () => {
+          const textResult = await socket.sendMessage(jid, { text });
+          if (voiceAudio) {
+            if (Date.now() >= expires) throw new SendAliasError(504, 'whatsapp_send_timeout');
+            await socket.sendMessage(jid, { audio: voiceAudio, mimetype: 'audio/mpeg', ptt: true });
+          }
+          return textResult;
+        });
         // Baileys has no reliable cancellation API. Keep the single socket busy
         // after a timeout until that actual send settles; never retry it here.
         sent.then(() => sending.delete(socket), () => sending.delete(socket));

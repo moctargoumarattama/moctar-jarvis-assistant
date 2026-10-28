@@ -27,6 +27,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 
+from action_status import action_status_fields
 from collector import utc_now
 from config import Settings
 import system_manager
@@ -205,8 +206,21 @@ def parse_message(payload: dict[str, Any], admin_phone_number: str | tuple[str, 
         audio = {"path": path, "url": url, "mimetype": mimetype}
     elif not text.strip():
         raise ValueError("Texte ou note vocale obligatoire")
+    explicit_voice = any(data.get(flag) is True for flag in ("is_voice", "voice_note", "voice_reply"))
+    explicit_voice = explicit_voice or data.get("media_type") == "audio"
     return {"id": message_id, "sender": phones[0], "text": text.strip(), "audio": audio,
-            "source": "voice" if audio else "text"}
+            "source": "voice" if audio else "text", "voice_reply_requested": explicit_voice}
+
+
+def wants_voice_reply(message: dict[str, Any]) -> bool:
+    """Only a voice note or an explicit request opts in to audio delivery."""
+    if message.get("audio") or message.get("source") == "voice" or message.get("voice_reply_requested"):
+        return True
+    text = "".join(char for char in unicodedata.normalize("NFKD", str(message.get("text") or "").casefold())
+                   if not unicodedata.combining(char))
+    return bool(re.search(
+        r"\b(?:reponds?|repondre|reponse|envoie|envoies|parle)\b.{0,65}\b(?:vocale?|audio|voix)\b"
+        r"|\b(?:reponse vocale|a voix haute|reply (?:by |with )?voice)\b", text))
 
 
 def parse_intent(text: str) -> tuple[str, str | None]:
@@ -632,7 +646,23 @@ class WhatsAppController:
                 if message.get("simulated"):
                     self.runtime.collector.add_event("info", f"Simulation vocale · {command['action']} · {command['status']}")
                     continue
-                command["reply_sent"] = await self._send_reply(command["response"], message["sender"])
+                outgoing = {"reply": command["response"]}
+                if wants_voice_reply(message):
+                    synthesize = getattr(self.runtime, "synthesize_whatsapp_reply", None)
+                    if callable(synthesize):
+                        try:
+                            outgoing.update(await synthesize(command["response"]))
+                            command["voice_reply_generated"] = bool(outgoing.get("voice_reply_b64"))
+                        except Exception:
+                            # TTS failure never hides the text result or retries an action.
+                            command["voice_reply_generated"] = False
+                            LOGGER.warning("Synthèse WhatsApp indisponible; réponse texte conservée")
+                # The asynchronous webhook remains a fast ACK. The result JSON is
+                # delivered by the existing authenticated /message/send connector.
+                command["reply_sent"] = await self._send_reply(
+                    outgoing if outgoing.get("voice_reply_b64") else command["response"], message["sender"])
+                if command.get("voice_reply_generated"):
+                    command["voice_reply_sent"] = command["reply_sent"]
                 level = "info" if command["status"] == "completed" and command["reply_sent"] else "warning"
                 delivery = "" if command["reply_sent"] else " · réponse non livrée"
                 self.runtime.collector.add_event(level, f"WhatsApp · {command['action']} · {command['status']}{delivery}")
@@ -709,7 +739,7 @@ class WhatsAppController:
                     )
                 except Exception:
                     pass
-            return result["reply"], result.get("status") != "error"
+            return result["reply"], action_status_fields(result)["ok"]
         return ("Commande système refusée ou non reconnue. Envoyez aide pour la syntaxe exacte et les services autorisés.", False)
 
     async def _backup(self) -> tuple[str, bool]:
@@ -746,13 +776,17 @@ class WhatsAppController:
             return False
         number = normalize_phone(recipient or self.settings.admin_phone_number)
         jid = f"{number}@s.whatsapp.net"
-        text = response[:4096]
+        voice = response if isinstance(response, dict) else {}
+        text = str(voice.get("reply", "") if voice else response)[:4096]
         recipient_value = jid if self.settings.whatsapp_send_to_field == "jid" else number
         payload = {"to": number, "jid": jid, "number": number,
                    "text": text, "message": text}
         # Preserve custom gateway aliases while always sending the standard contract.
         payload[self.settings.whatsapp_send_to_field] = recipient_value
         payload[self.settings.whatsapp_send_text_field] = text
+        if voice.get("voice_reply_b64"):
+            payload.update(reply=text, voice_reply_b64=voice["voice_reply_b64"],
+                           voice_mime_type="audio/mpeg")
         url = self.settings.whatsapp_send_url.replace(
             "{session_id}", quote(self.settings.whatsapp_session_id, safe=""))
         LOGGER.info("WhatsApp envoi passerelle: POST %s destinataire=%s", url, recipient_value)

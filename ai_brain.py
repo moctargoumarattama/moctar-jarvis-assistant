@@ -1559,6 +1559,8 @@ class AIBrain:
             }
         """
         try:
+            if isinstance(messages, dict):
+                messages = [messages]
             if isinstance(messages, str):
                 msg_list: list[dict[str, Any]] = []
                 if system_prompt:

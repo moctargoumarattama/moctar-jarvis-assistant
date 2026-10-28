@@ -10,6 +10,7 @@ import locale
 import os
 import re
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -455,8 +456,65 @@ def _resolve_app_alias(target: str) -> str:
     return norm
 
 
+def _app_command_args(command: Any) -> list[str]:
+    """Parse trusted app configuration without interpreting shell syntax."""
+    if isinstance(command, str):
+        raw_parts = [command]
+    elif isinstance(command, (list, tuple)):
+        raw_parts = [str(part) for part in command]
+    else:
+        raise ValueError("La commande d'application doit être une chaîne ou une liste.")
+    if any(re.search(r"[;&|`<>\r\n]|\$\(", part) for part in raw_parts):
+        raise ValueError("Métacaractère shell interdit dans la commande d'application.")
+    args = shlex.split(command, posix=(os.name != "nt")) if isinstance(command, str) else raw_parts
+    if os.name == "nt":
+        # Windows shlex retains surrounding quotes; CreateProcess expects plain argv.
+        args = [part[1:-1] if len(part) >= 2 and part[0] == part[-1] == '"' else part for part in args]
+        # Historical APP_COMMANDS use the cmd.exe builtin 'start'. Keep their aliases
+        # usable by launching the actual executable, never cmd.exe /c start.
+        if args and args[0].lower() == "start":
+            args = args[1:]
+            if args and not args[0]:
+                args = args[1:]
+    if not args or not args[0]:
+        raise ValueError("Exécutable d'application manquant.")
+    return args
+
+
+def _resolve_app_executable(executable: str, search_path: str) -> str:
+    """Find native executables, including Windows App Paths and VS Code launchers."""
+    resolved = executable if os.path.isfile(executable) else shutil.which(executable, path=search_path)
+    if os.name == "nt" and not resolved:
+        # Chrome/Edge registered with 'start' need not appear in PATH.
+        try:
+            import winreg
+            app_name = executable if executable.lower().endswith(".exe") else executable + ".exe"
+            for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                try:
+                    with winreg.OpenKey(hive, "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + app_name) as key:
+                        candidate = str(winreg.QueryValue(key, None)).strip('"')
+                    if os.path.isfile(candidate):
+                        resolved = candidate
+                        break
+                except OSError:
+                    continue
+        except ImportError:
+            pass
+    if os.name == "nt" and resolved and resolved.lower().endswith((".bat", ".cmd")):
+        # code.cmd is a shell wrapper; VS Code installs its native binary next to bin/.
+        if os.path.basename(resolved).lower() in {"code.cmd", "code-insiders.cmd"}:
+            binary = "Code - Insiders.exe" if "insiders" in resolved.lower() else "Code.exe"
+            candidate = os.path.join(os.path.dirname(os.path.dirname(resolved)), binary)
+            resolved = candidate if os.path.isfile(candidate) else None
+        else:
+            resolved = None
+    if not resolved:
+        raise FileNotFoundError(f"Exécutable natif introuvable : {executable}.")
+    return resolved
+
+
 def open_app(target: str = "", app: str = "", name: str = "", **kwargs: Any) -> Dict[str, Any]:
-    """Lance et ouvre une application installée sur le système d'exploitation Windows.
+    """Lance une application configurée sur Windows ou Linux sans interpréteur shell.
 
     Critères d'utilisation:
         - L'agent DOIT appeler cet outil dès que l'utilisateur demande d'ouvrir une application
@@ -516,32 +574,45 @@ def open_app(target: str = "", app: str = "", name: str = "", **kwargs: Any) -> 
         )
 
     try:
-        import platform
-        if platform.system() != "Windows":
+        args = _app_command_args(command)
+        env = os.environ.copy()
+        if os.name != "nt":
             target_user = "moctar" if os.path.exists("/home/moctar") else os.environ.get("USER", "root")
             display = os.environ.get("DISPLAY", ":0")
             xauth = os.environ.get("XAUTHORITY") or f"/home/{target_user}/.Xauthority"
-            bus = os.environ.get("DBUS_SESSION_BUS_ADDRESS") or "/run/user/1000/bus"
-
-            env = os.environ.copy()
+            runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or "/run/user/1000"
+            try:
+                import pwd
+                account = pwd.getpwnam(target_user)
+                runtime_dir = f"/run/user/{account.pw_uid}"
+                if not os.environ.get("XAUTHORITY"):
+                    xauth = os.path.join(account.pw_dir, ".Xauthority")
+            except (ImportError, KeyError):
+                pass
+            bus = os.environ.get("DBUS_SESSION_BUS_ADDRESS") or f"unix:path={runtime_dir}/bus"
             env["DISPLAY"] = display
+            env["XDG_RUNTIME_DIR"] = runtime_dir
             if os.path.exists(xauth):
                 env["XAUTHORITY"] = xauth
-            if os.path.exists(bus):
-                env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus}"
+            env["DBUS_SESSION_BUS_ADDRESS"] = bus if bus.startswith("unix:") else f"unix:path={bus}"
+            env["PATH"] = os.pathsep.join(dict.fromkeys([
+                *env.get("PATH", "").split(os.pathsep), "/usr/local/bin", "/usr/bin", "/bin", "/snap/bin",
+            ]))
+            args[0] = _resolve_app_executable(args[0], env["PATH"])
 
             if hasattr(os, "getuid") and os.getuid() == 0 and target_user != "root":
-                full_cmd = (
-                    f"sudo -u {target_user} env DISPLAY={display} XAUTHORITY={xauth} "
-                    f"XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS={bus} "
-                    f"PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin:$PATH "
-                    f"{command} >/tmp/jarvis_app_launch.log 2>&1 &"
-                )
-                subprocess.Popen(full_cmd, shell=True, env=env)
-            else:
-                subprocess.Popen(f"{command} >/dev/null 2>&1 &", shell=True, env=env)
+                sudo = shutil.which("sudo", path=env["PATH"])
+                if not sudo:
+                    raise FileNotFoundError("sudo est introuvable pour ouvrir l'application dans la session graphique.")
+                forwarded = [f"{key}={env[key]}" for key in (
+                    "DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "PATH",
+                ) if key in env]
+                args = [sudo, "-n", "-u", target_user, "env", *forwarded, *args]
+            subprocess.Popen(args, shell=False, env=env, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
         else:
-            subprocess.Popen(command, shell=True)
+            args[0] = _resolve_app_executable(args[0], env.get("PATH", ""))
+            subprocess.Popen(args, shell=False, env=env)
         display_name = chosen_target.replace("_", " ")
         app_data: Dict[str, Any] = {"target": chosen_target, "canonical": normalized_target, "command": command}
         if normalized_target in ("vscode", "code"):
@@ -568,6 +639,55 @@ def open_app(target: str = "", app: str = "", name: str = "", **kwargs: Any) -> 
             data=None,
             error=str(exc),
         )
+
+
+def diagnose_linux_service(service_name: str = "jarvis.service") -> str:
+    """Inspecte l'état réel et les 25 dernières lignes du journal d'un service Linux.
+
+    Args:
+        service_name (str): Nom d'un service systemd, par défaut jarvis.service.
+    """
+    if not isinstance(service_name, str) or service_name.startswith("-") or not re.fullmatch(
+        r"[a-zA-Z0-9_@.-]+(?:\.service)?", service_name,
+    ):
+        return "Diagnostic refusé : nom de service invalide (lettres, chiffres, _, @, . et - uniquement)."
+    if not sys.platform.startswith("linux"):
+        return "Le diagnostic systemd/journalctl s'exécute sur l'hôte Linux Ubuntu ; il n'est pas disponible sur cette machine."
+
+    report = [f"Diagnostic systemd : {service_name}"]
+    log_text = ""
+    for label, command in (
+        ("État réel", ["systemctl", "is-active", service_name]),
+        ("Journal", ["journalctl", "-u", service_name, "-n", "25", "--no-pager"]),
+    ):
+        try:
+            result = subprocess.run(command, shell=False, capture_output=True, text=True,
+                                    timeout=4, check=False)
+            stdout, stderr = (result.stdout or "").strip(), (result.stderr or "").strip()
+            if label == "État réel":
+                report.append(f"État réel : {stdout or 'indéterminé'} (code retour {result.returncode}).")
+                if stderr:
+                    report.append(f"systemctl : {stderr}")
+            elif result.returncode != 0:
+                report.append(f"Journal inaccessible (code retour {result.returncode}) : {stderr or stdout or 'aucun détail' }.")
+            else:
+                log_text = stdout
+                if stderr:
+                    report.append(f"Avertissement journalctl : {stderr}")
+        except subprocess.TimeoutExpired:
+            report.append(f"{label} : délai de 4 secondes dépassé, résultat non vérifié.")
+        except OSError as exc:
+            report.append(f"{label} : commande indisponible ou refusée : {exc}.")
+    if log_text:
+        errors = [line for line in log_text.splitlines()
+                  if re.search(r"ERROR|Traceback|Exception|Failed|exit-code", line, re.IGNORECASE)]
+        if errors:
+            report.append("Lignes d'erreur détectées :\n" + "\n".join(errors[-25:]))
+        else:
+            report.append("Aucun des marqueurs d'erreur recherchés dans les 25 dernières lignes ; cela ne garantit pas l'absence de panne.")
+    elif not any("Journal inaccessible" in line or line.startswith("Journal :") for line in report):
+        report.append("Journal : aucune ligne disponible ; cause de panne non déterminée.")
+    return "\n".join(report)
 
 
 def close_app(target: str) -> Dict[str, Any]:

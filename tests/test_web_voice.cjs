@@ -316,6 +316,64 @@ function createWebAudioFixture(t, overrides = {}) {
   };
 }
 
+test('proactive polling emits one HUD event and only the voice engine plays audio', async t => {
+  const events = [];
+  let polls = 0;
+  const audioUrl = '/api/voice/tts/cache/1234567890abcdef1234567890abcdef.mp3';
+  const message = { has_event: true, message: 'Votre sauvegarde est disponible.', audio_url: audioUrl };
+  const f = createWebAudioFixture(t, {
+    fetch: async url => {
+      assert.equal(url, '/api/voice/proactive');
+      polls += 1;
+      return { ok: true, json: async () => message };
+    },
+  });
+  f.fakeWindow.CustomEvent = class { constructor(type, options) { this.type = type; this.detail = options.detail; } };
+  f.fakeWindow.dispatchEvent = event => { if (event.type === 'jarvis:proactive-message') events.push(event); };
+  await f.engine.enable();
+  f.time.advance(25000);
+  await f.settle();
+  assert.equal(polls, 1);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, 'jarvis:proactive-message');
+  assert.equal(events[0].detail, message);
+  assert.deepEqual(f.audioPlayedUrls, [audioUrl]);
+  f.time.advance(25000);
+  await f.settle();
+  assert.equal(polls, 1, 'no competing request while proactive audio is playing');
+});
+
+for (const delayedStage of ['fetch', 'json']) {
+  test(`STOP aborts a proactive ${delayedStage} response before HUD updates or playback`, async t => {
+    const events = [];
+    let signal;
+    let resolveResponse;
+    const pending = new Promise(resolve => { resolveResponse = resolve; });
+    const data = { has_event: true, message: 'Cette initiative doit etre annulee.', audio_url: '/stale.mp3' };
+    const f = createWebAudioFixture(t, {
+      fetch: async (url, options) => {
+        assert.equal(url, '/api/voice/proactive');
+        signal = options.signal;
+        if (delayedStage === 'fetch') return pending;
+        return { ok: true, json: () => pending };
+      },
+    });
+    f.fakeWindow.CustomEvent = class { constructor(type, options) { this.type = type; this.detail = options.detail; } };
+    f.fakeWindow.dispatchEvent = event => { if (event.type === 'jarvis:proactive-message') events.push(event); };
+    await f.engine.enable();
+    f.time.advance(25000);
+    await f.settle();
+    assert.equal(signal.aborted, false);
+    f.engine.cancelActiveVoice();
+    assert.equal(signal.aborted, true);
+    resolveResponse(delayedStage === 'fetch' ? { ok: true, json: async () => data } : data);
+    await f.settle();
+    assert.deepEqual(events, []);
+    assert.deepEqual(f.audioPlayedUrls, []);
+    assert.deepEqual(f.spokenUtterances, []);
+  });
+}
+
 test('zero references to webkitSpeechRecognition or SpeechRecognition exist in static/voice.js and static/index.html', () => {
   const voiceSource = fs.readFileSync(path.join(__dirname, '../static/voice.js'), 'utf8');
   const indexSource = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
@@ -323,11 +381,11 @@ test('zero references to webkitSpeechRecognition or SpeechRecognition exist in s
   assert.equal(/webkitSpeechRecognition|SpeechRecognition/.test(indexSource), false, 'index.html must not reference SpeechRecognition');
 });
 
-test('cache-busting ?v=4.0 and Service Worker NetworkOnly for /api/voice/* are configured', () => {
+test('versioned voice scripts and Service Worker NetworkOnly for /api/voice/* are configured', () => {
   const indexSource = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
   const swSource = fs.readFileSync(path.join(__dirname, '../static/service-worker.js'), 'utf8');
-  assert.ok(indexSource.includes('/static/voice.js?v=4.0'), 'index.html must load /static/voice.js?v=4.0');
-  assert.ok(indexSource.includes('/static/cosmos.js?v=4.0'), 'index.html must load /static/cosmos.js?v=4.0');
+  assert.match(indexSource, /\/static\/voice\.js\?v=\d+(?:\.\d+)*/, 'voice.js needs an explicit cache version');
+  assert.match(indexSource, /\/static\/cosmos\.js\?v=\d+(?:\.\d+)*/, 'cosmos.js needs an explicit cache version');
   assert.ok(swSource.includes('self.skipWaiting()'), 'service-worker.js must call self.skipWaiting()');
   assert.ok(swSource.includes('/api/voice/'), 'service-worker.js must exclude /api/voice/* from caching');
 });
@@ -359,7 +417,7 @@ test('enabling warms up window.MoctarSpeaker, inserts 120Hz highpass BiquadFilte
   assert.equal(f.engine.state, 'wake');
   const wakeStates = f.states.filter(s => s.state === 'wake');
   assert.ok(wakeStates.length >= 1);
-  assert.equal(wakeStates.at(-1).detail.message, '🟢 À l\'écoute — Dites « Yo Moctar »');
+  assert.equal(wakeStates.at(-1).detail.message, '🟢 À l\'écoute — Parlez librement');
 });
 
 test('60 FPS VU-meter triggers on RMS > 0.035, stops after 850ms silence and min 1200ms recording, reuses window.MoctarSpeaker, and updates status labels', async t => {
@@ -380,7 +438,7 @@ test('60 FPS VU-meter triggers on RMS > 0.035, stops after 850ms silence and min
   await f.settle();
 
   assert.equal(f.engine.state, 'listening');
-  assert.equal(f.states.at(-1).detail.message, '🎙️ Moctar vous écoute...');
+  assert.equal(f.states.at(-1).detail.message, "🎙️ Je t'écoute Moctar...");
   assert.equal(f.latestRecorder.state, 'recording');
   assert.equal(f.latestRecorder.audioBitsPerSecond, 128000);
   assert.equal(f.solarActivityCalls.at(-1).volume, 0.12);
@@ -408,8 +466,11 @@ test('60 FPS VU-meter triggers on RMS > 0.035, stops after 850ms silence and min
   assert.equal(f.engine.state, 'speaking');
   assert.equal(f.states.at(-1).detail.message, '🔊 Moctar : "Tous les cœurs CPU sont nominaux, Moctar."');
 
-  // Finish audio playback -> returns to wake listening (strict wake-word, zero ambient followup window)
+  // The existing conversational mode keeps its follow-up window after playback.
   f.finishAudio();
+  await f.settle();
+  assert.equal(f.engine.state, 'listening');
+  f.time.advance(20000);
   await f.settle();
   assert.equal(f.engine.state, 'wake');
 });

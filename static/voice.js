@@ -139,6 +139,7 @@
           activeVoiceAbortController.abort();
         } catch {}
         activeVoiceAbortController = null;
+      }
       if (proactiveAbortController) {
         try {
           proactiveAbortController.abort();
@@ -146,7 +147,6 @@
         proactiveAbortController = null;
       }
       isProactivePollInFlight = false;
-      }
       if (activeAudioPlaybackFinish) {
         const finish = activeAudioPlaybackFinish;
         activeAudioPlaybackFinish = null;
@@ -1098,6 +1098,7 @@
           if (voiceDetected) {
             silenceElapsedMs = 0;
             if (!isSpeaking) {
+              if (proactiveAbortController) abortActiveVoiceNetworkAndAudio();
               isSpeaking = true;
               startPhraseRecorder();
             }
@@ -1302,6 +1303,7 @@
 
     async function startPushToTalk() {
       if (!available()) return false;
+      abortActiveVoiceNetworkAndAudio();
       ensureMoctarSpeakerUnlocked(true);
       isPushToTalk = true;
       generation += 1;
@@ -1368,21 +1370,34 @@
 
       isProactivePollInFlight = true;
       const reqEpoch = currentRequestId;
-      proactiveAbortController = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      const pollGeneration = generation;
+      const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      proactiveAbortController = controller;
+      const requestIsCurrent = () => currentRequestId === reqEpoch && generation === pollGeneration
+        && !destroyed && !suspended && !fault && !busy && (enabled || manual)
+        && (!job || job === current) && !isSpeaking && !userBargedIn
+        && !(controller && controller.signal.aborted);
+      const canAcceptInitiative = () => requestIsCurrent() && !isAssistantSpeaking
+        && !processingAudio && !job && phase === 'wake';
       let current = null;
       try {
-        const fetchOpts = proactiveAbortController ? { signal: proactiveAbortController.signal } : {};
+        const fetchOpts = controller ? { signal: controller.signal } : {};
         const res = await fetchImpl('/api/voice/proactive', fetchOpts);
         if (!res || !res.ok) return;
-        if (currentRequestId !== reqEpoch || isSpeaking || isAssistantSpeaking || processingAudio || job || !wanted() || userBargedIn) return;
+        if (!canAcceptInitiative()) return;
         const data = await res.json();
-        if (currentRequestId !== reqEpoch || isSpeaking || isAssistantSpeaking || processingAudio || job || !wanted() || userBargedIn) return;
+        if (!canAcceptInitiative()) return;
         if (!data || !data.has_event || !data.message) return;
-
-        if (isSpeaking || isAssistantSpeaking || processingAudio || job || phase !== 'wake') return;
 
         const initiativeText = String(data.message || '').trim();
         if (!initiativeText) return;
+
+        // The HUD observes this event; polling and audio stay owned by this engine.
+        const EventClass = win.CustomEvent || (typeof CustomEvent === 'function' ? CustomEvent : null);
+        if (typeof win.dispatchEvent === 'function' && EventClass) {
+          win.dispatchEvent(new EventClass('jarvis:proactive-message', { detail: data }));
+        }
+        if (!canAcceptInitiative()) return;
 
         current = { generation, reqEpoch };
         job = current;
@@ -1398,29 +1413,31 @@
         });
 
         let played = false;
-        if (data.audio_url && !userBargedIn && currentRequestId === reqEpoch) {
+        if (data.audio_url && requestIsCurrent()) {
           played = await playAudioUrl(data.audio_url);
         }
-        if (!played && initiativeText && !userBargedIn && currentRequestId === reqEpoch) {
+        if (!played && initiativeText && requestIsCurrent()) {
           await speakWithNativeSpeechSynthesis(initiativeText);
         }
 
+        if (!requestIsCurrent()) return;
         releaseEchoLock();
-        if (generation !== current.generation || currentRequestId !== reqEpoch || destroyed || suspended) return;
 
         // Ouvre automatiquement la fenetre d'ecoute pour la reponse de Moctar (ex: "Oui", "Non merci")
         openFollowup();
       } catch {
         // En cas d'erreur reseau, abort ou synthese, liberer proprement l'etat d'ecoute
-        if (current && isAssistantSpeaking) {
+        if (current && job === current && requestIsCurrent() && isAssistantSpeaking) {
           releaseEchoLock();
         }
       } finally {
-        proactiveAbortController = null;
-        isProactivePollInFlight = false;
-        if (current && job === current) job = null;
-        if (current && isAssistantSpeaking) {
-          isAssistantSpeaking = false;
+        if (proactiveAbortController === controller) {
+          proactiveAbortController = null;
+          isProactivePollInFlight = false;
+        }
+        if (current && job === current) {
+          job = null;
+          if (echoDampeningTimer === null) isAssistantSpeaking = false;
         }
         reconcile();
       }
@@ -1428,17 +1445,20 @@
 
     function startProactiveInitiativePoller() {
       stopProactiveInitiativePoller();
-      proactiveCheckTimer = setInterval(() => {
-        if (!destroyed && !suspended && wanted() && phase === 'wake' && !job && !isAssistantSpeaking && !isSpeaking) {
-          pollProactiveInitiative().catch(() => {});
-        }
-      }, PROACTIVE_POLL_INTERVAL_MS);
+      const tick = () => {
+        proactiveCheckTimer = null;
+        if (destroyed) return;
+        if (!suspended && wanted()) void pollProactiveInitiative().catch(() => {});
+        proactiveCheckTimer = delay(tick, PROACTIVE_POLL_INTERVAL_MS);
+      };
+      proactiveCheckTimer = delay(tick, PROACTIVE_POLL_INTERVAL_MS);
     }
 
     function stopProactiveInitiativePoller() {
       if (proactiveCheckTimer !== null) {
-        clearInterval(proactiveCheckTimer);
+        cancel(proactiveCheckTimer);
         proactiveCheckTimer = null;
+      }
       if (proactiveAbortController) {
         try {
           proactiveAbortController.abort();
@@ -1446,7 +1466,6 @@
         proactiveAbortController = null;
       }
       isProactivePollInFlight = false;
-      }
     }
 
     return {
@@ -1489,6 +1508,7 @@
       },
       async startManual() {
         if (!available()) return false;
+        abortActiveVoiceNetworkAndAudio();
         ensureMoctarSpeakerUnlocked(true);
         generation += 1;
         fault = null;

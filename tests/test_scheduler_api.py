@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from main import create_app
@@ -13,6 +16,14 @@ class TestSchedulerAPI(unittest.TestCase):
     def setUpClass(cls):
         cls.app = create_app()
         cls.client = TestClient(cls.app)
+        cls.addClassCleanup(cls.client.close)
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        database = patch.object(scheduler_store, "DB_PATH", Path(directory.name) / "scheduler.db")
+        database.start()
+        self.addCleanup(database.stop)
 
     def test_list_tasks_endpoint(self):
         resp = self.client.get("/api/scheduler/tasks")

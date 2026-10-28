@@ -410,7 +410,31 @@ def parse_focus_target(text):
     return (match.group(1) or "").strip()
 
 
+def _parse_service_diagnostic(raw_text):
+    # Parse before normalize(): that historical helper removes the wake word
+    # 'jarvis' everywhere, including inside the service name jarvis.service.
+    text = unicodedata.normalize("NFD", str(raw_text or "").strip())
+    text = "".join(char for char in text if unicodedata.category(char) != "Mn")
+    text = re.sub(r"^jarvis\s*[,!:]?\s+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+(?:stp|svp|s[' ]il te plait)\s*[.!?]*$", "", text, flags=re.IGNORECASE)
+    patterns = (
+        r"diagnostique(?:r)?(?:\s+(?:le\s+)?service)?(?:\s+(?P<service>.+?))?\s*[!?]*",
+        r"pourquoi\s+(?:le\s+)?service\s+(?P<service>.+?)\s+(?:plante|a plante|est en panne|echoue|ne fonctionne pas)\s*[!?]*",
+        r"verifie\s+les\s+logs(?:\s+(?:de|du|pour)\s+(?:le\s+)?(?:service\s+)?(?P<service>.+?))?\s*[!?]*",
+    )
+    for pattern in patterns:
+        match = re.fullmatch(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return (match.group("service") or "jarvis.service").strip()
+    return None
+
+
 def detect_intent(raw_text):
+    service_name = _parse_service_diagnostic(raw_text)
+    if service_name is not None:
+        return {"intent": "diagnose_linux_service", "target": service_name, "confidence": 100,
+                "raw": raw_text, "slots": {"service_name": service_name}}
+
     text = normalize(raw_text)
 
     if not text:

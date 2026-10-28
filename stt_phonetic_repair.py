@@ -53,7 +53,7 @@ _PHONETIC_PHRASE_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     
         # 2b. Écosystème & Projets Moctar (Klasora, Babamarket, Heliantha, Noor Express, SupMTI)
     (re.compile(r"\b(?:classe\s+aura|class\s+aura|clasora|clazora)\b", re.I), "Klasora", "klasora_repair"),
-    (re.compile(r"\b(?:baba\s*market|baba\s+mark[eé]|baba\s+marqu[eé]s?|babam\s*market)\b", re.I), "Babamarket", "babamarket_repair"),
+    (re.compile(r"\b(?:baba\s*market|baba\s+mark[eé]|baba\s+marqu[eé]s?|babam\s*market)\b", re.I), "Baba Market", "babamarket_repair"),
     (re.compile(r"\b(?:h[eé]lianthe|eliantha|h[eé]liantha|elianthe)\b", re.I), "Heliantha", "heliantha_repair"),
     (re.compile(r"\b(?:nour|noor)\s+express\b", re.I), "Noor Express", "noor_express_repair"),
     (re.compile(r"\b(?:sup|sub)\s*m\s*t\s*i\b", re.I), "SupMTI", "supmti_repair"),

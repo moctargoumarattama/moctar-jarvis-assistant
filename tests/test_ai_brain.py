@@ -22,7 +22,7 @@ class AiBrainConfigTests(unittest.TestCase):
         self.assertEqual("gemini", brain.api_type)
         self.assertEqual("gemini-3.5-flash-lite", brain.model)
         self.assertEqual(ai_brain.config.gemini_model, ai_brain.DEFAULT_MODEL)
-        self.assertEqual({"temperature": 0.2, "max_tokens": 350, "top_p": 0.8}, ai_brain.GENERATION_CONFIG)
+        self.assertEqual({"temperature": 0.6, "max_tokens": 350, "top_p": 0.8}, ai_brain.GENERATION_CONFIG)
         self.assertEqual(15.0, brain.gemini_timeout)
 
     def test_legacy_environment_providers_always_resolve_to_cloud(self):
@@ -155,7 +155,7 @@ class AiBrainConfigTests(unittest.TestCase):
             result = ai_brain.LocalBrain().chat("Améliore ce message", context="scheduler")
         self.assertEqual("Message amélioré", result)
         self.assertIn("Contexte additionnel: scheduler", ask.call_args.args[0])
-        self.assertEqual(0.2, ask.call_args.kwargs["temperature"])
+        self.assertEqual(ai_brain.GENERATION_CONFIG["temperature"], ask.call_args.kwargs["temperature"])
 
 
 class GeminiBrainTests(unittest.TestCase):
@@ -276,7 +276,7 @@ class GeminiBrainTests(unittest.TestCase):
         self.assertIsInstance(request["config"], ai_brain.genai_types.GenerateContentConfig)
         generation_config = request["config"].model_dump(mode="json", exclude_none=True)
         self.assertEqual("Tu es Jarvis.", generation_config["system_instruction"])
-        self.assertEqual(0.2, generation_config["temperature"])
+        self.assertEqual(ai_brain.GENERATION_CONFIG["temperature"], generation_config["temperature"])
         self.assertEqual(350, generation_config["max_output_tokens"])
         self.assertEqual(0.8, generation_config["top_p"])
         declaration = generation_config["tools"][0]["function_declarations"][0]
@@ -387,7 +387,8 @@ class GeminiBrainTests(unittest.TestCase):
                 elapsed = time.monotonic() - started
         finally:
             release.set()
-        self.assertEqual("error", result["finish_reason"])
+        self.assertTrue(result["fallback_courtesy"])
+        self.assertEqual("DEGRADE", result["status"])
         self.assertLess(elapsed, 0.75)
         self.assertTrue(brain.get_health_status(probe=False)["all_providers_offline"])
 
@@ -528,7 +529,7 @@ class LocalBrainTests(unittest.TestCase):
         self.assertEqual("Niamey est la capitale du Niger.", response)
         self.assertIn("une ou deux phrases maximum", ask_mock.call_args.kwargs["system_prompt"])
         self.assertEqual(96, ask_mock.call_args.kwargs["max_predict"])
-        self.assertEqual(0.2, ask_mock.call_args.kwargs["temperature"])
+        self.assertEqual(ai_brain.GENERATION_CONFIG["temperature"], ask_mock.call_args.kwargs["temperature"])
 
     def test_activity_request_uses_gemini_with_personal_context(self):
         with patch("ai_brain.can_answer_general_questions", return_value=True):
@@ -547,8 +548,8 @@ class LocalBrainTests(unittest.TestCase):
         self.assertIn("Demain", response)
         self.assertIn("Projet actif: baba_market", ask_mock.call_args.args[0])
         self.assertIn("Todos ouverts:", ask_mock.call_args.args[0])
-        self.assertIn("activites quotidiennes", ask_mock.call_args.kwargs["system_prompt"])
-        self.assertEqual(0.2, ask_mock.call_args.kwargs["temperature"])
+        self.assertIn("priorites", ask_mock.call_args.kwargs["system_prompt"])
+        self.assertEqual(ai_brain.GENERATION_CONFIG["temperature"], ask_mock.call_args.kwargs["temperature"])
 
     def test_enhance_social_post_uses_local_fallback_when_ai_is_disabled(self):
         with patch("ai_brain.can_answer_general_questions", return_value=False):

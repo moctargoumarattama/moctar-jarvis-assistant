@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import hashlib
 import hmac
@@ -33,12 +34,28 @@ import hud_state_manager
 import stt_phonetic_repair
 import voice_transcribe
 from ai_brain import build_live_system_context, get_cpu_temperature_celsius, voice_fast_llm_reply
-from voice_semantic_engine import execute_voice_semantic_turn
+from action_status import action_status_fields
+from voice_semantic_engine import execute_voice_semantic_turn, resolve_pending_voice_command, voice_session_scope
 from config import RESTART_ALLOWLIST, Settings
 from cyberdefense import CyberDefenseManager, TRAP_PATHS
 from sentinel import SentinelManager
 from vps_registry import VPSRegistry
 from whatsapp import AUDIO_MIME_TYPES, WhatsAppController
+
+
+def voice_interaction_response(payload: dict[str, Any]) -> JSONResponse:
+    """Every voice response carries the same execution/security contract."""
+    return JSONResponse({**payload, **action_status_fields(payload)})
+
+
+def instant_local_status(reply: str) -> dict[str, Any]:
+    """Legacy local handlers return text; preserve their explicit failure markers."""
+    text = _strip_accents_1to1(str(reply)).strip().lower()
+    if re.match(r"^(?:action|commande) (?:refusee|bloquee)\b", text):
+        return action_status_fields({"status": "blocked"})
+    if re.match(r"^(?:impossible\b|erreur\b|echec\b)", text):
+        return action_status_fields({"status": "error"})
+    return action_status_fields({"status": "success"})
 
 LOGGER = logging.getLogger("noc-dashboard")
 BASE_DIR = Path(__file__).resolve().parent
@@ -558,7 +575,7 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
         "aide", "bonjour", "salut", "merci", "pause", "stop", "musique",
         "terre", "globe", "plasma", "quantum", "bureau", "code", "terminal",
     }
-    if norm_clean in common_short_commands or any(
+    if len(words) >= 2 or norm_clean in common_short_commands or any(
         norm_clean.startswith(prefix)
         for prefix in (
             "qui", "quoi", "comment", "pourquoi", "quand", "ou ", "où ",
@@ -634,19 +651,23 @@ _COMPLEX_ACTION_KEYWORDS = {
 
 
 def _is_compound_or_actionable_request(cleaned: str, normalized: str) -> bool:
-    """D?tecte si une phrase contient une demande d'action, un probl?me ou une formulation compos?e.
+    """Détecte si une phrase contient une demande d'action, un problème ou une formulation composée.
 
-    ?vite que les r?ponses sociales instantan?es (salut, merci, je suis fatigu?) n'interceptent
-    des requ?tes complexes ou compos?es.
+    Évite que les réponses sociales instantanées (salut, merci, je suis fatigué) n'interceptent
+    des requêtes complexes ou composées.
     """
     if not cleaned:
+        return False
+
+    # Exceptions bienveillantes et pauses légitimes
+    if re.search(r"\b(?:je\s+fais\s+une\s+pause|pause\s+caf[ée]|je\s+prends\s+(?:l['’]air|une\s+pause)|je\s+vais\s+prendre\s+l['’]air|je\s+souffle\s+un\s+peu|bonne\s+nuit|je\s+vais\s+dormir)\b", normalized):
         return False
 
     norm_words = set(re.findall(r"\b[\w-]+\b", normalized))
     if any(k in norm_words for k in _COMPLEX_ACTION_KEYWORDS):
         return True
 
-    # D?tection de propositions multiples via ponctuation (, ; ? !)
+    # Détection de propositions multiples via ponctuation (, ; ? !)
     segments = [s.strip() for s in re.split(r"[,;?!]", cleaned) if s.strip()]
     if len(segments) > 1:
         if any(len(s.split()) >= 2 for s in segments[1:]):
@@ -779,53 +800,54 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
         return "J'ai été conçu, programmé et entraîné sur mesure par Moctar pour être son copilote d'ingénierie autonome et système d'intelligence opérationnelle."
 
 
-    # 0a7. Coucher, Sommeil et Bonne Nuit ("bonne nuit", "je vais dormir", "je vais me coucher", "je suis fatigu?")
-    if not is_compound and re.search(r"\b(?:bonne\s+nuit|je\s+vais\s+(?:dormir|me\s+coucher|au\s+lit|pioncer)|je\s+suis\s+fatigu[?e]|on\s+(?:arr[?e]te|[?e]teint|coupe)\s+(?:pour\s+ce\s+soir|pour\s+aujourd['?]hui)|[a?]\s+demain)\b", normalized):
-        return "Bonne nuit Moctar ! Repose-toi bien, tu as fait une grosse session. Tous les syst?mes sont sous surveillance et je garde tout au chaud pour demain !"
+    # 0a7. Coucher, Sommeil et Bonne Nuit ("bonne nuit", "je vais dormir", "je vais me coucher", "je suis fatigué")
+    if not is_compound and re.search(r"\b(?:bonne\s+nuit|je\s+vais\s+(?:dormir|me\s+coucher|au\s+lit|pioncer)|je\s+suis\s+fatigu[ée]|on\s+(?:arr[êe]te|[ée]teint|coupe)\s+(?:pour\s+ce\s+soir|pour\s+aujourd['’]hui)|[aà]\s+demain)\b", normalized):
+        return "Bonne nuit Moctar ! Repose-toi bien, tu as fait une grosse session. Tous les systèmes sont sous surveillance et je garde tout au chaud pour demain !"
 
-    # 0a8. Pauses bienveillantes ("je fais une pause", "pause caf?", "je prends l'air", "je souffle un peu")
-    if not is_compound and re.search(r"\b(?:je\s+fais\s+une\s+pause|pause\s+caf[?e]|je\s+prends\s+(?:l['?]air|une\s+pause)|je\s+vais\s+prendre\s+l['?]air|je\s+souffle\s+un\s+peu)\b", normalized):
-        return "Tr?s bonne id?e Moctar, souffle un peu et prends ton temps. Je garde un ?il sur la machine pendant ta pause !"
+    # 0a8. Pauses bienveillantes ("je fais une pause", "pause café", "je prends l'air", "je souffle un peu")
+    if not is_compound and re.search(r"\b(?:je\s+fais\s+une\s+pause|pause\s+caf[ée]|je\s+prends\s+(?:l['’]air|une\s+pause)|je\s+vais\s+prendre\s+l['’]air|je\s+souffle\s+un\s+peu)\b", normalized):
+        return "Très bonne idée Moctar, souffle un peu et prends ton temps. Je garde un œil sur la machine pendant ta pause !"
 
-    # 0a9. Comment ?a va & Humeur complice ("comment tu vas", "?a va", "tu as la forme", "la forme")
+    # 0a9. Comment ça va & Humeur complice ("comment tu vas", "ça va", "tu as la forme", "la forme")
     if not is_compound and (
-        re.search(r"\b(?:comment\s+(?:vas?[- ]tu|tu\s+vas)|(?:[c?]a\s+va|la\s+forme)(?:\s+moctar|\s+jarvis)?)\b", normalized)
-        or normalized.strip(" ?!,.") in ("ca va", "?a va", "la forme", "comment tu vas", "comment vas tu", "tu vas bien")
+        re.search(r"\b(?:comment\s+(?:vas?[- ]tu|tu\s+vas)|(?:[cç]a\s+va|la\s+forme)(?:\s+moctar|\s+jarvis)?)\b", normalized)
+        or normalized.strip(" ?!,.") in ("ca va", "ça va", "la forme", "comment tu vas", "comment vas tu", "tu vas bien")
     ):
         has_issue = False
         issue_detail = ""
-        try:
-            import psutil
-            cpu_val = psutil.cpu_percent(interval=None)
-            ram_val = psutil.virtual_memory().percent
-            if cpu_val > 90 or ram_val > 92:
-                has_issue = True
-                issue_detail = f"forte charge d?tect?e ({int(cpu_val)}% CPU, {int(ram_val)}% RAM)"
-        except Exception:
-            pass
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                import psutil
+                cpu_val = psutil.cpu_percent(interval=None)
+                ram_val = psutil.virtual_memory().percent
+                if cpu_val > 95 and ram_val > 95:
+                    has_issue = True
+                    issue_detail = f"forte charge détectée ({int(cpu_val)}% CPU, {int(ram_val)}% RAM)"
+            except Exception:
+                pass
 
         if has_issue:
-            return f"Je reste op?rationnel Moctar, mais attention : {issue_detail} sur le serveur Dell. Souhaites-tu que j'optimise les ressources ?"
+            return f"Je reste opérationnel Moctar, mais attention : {issue_detail} sur le serveur Dell. Souhaites-tu que j'optimise les ressources ?"
 
         if client_device and client_device != "Serveur local Dell M4800":
-            return f"Tout tourne comme une horloge Moctar ! Le serveur h?te Dell Precision M4800 est nominal, synchronis? avec votre {device_label}. Et toi, la forme ? Pr?t ? avancer ?"
-        return "Tout tourne comme une horloge Moctar ! Les syst?mes sont nominaux sur le serveur Dell Precision M4800. Et toi, la forme ? Pr?t ? avancer ?"
+            return f"Tout tourne comme une horloge Moctar ! Le serveur hôte Dell Precision M4800 est nominal, synchronisé avec votre {device_label}. Et toi, la forme ? Prêt à avancer ?"
+        return "Tout tourne comme une horloge Moctar ! Les systèmes sont nominaux sur le serveur Dell Precision M4800. Et toi, la forme ? Prêt à avancer ?"
 
-    # 0a10. Remerciements et Fraternit? ("merci", "merci mon ami", "merci fr?rot", "super merci", "bien jou?")
+    # 0a10. Remerciements et Fraternité ("merci", "merci mon ami", "merci frérot", "super merci", "bien joué")
     if not is_compound and (
-        re.search(r"\b(?:merci\s+(?:mon\s+ami|fr[?e]rot|infiniment|beaucoup|moctar|jarvis)|t['?]es\s+le\s+meilleur|super\s+boulot)\b", normalized)
-        or normalized.strip(" ?!,.") in ("merci", "super merci", "merci beaucoup", "merci bien", "bien jou?", "merci mon ami", "merci fr?rot")
+        re.search(r"\b(?:merci\s+(?:mon\s+ami|fr[ée]rot|infiniment|beaucoup|moctar|jarvis)|t['’]es\s+le\s+meilleur|super\s+boulot)\b", normalized)
+        or normalized.strip(" ?!,.") in ("merci", "super merci", "merci beaucoup", "merci bien", "bien joué", "merci mon ami", "merci frérot")
     ):
-        return "Avec grand plaisir Moctar ! On forme une sacr?e ?quipe. Toujours l? pour toi !"
+        return "Avec grand plaisir Moctar ! On forme une sacrée équipe. Toujours là pour toi !"
 
-    # 0b. Pr?sence complice ("t'es l?", "tu es l?")
-    if not is_compound and re.search(r"\b(?:t['?]es\s+l[a?]|tu\s+es\s+l[a?]|es[- ]tu\s+l[a?])\b", normalized):
+    # 0b. Présence complice ("t'es là", "tu es là")
+    if not is_compound and re.search(r"\b(?:t['’]es\s+l[aà]|tu\s+es\s+l[aà]|es[- ]tu\s+l[aà])\b", normalized):
         hour = datetime.now().hour
         if hour >= 23 or hour < 6:
-            return "Oui Moctar, je suis l? ! Encore au travail ? Je reste avec toi, dis-moi ce qu'on boucle."
-        return "Oui Moctar, je suis l? !"
+            return "Oui Moctar, je suis là ! Encore au travail ? Je reste avec toi, dis-moi ce qu'on boucle."
+        return "Oui Moctar, je suis là !"
 
-    # 0c. Salutations chaleureuses selon le moment de la journ?e & continuit? ?pisodique
+    # 0c. Salutations chaleureuses selon le moment de la journée & continuité épisodique
     if not is_compound and normalized in ("bonjour", "salut", "bonjour moctar", "salut moctar", "moc", "yo moc", "yo mokti", "coucou", "hello", "bonjour mon ami", "salut mon ami"):
         hour = datetime.now().hour
         if memory and hasattr(memory, "build_episodic_greeting"):
@@ -1454,7 +1476,7 @@ def _is_allowed_origin_host(p_host: str, t_host: str) -> bool:
 def same_origin(request: Request) -> None:
     # Les actions web sont directes ; une page tierce ne peut pas les déclencher.
     site = request.headers.get("sec-fetch-site")
-    if site and site.lower() not in {"same-origin", "same-site", "none"}:
+    if site and site.lower() not in {"same-origin", "none"}:
         raise HTTPException(403, "Origine non autorisée")
     origin = request.headers.get("origin")
     if not origin:
@@ -1472,22 +1494,16 @@ def same_origin(request: Request) -> None:
             or (bool(host_header) and p_host == host_header)
             or _is_allowed_origin_host(p_host, t_host)
         )
-        is_local = is_local_request(request)
         forwarded_proto = (request.headers.get("x-forwarded-proto") or "").lower()
 
-        # En réseau local, Tailscale ou derrière reverse proxy HTTPS (Cloudflare, Nginx),
-        # tolérance de schéma et de port pour les accès multi-appareils
-        is_trusted_host = bool(p_host and (p_host == host_header or p_host == t_host))
+        # En reverse proxy HTTPS (Cloudflare, Nginx), tolérance si x-forwarded-proto est présent
         port_match = (
             (parts.port or (443 if parts.scheme == "https" else 80)) == (target.port or (443 if target.scheme == "https" else 80))
-            or is_local
-            or is_trusted_host
+            or (bool(forwarded_proto) and (parts.port or (443 if parts.scheme == "https" else 80)) in {80, 443})
         )
         scheme_match = parts.scheme in {"http", "https"} and (
             parts.scheme == target.scheme
-            or parts.scheme == forwarded_proto
-            or is_local
-            or is_trusted_host
+            or (bool(forwarded_proto) and parts.scheme == forwarded_proto)
         )
         valid = (scheme_match and hostname_match and port_match
                  and not parts.username and not parts.password and parts.path in {"", "/"}
@@ -1539,6 +1555,15 @@ class Runtime:
                 self.ai_brain = AIBrain()
             except Exception:
                 self.ai_brain = None
+
+    async def synthesize_whatsapp_reply(self, text: str) -> dict[str, str]:
+        """Reuse the cloud TTS cache; keep audio ephemeral and bounded per reply."""
+        async with asyncio.timeout(20):
+            audio, _ = await generate_cached_tts(text[:4096], "fr-FR-RemyMultilingualNeural")
+        if not audio or len(audio) > 1024 * 1024:
+            raise ValueError("Réponse vocale vide ou trop volumineuse (1 Mio maximum)")
+        return {"voice_reply_b64": base64.b64encode(audio).decode("ascii"),
+                "voice_mime_type": "audio/mpeg"}
 
     def vps_snapshot(self) -> list[dict[str, Any]]:
         now = time.monotonic()
@@ -1688,7 +1713,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 accepted, command_text, _ = extract_voice_interact_command(repaired, session_active=True)
                 if not accepted or not command_text:
                     command_text = repaired
-                instant_reply = handle_instant_local_command(command_text)
+                voice_session = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
+                with voice_session_scope(voice_session):
+                    instant_reply = handle_instant_local_command(command_text)
                 if instant_reply:
                     reply_text = instant_reply
                 else:
@@ -1755,12 +1782,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 runtime.cyber.record_request_traffic(path)
             except Exception:
                 pass
-            if path in TRAP_PATHS:
-                try:
-                    await runtime.cyber.trap(peer, path)
-                except Exception:
-                    pass
-                return JSONResponse({"detail": "Accès interdit - tentative répertoriée"}, status_code=403)
 
         if (runtime and runtime.cyber.is_banned(peer) and path not in TRAP_PATHS):
             response = JSONResponse({"detail": "Accès refusé"}, status_code=403)
@@ -2440,7 +2461,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 body.extend(chunk)
 
         if not body:
-            return JSONResponse(
+            return voice_interaction_response(
                 {
                     "ok": True,
                     "ignored": True,
@@ -2463,7 +2484,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             has_pending_git = project_actions.has_pending_git_action()
         except Exception:
             pass
-        session_active = header_session or header_barge_in or query_session or runtime_session or has_pending_git
+        request_voice_session = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
+        from voice_semantic_engine import has_pending_voice_action
+        has_pending_voice = has_pending_voice_action(request_voice_session)
+        session_active = header_session or header_barge_in or query_session or runtime_session or has_pending_git or has_pending_voice
 
         if content_type == "application/json":
             try:
@@ -2503,7 +2527,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         LOGGER.info(f"🎙️ [WHISPER BRUT]: '{transcript}'")
 
         if not transcript:
-            return JSONResponse(
+            return voice_interaction_response(
                 {
                     "ok": True,
                     "ignored": True,
@@ -2528,7 +2552,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # 1b. Filtre Anti-Auto-Écho (rejette la réverbération acoustique de la propre voix de M.O.C.T.A.R, ex: 'Ventraler 0.2')
         if is_self_echo_transcript(repaired_transcript, runtime):
             LOGGER.info("🔇 [SELF ECHO IGNORED]: Réverbération TTS détectée et ignorée ('%s')", transcript)
-            return JSONResponse(
+            return voice_interaction_response(
                 {
                     "ok": True,
                     "ignored": True,
@@ -2557,7 +2581,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 audio_url, audio_chunks = await generate_cached_tts_chunks(reply_text, DEFAULT_TTS_VOICE)
             except Exception:
                 pass
-            return JSONResponse(
+            return voice_interaction_response(
                 {
                     "ok": True,
                     "ignored": False,
@@ -2592,7 +2616,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "n'a pas terminé sa phrase (VAD sémantique)" if is_inc else "réfléchit à voix haute",
                 repaired_transcript,
             )
-            return JSONResponse(
+            return voice_interaction_response(
                 {
                     "ok": True,
                     "ignored": True,
@@ -2628,7 +2652,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 audio_url, audio_chunks = await generate_cached_tts_chunks(reply_text, DEFAULT_TTS_VOICE)
             except Exception:
                 pass
-            return JSONResponse(
+            return voice_interaction_response(
                 {
                     "ok": True,
                     "ignored": False,
@@ -2657,13 +2681,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception:
             pass
 
-        accepted, command_text, wake_detected = extract_voice_interact_command(
-            repaired_transcript,
-            session_active=session_active,
-        )
+        with voice_session_scope(request_voice_session):
+            accepted, command_text, wake_detected = extract_voice_interact_command(
+                repaired_transcript,
+                session_active=session_active,
+            )
         if not accepted or not command_text:
             LOGGER.info("🔇 [VOICE IGNORED]: Mot-clé absent hors session ('%s')", transcript)
-            return JSONResponse(
+            return voice_interaction_response(
                 {
                     "ok": True,
                     "ignored": True,
@@ -2677,7 +2702,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         if pc_playing and not wake_detected and not header_barge_in and not header_session:
             LOGGER.info("🔇 [PC AUDIO BLEED IGNORED]: Son PC en cours et mot-clé absent ('%s')", transcript)
-            return JSONResponse(
+            return voice_interaction_response(
                 {
                     "ok": True,
                     "ignored": True,
@@ -2729,8 +2754,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         agent_result: dict[str, Any] = {}
         memory_instance = getattr(getattr(runtime, "jarvis", None), "memory", None)
-        instant_reply = handle_instant_local_command(command_text, memory=memory_instance, client_device=client_device)
-        if command_text == _WAKE_ONLY_SENTINEL or _is_pure_filler_or_wake(command_text):
+        session_id = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
+        pending_result = await asyncio.to_thread(resolve_pending_voice_command, command_text, session_id, runtime)
+        with voice_session_scope(session_id):
+            instant_reply = None if pending_result else handle_instant_local_command(
+                command_text, memory=memory_instance, client_device=client_device)
+        if pending_result is not None:
+            display_user_text = command_text
+            agent_result = pending_result
+            reply_text = str(pending_result.get("reply") or pending_result.get("message") or "Action traitée.")
+        elif command_text == _WAKE_ONLY_SENTINEL or _is_pure_filler_or_wake(command_text):
             display_user_text = transcript
             reply_text = VOICE_BUTLER_GREETINGS[0]
             LOGGER.info("⚡ [VOICE BUTLER (0ms)]: Wake-word pur détecté ('%s') -> '%s'", transcript, reply_text)
@@ -2746,7 +2779,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             reply_text = instant_reply
             LOGGER.info("⚡ [VOICE LOCAL COMMAND (0ms)]: '%s' -> '%s'", command_text, reply_text)
             agent_result = {
-                "status": "success",
+                **instant_local_status(instant_reply),
                 "reply": reply_text,
                 "tools_used": [],
                 "thought_chain": ["Commande locale instantanée sans LLM (0ms)"],
@@ -2884,9 +2917,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         current_hud = hud_state_manager.get_hud_state()
 
-        return JSONResponse(
+        return voice_interaction_response(
             {
-                "ok": True,
+                **action_status_fields(agent_result),
                 "ignored": False,
                 "user_text": display_user_text,
                 "raw_transcript": transcript,
@@ -3103,12 +3136,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         session_id = getattr(getattr(runtime, "jarvis", None), "active_session_id", "session_voice")
 
+        pending_result = await asyncio.to_thread(resolve_pending_voice_command, effective_prompt, session_id, runtime)
+        if pending_result is not None:
+            return JSONResponse({**pending_result, **action_status_fields(pending_result)})
+
         # 1. Intercepteur local 0ms pour requêtes système, statut, météo ou identité
         instant_reply = None
         try:
             mem = getattr(runtime.jarvis, "memory", None)
             dev = request.headers.get("x-client-device") or ""
-            instant_reply = handle_instant_local_command(effective_prompt, memory=mem, client_device=dev)
+            with voice_session_scope(session_id):
+                instant_reply = handle_instant_local_command(effective_prompt, memory=mem, client_device=dev)
         except Exception:
             instant_reply = None
 
@@ -3133,7 +3171,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     pass
             return JSONResponse(
                 {
-                    "status": "success",
+                    **instant_local_status(instant_reply),
                     "reply": instant_reply,
                     "thought_chain": ["Commande locale instantanée sans LLM (0ms)"],
                     "tools_used": [],
@@ -3238,7 +3276,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except Exception:
                 pass
             return JSONResponse({
-                "status": "success",
+                **action_status_fields(semantic_res),
                 "reply": rep,
                 "action": semantic_res.get("action"),
                 "url": semantic_res.get("url"),

@@ -10,11 +10,11 @@ class SchedulerCoreTests(unittest.TestCase):
     def test_run_once_queues_due_tasks(self):
         due_task = {"id": 7, "title": "Promo", "platform": "whatsapp", "last_sent": None}
         with patch("scheduler.scheduler_core.store.get_due_tasks", return_value=[due_task]), patch(
-            "scheduler.scheduler_core.store.update_task"
-        ) as update_task:
+            "scheduler.scheduler_core.store.queue_task_occurrence", return_value=True,
+        ) as queue_task:
             scheduler_core.run_once(now=datetime(2026, 8, 23, 9, 0))
 
-        update_task.assert_called_once_with(7, status="pending_confirmation")
+        queue_task.assert_called_once_with(7, now=datetime(2026, 8, 23, 9, 0))
 
     def test_confirm_and_send_marks_task_active_when_delivery_is_final(self):
         task = {
@@ -25,11 +25,14 @@ class SchedulerCoreTests(unittest.TestCase):
             "message": "Bonjour",
             "media_paths": [],
             "ai_enhanced": False,
+            "execution_id": "exec-3",
         }
-        with patch("scheduler.scheduler_core.store.get_task", return_value=task), patch(
+        with patch("scheduler.scheduler_core.store.claim_task_execution", return_value=(True, task, "")), patch(
+            "scheduler.scheduler_core.store.recover_stale_execution", return_value=False,
+        ), patch(
             "scheduler.scheduler_core.platforms.dispatch",
             return_value=DispatchResult("sent", "Message envoye."),
-        ) as dispatch, patch("scheduler.scheduler_core.store.update_task") as update_task:
+        ) as dispatch, patch("scheduler.scheduler_core.store.finish_task_execution") as finish:
             ok, detail = scheduler_core.confirm_and_send(3)
 
         self.assertTrue(ok)
@@ -40,8 +43,7 @@ class SchedulerCoreTests(unittest.TestCase):
             "Bonjour",
             [],
         )
-        self.assertEqual("active", update_task.call_args.kwargs["status"])
-        self.assertIn("last_sent", update_task.call_args.kwargs)
+        finish.assert_called_once_with(3, "exec-3", "completed", "Message envoye.")
 
     def test_confirm_and_send_marks_task_waiting_manual_action_when_needed(self):
         task = {
@@ -52,11 +54,14 @@ class SchedulerCoreTests(unittest.TestCase):
             "message": "Publication",
             "media_paths": ["C:/demo/post.jpg", "C:/demo/teaser.mp4"],
             "ai_enhanced": False,
+            "execution_id": "exec-4",
         }
-        with patch("scheduler.scheduler_core.store.get_task", return_value=task), patch(
+        with patch("scheduler.scheduler_core.store.claim_task_execution", return_value=(True, task, "")), patch(
+            "scheduler.scheduler_core.store.recover_stale_execution", return_value=False,
+        ), patch(
             "scheduler.scheduler_core.platforms.dispatch",
             return_value=DispatchResult("prepared", "Publiez dans le navigateur."),
-        ) as dispatch, patch("scheduler.scheduler_core.store.update_task") as update_task:
+        ) as dispatch, patch("scheduler.scheduler_core.store.finish_task_execution") as finish:
             ok, detail = scheduler_core.confirm_and_send(4)
 
         self.assertTrue(ok)
@@ -67,7 +72,7 @@ class SchedulerCoreTests(unittest.TestCase):
             "Publication",
             ["C:/demo/post.jpg", "C:/demo/teaser.mp4"],
         )
-        self.assertEqual({"status": "awaiting_manual_action"}, update_task.call_args.kwargs)
+        finish.assert_called_once_with(4, "exec-4", "awaiting_manual_action", "Publiez dans le navigateur.")
 
     def test_confirm_and_send_marks_error_on_dispatch_failure(self):
         task = {
@@ -77,28 +82,30 @@ class SchedulerCoreTests(unittest.TestCase):
             "target": "+212700000000",
             "message": "Bonjour",
             "ai_enhanced": False,
+            "execution_id": "exec-5",
         }
-        with patch("scheduler.scheduler_core.store.get_task", return_value=task), patch(
+        with patch("scheduler.scheduler_core.store.claim_task_execution", return_value=(True, task, "")), patch(
+            "scheduler.scheduler_core.store.recover_stale_execution", return_value=False,
+        ), patch(
             "scheduler.scheduler_core.platforms.dispatch",
             return_value=DispatchResult("error", "Echec."),
-        ), patch("scheduler.scheduler_core.store.update_task") as update_task:
+        ), patch("scheduler.scheduler_core.store.finish_task_execution") as finish:
             ok, detail = scheduler_core.confirm_and_send(5)
 
         self.assertFalse(ok)
         self.assertEqual("Echec.", detail)
-        self.assertEqual({"status": "error"}, update_task.call_args.kwargs)
+        finish.assert_called_once_with(5, "exec-5", "failed", "Echec.")
 
     def test_mark_task_sent_returns_task_to_active(self):
-        task = {"id": 8, "status": "awaiting_manual_action"}
-        with patch("scheduler.scheduler_core.store.get_task", return_value=task), patch(
-            "scheduler.scheduler_core.store.update_task"
-        ) as update_task:
+        with patch(
+            "scheduler.scheduler_core.store.mark_execution_manually_sent",
+            return_value=(True, "Tache marquee comme envoyee."),
+        ) as mark_sent:
             ok, detail = scheduler_core.mark_task_sent(8)
 
         self.assertTrue(ok)
         self.assertIn("envoyee", detail)
-        self.assertEqual("active", update_task.call_args.kwargs["status"])
-        self.assertIn("last_sent", update_task.call_args.kwargs)
+        mark_sent.assert_called_once_with(8)
 
 
 if __name__ == "__main__":

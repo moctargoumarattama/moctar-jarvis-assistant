@@ -101,10 +101,11 @@ class SystemActionsTests(unittest.TestCase):
         mock_img = Mock()
         mock_pyautogui.screenshot.return_value = mock_img
 
-        res = system_actions.capture_screenshot(pyautogui_module=mock_pyautogui)
+        with patch.object(system_actions, "_take_screenshot", return_value=True) as capture:
+            res = system_actions.capture_screenshot(pyautogui_module=mock_pyautogui)
         self.assertTrue(res["success"])
         self.assertEqual("capture_screenshot", res["action"])
-        mock_img.save.assert_called_once()
+        self.assertIs(mock_pyautogui, capture.call_args.kwargs["pyautogui_module"])
         self.assertIn("screenshot_", res["data"]["name"])
 
     def test_analyze_screen_with_vision_model(self):
@@ -112,7 +113,10 @@ class SystemActionsTests(unittest.TestCase):
         mock_img = Mock()
         mock_pyautogui.screenshot.return_value = mock_img
 
-        with patch("ai_brain.ask_ai", return_value="Je vois VS Code ouvert sur main_jarvis.py"):
+        with patch.object(system_actions, "_take_screenshot", return_value=True), \
+                patch("desktop_window_manager.get_active_window_info", return_value={"available": False}), \
+                patch("desktop_window_manager.list_open_windows", return_value=[], create=True), \
+                patch("ai_brain.ask_ai", return_value="Je vois VS Code ouvert sur main_jarvis.py") as ask:
             res = system_actions.analyze_screen(
                 question="Que vois-tu ?",
                 pyautogui_module=mock_pyautogui,
@@ -122,13 +126,19 @@ class SystemActionsTests(unittest.TestCase):
         self.assertEqual("analyze_screen", res["action"])
         self.assertIn("VS Code", res["message"])
         self.assertEqual("Je vois VS Code ouvert sur main_jarvis.py", res["data"]["analysis"])
+        self.assertEqual([res["data"]["file_path"]], ask.call_args.kwargs["images"])
 
-    def test_analyze_screen_cloud_offline_preserves_capture(self):
+    def test_analyze_screen_cloud_offline_preserves_capture_and_window_context(self):
         mock_pyautogui = Mock()
         mock_img = Mock()
         mock_pyautogui.screenshot.return_value = mock_img
 
-        with patch("ai_brain.ask_ai", side_effect=RuntimeError("cloud unavailable")):
+        with patch.object(system_actions, "_take_screenshot", return_value=True), \
+                patch("desktop_window_manager.get_active_window_info", return_value={
+                    "available": True, "app_name": "VS Code", "window_title": "Local project editor",
+                }), \
+                patch("desktop_window_manager.list_open_windows", return_value=[], create=True), \
+                patch("ai_brain.ask_ai", side_effect=RuntimeError("cloud unavailable")) as ask:
             res = system_actions.analyze_screen(
                 question="Que vois-tu ?",
                 pyautogui_module=mock_pyautogui,
@@ -136,8 +146,10 @@ class SystemActionsTests(unittest.TestCase):
 
         self.assertTrue(res["success"])
         self.assertEqual("analyze_screen", res["action"])
-        self.assertIn("Capture enregistrée", res["message"])
-        self.assertIsNone(res["data"]["analysis"])
+        self.assertIn("Local project editor", res["message"])
+        self.assertIn("screen_analysis_", res["data"]["file_path"])
+        self.assertEqual(res["message"], res["data"]["analysis"])
+        ask.assert_called_once()
 
     def test_actions_dispatcher_has_analyze_screen(self):
         self.assertIn("analyze_screen", actions.TOOL_DISPATCHER)

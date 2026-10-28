@@ -159,6 +159,22 @@ def build_default_registry(assistant):
         parameters=_object_parameters(),
         ai_enabled=True,
     )
+    def diagnose_service(intent_data):
+        from actions.system_actions import diagnose_linux_service
+        service = (intent_data.get("slots") or {}).get("service_name") or intent_data.get("target") or "jarvis.service"
+        return diagnose_linux_service(service_name=service)
+
+    registry.register(
+        "diagnose_linux_service",
+        "system",
+        diagnose_service,
+        description="Lit l'état systemd et les erreurs des 25 dernières lignes du journal d'un service Linux, sans modifier le service.",
+        parameters=_object_parameters({"service_name": {
+            "type": "string", "description": "Nom du service systemd à inspecter.",
+            "default": "jarvis.service", "pattern": "^[a-zA-Z0-9_@.-]+(\\.service)?$",
+        }}),
+        ai_enabled=True,
+    )
     registry.register("screenshot", "system", assistant._handle_screenshot)
     registry.register("analyze_screen", "system", assistant._handle_analyze_screen)
     registry.register("volume_up", "system", assistant._handle_volume_up)

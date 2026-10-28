@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+import ai_brain
 from agent_core import AGENT_SYSTEM_PROMPT, AgentCore
 from assistant_plugins import PluginRegistry
 from assistant_security import SecurityPolicy
@@ -98,13 +99,14 @@ class AgentCoreTests(unittest.TestCase):
         self.assertEqual("test_clock", chat.calls[0]["kwargs"]["tools"][0]["function"]["name"])
 
     def test_prompt_is_compact_and_retains_operational_and_safety_rules(self):
-        self.assertLess(len(AGENT_SYSTEM_PROMPT), 2000)
+        # Phase 8 shares the companion persona with other entry points. Bound the
+        # agent-specific instructions separately rather than excluding that persona.
+        self.assertIn(ai_brain.MOCTAR_SYSTEM_PROMPT, AGENT_SYSTEM_PROMPT)
+        self.assertLess(len(AGENT_SYSTEM_PROMPT) - len(ai_brain.MOCTAR_SYSTEM_PROMPT), 1500)
         for rule in (
-            "l'OS personnel et copilote d'ingénierie de Moctar", "Dell Precision M4800",
-            "DevOps, Linux, Solaire/Énergie, IoT, Projets", "directement dès le premier mot",
-            "aucune politesse, phrase de transition ou conclusion inutile", "commandes Bash/Python",
-            "2 à 4 phrases", "demande explicite de Moctar", "calcul déterministe",
-            "résultat brut sans paraphrase",
+            "copilote d'ingénierie", "Moctar", "1 à 2 phrases",
+            "N'invente ni mesure", "ne prétends jamais avoir réussi",
+            "une recommandation n'est pas une action exécutée",
             "Ne fais JAMAIS de promesse", "APPELLE DIRECTEMENT L'OUTIL au premier tour",
             "observations réelles déjà obtenues", "uniquement l'hôte mesuré",
             "confirmations requises",
@@ -121,7 +123,7 @@ class AgentCoreTests(unittest.TestCase):
         result = agent.run("Explique le fonctionnement du solaire")
 
         self.assertEqual("Réponse disponible.", result.response)
-        self.assertEqual(0.2, brain.chat.call_args.kwargs["temperature"])
+        self.assertEqual(ai_brain.GENERATION_CONFIG["temperature"], brain.chat.call_args.kwargs["temperature"])
 
     def test_direct_response_without_tool(self):
         chat = ScriptedChat([assistant_response("Le ciel est bleu a cause de la diffusion de la lumiere.")])
@@ -153,7 +155,7 @@ class AgentCoreTests(unittest.TestCase):
         self.assertIn("observations réelles déjà obtenues", system_content)
         self.assertIn("uniquement l'hôte mesuré", system_content)
         self.assertIn("APPELLE DIRECTEMENT L'OUTIL au premier tour", system_content)
-        self.assertIn("résultat brut sans paraphrase", system_content)
+        self.assertIn("N'invente ni mesure", system_content)
         handler.assert_not_called()
 
     def test_action_promise_is_retried_before_returning_a_result(self):
@@ -243,7 +245,7 @@ class AgentCoreTests(unittest.TestCase):
         tool_messages = [message for message in second_request_messages if message["role"] == "tool"]
         self.assertEqual(1, len(tool_messages))
         self.assertIn("Il est 14:30.", tool_messages[0]["content"])
-        self.assertTrue(all(call["kwargs"]["temperature"] == 0.2 for call in chat.calls))
+        self.assertTrue(all(call["kwargs"]["temperature"] == ai_brain.GENERATION_CONFIG["temperature"] for call in chat.calls))
 
     def test_native_gemini_signed_parts_survive_the_tool_observation(self):
         handler = Mock(return_value="Il est 14:30.")

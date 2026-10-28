@@ -36,6 +36,7 @@ class PluginRegistryTests(unittest.TestCase):
                 "iot_status",
                 "iot_temperature",
                 "get_system_telemetry",
+                "diagnose_linux_service",
             },
             {route.name for route in registry.ai_routes()},
         )

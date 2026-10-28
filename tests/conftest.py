@@ -11,6 +11,8 @@ from copy import deepcopy
 import json
 import os
 import socket
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import urlsplit
@@ -19,6 +21,10 @@ import urllib.request
 import httpx
 import pytest
 
+# Test collection imports config/main before fixtures run. Never use the user's
+# databases, notes or memories for implicit default paths during that import.
+_TEST_RUNTIME_ROOT = tempfile.TemporaryDirectory(prefix="jarvis-unit-runtime-")
+os.environ.setdefault("JARVIS_APP_ROOT", _TEST_RUNTIME_ROOT.name)
 
 GEMINI_TEST_MODEL = "gemini-3.5-flash-lite"
 
@@ -66,6 +72,8 @@ class OfflineGemini:
 def offline_gemini():
     """Never consume a production key or contact a local/cloud model server."""
     import ai_brain
+    import headless_bridge
+    import assistant_memory
     from google import genai
 
     backend = OfflineGemini()
@@ -94,17 +102,34 @@ def offline_gemini():
         return original_create_connection(address, *args, **kwargs)
 
     with ExitStack() as stack:
-        def client_factory(*, api_key, http_options=None, **kwargs):
-            http = stack.enter_context(httpx.Client(transport=httpx.MockTransport(backend.respond)))
+        real_bridge_init = headless_bridge.JarvisHeadlessBridge.__init__
+        state_path = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="jarvis-unit-state-")))
+        stack.enter_context(patch.object(assistant_memory, "_DEFAULT_DB_PATH", state_path / "memory.db"))
+
+        def isolated_bridge_init(self, base_dir=None, db_path=None, model=None, base_url=None):
+            return real_bridge_init(self, base_dir, db_path if db_path is not None else state_path / "memory.db", model, base_url)
+
+        stack.enter_context(patch.object(headless_bridge.JarvisHeadlessBridge, "__init__", isolated_bridge_init))
+        def client_factory(*, api_key=None, http_options=None, **kwargs):
             options = http_options.model_dump(exclude_none=True) if hasattr(http_options, "model_dump") else dict(http_options or {})
-            options["httpx_client"] = http
-            return stack.enter_context(real_client(api_key="offline-validation", http_options=options, **kwargs))
+            if "httpx_client" not in options:
+                http = stack.enter_context(httpx.Client(transport=httpx.MockTransport(backend.respond), trust_env=False))
+                options["httpx_client"] = http
+            # No TLS connection exists with MockTransport. Avoid constructing a
+            # second Windows certificate store for the SDK's unused async client.
+            options.setdefault("async_client_args", {"verify": False, "trust_env": False})
+            return stack.enter_context(real_client(api_key=api_key or "offline-validation", http_options=options, **kwargs))
 
         stack.enter_context(patch.dict(os.environ, {
             "AI_PROVIDER": "gemini", "GEMINI_API_KEY": "offline-validation",
             "GEMINI_MODEL": GEMINI_TEST_MODEL, "GEMINI_TIMEOUT_SECONDS": "15.0",
+            # A developer's real secondary key must never leak into fallback tests.
+            "GROQ_API_KEY": "", "NOC_GROQ_API_KEY": "",
         }))
         stack.enter_context(patch.object(ai_brain, "genai", SimpleNamespace(Client=client_factory)))
+        # Voice/vision sometimes import google.genai directly instead of going
+        # through ai_brain; these clients need the same offline transport.
+        stack.enter_context(patch.object(genai, "Client", side_effect=client_factory))
         stack.enter_context(patch.object(urllib.request, "urlopen", side_effect=urlopen))
         stack.enter_context(patch.object(urllib.request.OpenerDirector, "open", new=opener_open))
         stack.enter_context(patch.object(socket, "create_connection", side_effect=create_connection))

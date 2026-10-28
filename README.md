@@ -1,16 +1,19 @@
 # M.O.C.T.A.R
 
-Assistant personnel Windows local, modulaire, fiable et extensible, avec interface PyQt5 style Iron Man.
+Assistant personnel et centre de supervision Ubuntu/Windows : FastAPI headless, NOC,
+HUD 3D, voix, WhatsApp et interface desktop PyQt5.
 
 ## Etat actuel
 
-Les actions autonomes restent locales ; les requetes IA utilisent Gemini Cloud :
-- `main_jarvis.py` est l'unique point d'entree reel
+Les actions autonomes restent locales ; les questions utilisent Gemini, puis le secours Groq
+si configuré, puis le moteur d'intentions locales. Aucun serveur IA local n'est requis.
+- `main.py` est le point d'entrée du service FastAPI headless (port 5050)
+- `main_jarvis.py` lance le mode desktop PyQt5
 - `assistant_core.py` orchestre les actions via un registre de plugins
 - `intent_engine.py` detecte les commandes localement avec regles explicites + `rapidfuzz`
 - `actions/` regroupe la logique metier par domaine
 - `wake_word_simple.py` gere le wake word moderne local
-- les reponses IA et le tool calling utilisent exclusivement Google Gemini
+- Gemini assure le tool calling ; Groq peut fournir le secours conversationnel cloud
 - `ai_brain.py` peut maintenant produire des briefs quotidiens, des priorites et des suggestions locales sans cloud
 
 Les anciens modules `JarvisGUI/`, `Gesture Control/` et autres scripts legacy ont ete regroupes sous `legacy/`. Ils sont conserves pour reference, mais ils ne pilotent plus le coeur moderne.
@@ -121,7 +124,9 @@ Si la transcription courte mange le wake word mais capte une commande claire com
 
 La capture de commande utilise le microphone `2` par defaut sur cette installation. Elle calibre le bruit periodiquement, retente une transcription une fois et distingue les erreurs de micro, de delai et de transcription. Les reglages `JARVIS_MIC_ENERGY_RATIO`, `JARVIS_MIC_PAUSE_THRESHOLD` et `JARVIS_MIC_PHRASE_THRESHOLD` permettent d'ajuster la sensibilite lorsque de la musique joue dans la piece. Pour forcer un autre peripherique, definis `JARVIS_MIC_INDEX` dans `.env`.
 
-Le coeur reste autonome pour les commandes, la memoire, les briefs et les priorites. Les reponses conversationnelles et les outils IA passent directement par Gemini Cloud ; aucun serveur IA local n'est sonde ou utilise.
+Le coeur reste autonome pour les commandes, la memoire, les briefs et les priorites.
+Les réponses conversationnelles et les outils IA passent par le cloud, avec repli sur les
+intentions locales lorsque nécessaire ; aucun serveur IA local n'est sondé ou utilisé.
 
 ## Commandes vocales supportees
 
@@ -198,4 +203,96 @@ Commandes de verification recommandees :
 ```bash
 venv\Scripts\python.exe -m unittest discover -s tests -v
 venv\Scripts\python.exe -m py_compile main_jarvis.py interface.py speech2text.py intent_engine.py ai_brain.py config.py
+```
+
+## Exploitation du service Ubuntu — Phase 9
+
+Sur le Dell Precision M4800, le checkout de référence est `/opt/jarvis`.
+`jarvis.service` lance `main.py` en Python 3.11 sur le port 5050 ; le mode desktop
+`python main_jarvis.py` reste disponible pour une session graphique. Le service
+détecte les périphériques audio/vidéo disponibles et continue en mode web lorsque
+le poste ne possède pas de session graphique. Conserver un seul worker Uvicorn :
+les files WhatsApp, la mémoire de session et les notifications SSE sont partagées
+dans ce processus. Le planificateur démarre et s'arrête avec le service.
+
+Interfaces : `/` pour le NOC compact (SSE toutes les deux secondes), `/hud` pour le
+HUD 3D ; la modale NeuroVision 3D du HUD utilise la caméra et la télémétrie visuelle
+existantes. L'authentification et les permissions de la caméra restent applicables.
+Le contrôleur vocal est seul responsable de la proactivité : il informe le HUD via
+`jarvis:proactive-message` sans second polling ni seconde lecture audio.
+
+Configuration privée dans `/opt/jarvis/.env` (ne jamais commiter ses secrets) :
+
+- `GEMINI_API_KEY`, éventuellement `GROQ_API_KEY` pour le secours cloud.
+- `WHATSAPP_ADMIN_NUMBERS` ou `ADMIN_PHONE_NUMBER` pour les administrateurs autorisés.
+- `NOC_WHATSAPP_WEBHOOK_TOKEN` pour les webhooks entrants ; `NOC_GATEWAY_SECRET`
+  pour les réponses sortantes, identique au secret configuré dans la passerelle.
+- `NOC_WHATSAPP_SEND_URL=http://127.0.0.1:3001/message/send` et
+  `NOC_WHATSAPP_SESSION_ID=1` pour l'alias Baileys.
+- `NOC_VPS_TOKEN` et la configuration Sentinel existante pour les rapports distants.
+
+WhatsApp : `POST /api/whatsapp/webhook` reçoit le texte avec un ID Baileys stable,
+`POST /api/voice/process` reçoit l'audio brut authentifié. Le webhook reste un ACK
+rapide : la transcription, l'action puis la livraison se font dans le worker.
+Une note vocale ou la demande « réponds en vocal » ajoute à la réponse texte les
+champs JSON `reply`, `voice_reply_b64` et `voice_mime_type: "audio/mpeg"`.
+L'audio Remy est généré par le TTS existant, limité à 1 Mio et transmis à l'alias
+`integrations/baileys-send-alias.cjs`, qui envoie le texte puis une note vocale
+Baileys (`ptt: true`). Le parseur JSON de la passerelle doit accepter 2 Mio pour
+cette route. Un échec TTS conserve la réponse texte et ne rejoue jamais l'action.
+Les autres routes et sessions Baileys restent disponibles. Une mise à jour de
+Python seule ne suffit pas : copier aussi l'alias utilisé par `server.js`.
+
+Sentinel VPS reçoit les incidents authentifiés/chiffrés du VPS et les publie en
+SSE. La console Cyberdéfense conserve ses pièges, exercices, historique et audit
+heuristique ; ses exercices sont distincts des scans réels. Aucun nouveau modèle
+ni nouvelle dépendance n'est ajouté en Phase 9.
+
+Diagnostic en lecture seule : « diagnostique le service jarvis.service »,
+« pourquoi le service klasora-whatsapp.service plante » ou « vérifie les logs de
+jarvis.service ». L'outil valide le nom, lit `systemctl is-active` et les 25
+dernières lignes `journalctl` avec un délai de quatre secondes par commande et
+signale l'état réellement mesuré. Il ne redémarre aucun service. Sous Windows, il
+indique que la mesure doit être exécutée sur Ubuntu.
+
+États d'exécution exposés aux interfaces :
+
+| État | Signification |
+| --- | --- |
+| `success` / `completed` | Traitement terminé ; `verification_status` indique si un résultat a été vérifié. |
+| `pending_confirmation` | Action vocale suspendue, liée à sa session, valable 180 s ; « confirme l'action » ou « annule l'action ». |
+| `awaiting_confirmation` | Exécution planifiée interrompue : vérifier le destinataire avant de la marquer envoyée ; aucun renvoi aveugle. |
+| `blocked` | Permission ou politique de sécurité refusée, `ok: false`. |
+| `error` / `failed` / `degraded_fallback` | Échec réel ou indisponibilité, `ok: false` ; le texte explique la situation. |
+
+La réponse `/api/voice/interact` inclut aussi `security_status`,
+`requires_confirmation`, `pending_action_id` et `verification_status`.
+Les confirmations sont consommées une seule fois. Le planificateur conserve dans
+SQLite `occurrence_key` et `execution_id` ainsi qu'un journal des exécutions pour
+éviter le rejeu d'un même créneau après redémarrage.
+
+Administration sur le Dell (consulter les journaux avant un redémarrage) :
+
+```bash
+sudo systemctl status jarvis.service klasora-whatsapp.service --no-pager
+sudo journalctl -u jarvis.service -n 80 --no-pager
+sudo journalctl -u klasora-whatsapp.service -n 80 --no-pager
+cd /opt/jarvis && git pull --ff-only && sudo systemctl restart jarvis.service
+```
+
+Avant une mise à jour touchant le connecteur, sauvegarder `server.js` et vérifier
+le chemin importé par la passerelle ; mettre à jour l'alias puis redémarrer aussi
+`klasora-whatsapp.service`. Préserver `.env`, `data/`, les sessions Baileys et les
+bases SQLite. Les migrations ajoutent des colonnes et un journal sans supprimer
+les anciennes tâches. Sauvegarder les bases via l'API backup SQLite ou service
+arrêté, jamais une copie partielle pendant une écriture.
+
+Validation locale (aucun message WhatsApp réel requis) :
+
+```bash
+python -m py_compile main.py headless_bridge.py voice_semantic_engine.py actions/system_actions.py intent_engine.py scheduler/scheduler_store.py scheduler/scheduler_core.py
+node --check static/js/hud_3d.js
+node --check static/voice.js
+python -m pytest -q
+node --test tests/*.cjs
 ```

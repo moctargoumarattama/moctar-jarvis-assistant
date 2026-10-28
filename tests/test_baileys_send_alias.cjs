@@ -62,6 +62,29 @@ test('missing or invalid machine token cannot send', async context => {
   assert.equal(socket.sent.length, 0);
 });
 
+test('voice reply retains text then sends bounded MP3 as a voice note', async context => {
+  const socket = mockSocket();
+  const { post } = await gateway(context, { sessions: new Map([['1', socket]]) });
+  const audio = Buffer.from('ID3test-mp3');
+  const result = await post({ to: administrator, text: 'Rapport', reply: 'Rapport',
+    voice_reply_b64: audio.toString('base64'), voice_mime_type: 'audio/mpeg' });
+  assert.equal(result.status, 200);
+  assert.deepEqual(socket.sent.map(entry => entry.content), [
+    { text: 'Rapport' }, { audio, mimetype: 'audio/mpeg', ptt: true }
+  ]);
+});
+
+test('malformed or excessive audio is rejected before text delivery', async context => {
+  const socket = mockSocket();
+  const { post } = await gateway(context, { sessions: new Map([['1', socket]]) });
+  for (const voice of [
+    { voice_reply_b64: 'file:///private', voice_mime_type: 'audio/mpeg' },
+    { voice_reply_b64: Buffer.from('a').toString('base64'), voice_mime_type: 'audio/ogg' },
+    { voice_reply_b64: 'A'.repeat(1398108), voice_mime_type: 'audio/mpeg' }
+  ]) assert.equal((await post({ to: administrator, text: 'Rapport', ...voice })).status, 400);
+  assert.equal(socket.sent.length, 0);
+});
+
 test('empty explicitly configured secret keeps route disabled', async context => {
   const socket = mockSocket();
   const { post } = await gateway(context, { gatewaySecret: '', sessions: new Map([['1', socket]]) });

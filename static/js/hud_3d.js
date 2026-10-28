@@ -1513,32 +1513,14 @@
 
     let lastRemoteHudUpdated = 0;
 
-    let lastProactiveCheck = Date.now();
-    async function checkProactiveEvent() {
-      const now = Date.now();
-      if (now - lastProactiveCheck < 20000) return;
-      lastProactiveCheck = now;
-      if (currentVoicePhase === 'speaking' || currentVoicePhase === 'processing' || activeAudioElement) return;
-
-      try {
-        const pRes = await fetch('/api/voice/proactive', { credentials: 'include' });
-        if (pRes.ok) {
-          const pData = await pRes.json();
-          if (pData && pData.has_event && pData.message) {
-            if (assistantTextEl) assistantTextEl.textContent = pData.message;
-            recordHudConversationTurn('', pData.message);
-            if (pData.event && pData.event.mood) {
-              applyMood(pData.event.mood);
-            }
-            if (pData.audio_url) {
-              playAudioUrl(pData.audio_url);
-            } else {
-              speakJarvisText(pData.message);
-            }
-          }
-        }
-      } catch (_) {}
-    }
+    // voice.js owns proactive polling and playback. This listener only renders it.
+    window.addEventListener('jarvis:proactive-message', (event) => {
+      const data = event.detail;
+      if (!data || !data.has_event || !data.message) return;
+      if (assistantTextEl) assistantTextEl.textContent = data.message;
+      recordHudConversationTurn('', data.message);
+      if (data.event && data.event.mood) applyMood(data.event.mood);
+    });
 
     async function sync() {
       let metricsApplied = false;
@@ -1615,8 +1597,6 @@
         applyHudStatus('OFFLINE', 'HORS LIGNE', new Date().toISOString(), ['Serveur injoignable']);
       }
 
-      // 3. Vérification des initiatives proactives vocales (bienveillance, santé, rythme circadien)
-      await checkProactiveEvent();
     }
 
     sync();

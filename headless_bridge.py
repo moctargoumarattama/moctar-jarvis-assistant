@@ -10,6 +10,7 @@ ou des daemons d'arrière-plan.
 """
 
 import asyncio
+from copy import deepcopy
 from datetime import datetime
 import json
 import logging
@@ -23,14 +24,17 @@ import unicodedata
 from uuid import uuid4
 
 import actions
+from action_status import action_status_fields
 import ai_brain
 from ai_brain import AIBrain
-from agent_core import AgentCore
+from agent_core import AgentCore, PendingAgentAction
 from assistant_memory import AssistantMemory
 from assistant_security import SecurityPolicyEngine
 import config
 
 logger = logging.getLogger("jarvis.headless")
+MAX_PENDING_AGENT_ACTIONS = 64
+PENDING_AGENT_TTL_SECONDS = 180.0
 
 
 def _is_system_status_prompt(prompt: str) -> bool:
@@ -108,6 +112,9 @@ def select_tools_for_prompt(prompt: str) -> Tuple[str, ...]:
 
     def has_keyword(keywords):
         return any(re.search(r"\b" + re.escape(word) + r"(?:s|x)?\b", p) for word in keywords)
+
+    if has_keyword(("diagnostique", "diagnostic", "journalctl", "logs", "plante")):
+        tools.add("diagnose_linux_service")
 
     # Mots-clés Énergie / Solaire / Batterie
     if has_keyword(("energie", "énergie", "solaire", "panneau", "batterie", "consommation", "kw", "kwh", "onduleur", "autonomie", "audit")):
@@ -233,7 +240,8 @@ class JarvisHeadlessBridge:
         )
 
         self.active_session_id = f"session_web_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:4]}"
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._pending_agent_actions: dict[str, dict[str, Any]] = {}
         logger.info(
             "JarvisHeadlessBridge initialisé (Modèle: %s @ %s, DB: %s, Outils: %d)",
             self.model,
@@ -241,6 +249,68 @@ class JarvisHeadlessBridge:
             self.db_path,
             len(actions.TOOL_DISPATCHER),
         )
+
+    @staticmethod
+    def _confirmation_decision(text: str) -> Optional[bool]:
+        normalized = unicodedata.normalize("NFKD", str(text or "").casefold().replace("’", "'"))
+        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+        normalized = re.sub(r"\s+", " ", normalized).strip(" .!?")
+        if normalized in {"oui", "confirme", "je confirme", "confirme l'action", "confirmer l'action", "valide l'action"}:
+            return True
+        if normalized in {"non", "annule", "annuler", "annule l'action", "annuler l'action"}:
+            return False
+        return None
+
+    @staticmethod
+    def is_confirmation_command(text: str) -> bool:
+        """Recognize only an explicit confirmation/cancellation turn."""
+        return JarvisHeadlessBridge._confirmation_decision(text) is not None
+
+    def _purge_pending_agent_actions_locked(self) -> None:
+        now = time.monotonic()
+        for session, entry in list(self._pending_agent_actions.items()):
+            if entry["expires_at"] <= now:
+                self._pending_agent_actions.pop(session, None)
+
+    def has_pending_agent_action(self, session_id: Optional[str] = None) -> bool:
+        """Check only the trusted conversation, never another session's action."""
+        with self._lock:
+            self._purge_pending_agent_actions_locked()
+            return (session_id or self.active_session_id) in self._pending_agent_actions
+
+    def _register_pending_agent_action_locked(self, session_id: str, pending: PendingAgentAction) -> str:
+        self._purge_pending_agent_actions_locked()
+        self._pending_agent_actions.pop(session_id, None)
+        while len(self._pending_agent_actions) >= MAX_PENDING_AGENT_ACTIONS:
+            self._pending_agent_actions.pop(next(iter(self._pending_agent_actions)))
+        now = time.monotonic()
+        action_id = "agent_" + uuid4().hex
+        self._pending_agent_actions[session_id] = {
+            "action_id": action_id, "session_id": session_id,
+            "tool_name": pending.tool_name, "arguments": deepcopy(pending.arguments),
+            "created_at": now, "expires_at": now + PENDING_AGENT_TTL_SECONDS,
+            "pending_action": deepcopy(pending),
+        }
+        return action_id
+
+    def _validate_pending_agent_action(self, pending: PendingAgentAction) -> Optional[str]:
+        """Recheck the active agent's policy, including subsequent queued calls."""
+        from voice_semantic_engine import _infer_tool_domain
+        security = self.agent.security
+        if security is None or not callable(getattr(security, "validate_arguments", None)) or not callable(
+            getattr(security, "is_domain_allowed", None)
+        ):
+            return "Politique de sécurité indisponible ; préparez à nouveau l'action."
+        calls = [{"name": pending.tool_name, "arguments": pending.arguments}, *pending.remaining_tool_calls]
+        for call in calls:
+            tool_name, arguments = call["name"], call["arguments"]
+            valid, reason = security.validate_arguments(tool_name, arguments)
+            registry = getattr(self.agent, "registry", None)
+            route = registry.get(tool_name) if registry is not None and callable(getattr(registry, "get", None)) else None
+            domain = getattr(route, "domain", None) or _infer_tool_domain(tool_name)
+            if not valid or not security.is_domain_allowed(domain):
+                return reason or f"Domaine '{domain}' désactivé pour '{tool_name}'."
+        return None
 
     def execute_prompt(
         self,
@@ -276,6 +346,15 @@ class JarvisHeadlessBridge:
             }
 
         with self._lock:
+            self._purge_pending_agent_actions_locked()
+            decision = self._confirmation_decision(user_input)
+            pending_agent = self._pending_agent_actions.pop(current_session, None) if decision is not None else None
+            # Bind legacy pending-action helpers to this request's trusted session.
+            from voice_semantic_engine import resolve_pending_voice_command
+            pending_result = None if pending_agent else resolve_pending_voice_command(user_input, current_session, self)
+            if pending_result is not None:
+                return {**pending_result, **action_status_fields(pending_result),
+                        "timestamp": timestamp, "session_id": current_session, "source": source}
             thought_chain: List[str] = []
             tools_used: List[Dict[str, Any]] = []
             telemetry_result = None
@@ -391,22 +470,41 @@ class JarvisHeadlessBridge:
                 return "Le moteur IA est indisponible pour cette demande. Vérifiez le serveur et le modèle configurés, puis réessayez."
 
             status = "success"
+            agent_result = None
             try:
                 self.agent._call_llm = hooked_call_llm
-                agent_result = self.agent.run(
-                    prompt=user_input,
-                    context=system_context,
-                    session_id=current_session,
-                    tool_names=targeted_tools,
-                    fallback=local_fallback,
-                )
+                if pending_agent is not None:
+                    pending_action = pending_agent["pending_action"]
+                    denied = self._validate_pending_agent_action(pending_action) if decision else None
+                    if denied:
+                        agent_result = {"status": "blocked", "security_status": "blocked",
+                                        "reply": f"Action bloquée : {denied}",
+                                        "verification_status": "not_verified"}
+                    else:
+                        def resume_fallback() -> str:
+                            # Never route a completed action back through local execution.
+                            nonlocal status, fallback_required
+                            fallback_required = True
+                            status = "success" if tools_used and all(tool.get("success") is True for tool in tools_used) else "failed"
+                            observed = [str(tool.get("message") or tool.get("error") or "") for tool in tools_used]
+                            return "\n".join(filter(None, observed)) or "Synthèse indisponible ; résultat de l'action non vérifié. Ne la relancez pas sans vérifier."
+
+                        agent_result = self.agent.resume(pending_action, confirmed=bool(decision), fallback=resume_fallback)
+                else:
+                    agent_result = self.agent.run(
+                        prompt=user_input,
+                        context=system_context,
+                        session_id=current_session,
+                        tool_names=targeted_tools,
+                        fallback=local_fallback,
+                    )
                 if getattr(agent_result, "used_fallback", False) or getattr(agent_result, "status", None) == "fallback":
                     fallback_required = True
 
                 if hasattr(agent_result, "response"):
                     reply = agent_result.response
                 elif isinstance(agent_result, dict):
-                    reply = agent_result.get("response") or agent_result.get("message") or str(agent_result)
+                    reply = agent_result.get("reply") or agent_result.get("response") or agent_result.get("message") or str(agent_result)
                 else:
                     reply = str(agent_result or "").strip()
 
@@ -429,20 +527,26 @@ class JarvisHeadlessBridge:
             except Exception as exc:
                 logger.exception("Erreur exécution agent headless : %s", exc)
                 fallback_required = True
-                try:
-                    import autonomous_library
-                    auto_fallback = autonomous_library.execute_autonomous_task(user_input, session_id=current_session)
-                    if auto_fallback.get("handled"):
-                        reply = f"⚠️ [Mode Autonome Activé]\n{auto_fallback['reply']}"
-                        status = "success"
-                        if auto_fallback.get("tools_used"):
-                            tools_used.extend(auto_fallback["tools_used"])
-                    else:
+                if pending_agent is not None:
+                    # resume() may have performed an external action before failing.
+                    # Consumption is final; no fallback is allowed to execute again.
+                    reply = "Reprise interrompue ; résultat de l'action non vérifié. Vérifiez l'état réel avant de préparer une nouvelle action."
+                    status = "error"
+                else:
+                    try:
+                        import autonomous_library
+                        auto_fallback = autonomous_library.execute_autonomous_task(user_input, session_id=current_session)
+                        if auto_fallback.get("handled"):
+                            reply = f"⚠️ [Mode Autonome Activé]\n{auto_fallback['reply']}"
+                            status = "success"
+                            if auto_fallback.get("tools_used"):
+                                tools_used.extend(auto_fallback["tools_used"])
+                        else:
+                            reply = f"Erreur lors de l'exécution de la requête : {exc}"
+                            status = "error"
+                    except Exception:
                         reply = f"Erreur lors de l'exécution de la requête : {exc}"
                         status = "error"
-                except Exception:
-                    reply = f"Erreur lors de l'exécution de la requête : {exc}"
-                    status = "error"
             finally:
                 self.agent._call_llm = orig_call_llm
                 self.brain.timeout = original_timeout
@@ -454,12 +558,18 @@ class JarvisHeadlessBridge:
             # cette lecture ne fait aucun appel réseau.
             # Propagation structuree des etats de securite, confirmation et verification
             res_status = getattr(agent_result, "status", None) if not isinstance(agent_result, dict) else agent_result.get("status")
-            if res_status:
+            # 'fallback' describes routing, not whether the local fallback worked.
+            if res_status and res_status != "fallback":
                 status = res_status
 
             sec_status = getattr(agent_result, "security_status", None) if not isinstance(agent_result, dict) else agent_result.get("security_status")
             req_confirm = getattr(agent_result, "requires_confirmation", None) if not isinstance(agent_result, dict) else agent_result.get("requires_confirmation")
+            req_confirm = bool(req_confirm or getattr(agent_result, "pending_action", None))
             pending_act_id = getattr(agent_result, "pending_action_id", None) if not isinstance(agent_result, dict) else agent_result.get("pending_action_id")
+            pending_action = getattr(agent_result, "pending_action", None) if not isinstance(agent_result, dict) else agent_result.get("pending_action")
+            if isinstance(pending_action, PendingAgentAction):
+                pending_act_id = self._register_pending_agent_action_locked(current_session, pending_action)
+                status, req_confirm = "pending_confirmation", True
             tool_calls = getattr(agent_result, "tool_calls", None) if not isinstance(agent_result, dict) else agent_result.get("tool_calls")
             verif_status = getattr(agent_result, "verification_status", None) if not isinstance(agent_result, dict) else agent_result.get("verification_status")
 
@@ -473,7 +583,10 @@ class JarvisHeadlessBridge:
                 "requires_confirmation": bool(req_confirm or (status == "pending_confirmation")),
                 "pending_action_id": pending_act_id,
                 "tool_calls": tool_calls or tools_used,
-                "verification_status": verif_status or ("verified" if status == "success" else status),
+                "verification_status": verif_status or (
+                    "verified" if tools_used and all(tool.get("success") is True for tool in tools_used)
+                    else None
+                ),
                 "thought_chain": thought_chain,
                 "tools_used": tools_used,
                 "timestamp": timestamp,
@@ -486,6 +599,7 @@ class JarvisHeadlessBridge:
                 ),
                 "autonomous_available": True,
             }
+            resp_dict.update(action_status_fields(resp_dict))
 
             for tu in tools_used:
                 t_data = tu.get("data")
