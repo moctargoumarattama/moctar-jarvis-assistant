@@ -701,21 +701,52 @@ def execute_autonomous_task(
                 "task_category": "web_search",
             }
 
-    # 4. CONTRÔLE MÉDIA UNIVERSEL EN 0 MS (PLAYERCTL, SPOTIFY, LECTEUR ACTIF)
+    # 4. CONTRÔLE CONTEXTUEL DES FENÊTRES ("mets-le à droite", "mets-le à gauche", "snap", "plein écran")
+    # Vérifié avant le multimédia pour éviter qu'une phrase contenant "musique" ou "son" ne détourne l'action de placement
+    window_snap_match = re.search(
+        r"\b(?:mets?[-\s]le\s+[aà]\s+(?:droite|gauche)|place\s+[aà]\s+(?:droite|gauche)|snap\s+(?:right|left|droite|gauche)?|plein\s+[ée]cran|maximise|minimise|r[ée]duis)\b",
+        norm,
+    )
+    if window_snap_match:
+        pos = "maximize"
+        if "droite" in norm or "right" in norm:
+            pos = "right"
+        elif "gauche" in norm or "left" in norm:
+            pos = "left"
+        elif "minimise" in norm or "reduis" in norm or "réduis" in norm:
+            pos = "minimize"
+        snap_res = actions.execute_tool("snap_active_window", {"position": pos})
+        tools_used.append({"tool": "snap_active_window", "arguments": {"position": pos}, "success": bool(snap_res.get("success", True))})
+        msg = snap_res.get("message") if isinstance(snap_res, dict) else str(snap_res)
+        return {"handled": True, "reply": msg, "tools_used": tools_used, "task_category": "system_tools"}
+
+    # 4b. CONTRÔLE MÉDIA UNIVERSEL EN 0 MS (PLAYERCTL, SPOTIFY, LECTEUR ACTIF)
     norm_stripped = norm.strip(" .,:;!?'\"’«»")
-    is_media_pause = any(k in norm for k in [
-        "mets pause", "mets en pause", "mets sur pause",
-        "stop la musique", "coupe la musique", "pause la musique", "arrete la musique", "arrête la musique",
-        "pause musique", "pause youtube", "mets youtube en pause", "met youtube en pause", "youtube en pause",
+    has_pause_word = bool(re.search(
+        r"\b(?:pause|en\s+pause|sur\s+pause|arrete|arrête|stop|coupe|interromps|suspend)\b", norm
+    ))
+
+    is_media_pause = (
+        has_pause_word and any(w in norm for w in ("musique", "chanson", "son", "morceau", "audio", "video", "vidéo", "youtube", "lecture", "flux"))
+    ) or any(k in norm for k in [
+        "mets pause", "met pause", "mets en pause", "met en pause", "mets sur pause", "met sur pause",
+        "mettre en pause", "mettre pause", "mets la musique en pause", "met la musique en pause",
+        "mets la video en pause", "met la video en pause", "mets la vidéo en pause",
+        "pause la musique", "pause musique", "pause le son", "pause youtube",
+        "stop la musique", "arrete la musique", "arrête la musique", "coupe la musique",
+        "stop musique", "arrete le son", "arrête le son", "coupe le son",
+        "mets youtube en pause", "met youtube en pause", "youtube en pause",
         "j ai youtube en pause", "j'ai youtube en pause", "jai youtube en pause",
         "pause la video", "pause la vidéo", "pause le son",
     ]) or norm_stripped in ("pause", "stop", "en pause", "on pause", "stop musique", "pause la musique", "pause video", "pause la video")
 
-    is_media_play = any(k in norm for k in [
-        "reprends la lecture", "remets la musique", "reprends la musique",
-        "relance la musique", "relance la lecture", "reprends la video", "reprends la vidéo",
-        "relance youtube", "remets youtube", "play musique",
-    ]) or norm in ("lecture", "play", "reprise") or bool(re.search(r"\b(?:reprends?\s+la\s+lecture|remets?\s+la\s+musique|relance\s+la\s+musique)\b", norm))
+    is_media_play = (not has_pause_word) and (
+        any(k in norm for k in [
+            "reprends la lecture", "remets la musique", "reprends la musique",
+            "relance la musique", "relance la lecture", "reprends la video", "reprends la vidéo",
+            "relance youtube", "remets youtube", "play musique",
+        ]) or norm in ("lecture", "play", "reprise") or bool(re.search(r"\b(?:reprends?\s+la\s+lecture|remets?\s+la\s+musique|relance\s+la\s+musique)\b", norm))
+    )
 
     is_media_next = any(k in norm for k in [
         "chanson suivante", "piste suivante", "musique suivante", "morceau suivant", "suivant",
@@ -726,10 +757,15 @@ def execute_autonomous_task(
         "musique precedente", "musique précédente", "morceau precedent", "morceau précédent", "precedent", "précédent",
     ])
 
-    is_media_playlist = any(k in norm for k in [
-        "lance ma playlist", "lance spotify", "ouvre spotify", "mets ma playlist",
-        "mets de la musique", "lance de la musique", "joue de la musique", "mets la musique", "lance la musique", "musique",
-    ]) or norm in ("mets de la musique", "lance de la musique", "joue de la musique", "mets la musique", "lance la musique", "musique", "playlist", "spotify")
+    is_media_playlist = (not is_media_pause and not has_pause_word) and (
+        any(k in norm for k in [
+            "lance ma playlist", "lance spotify", "ouvre spotify", "mets ma playlist",
+            "lance de la musique", "joue de la musique", "lance la musique",
+        ]) or (
+            any(k in norm for k in ("mets de la musique", "mets la musique"))
+            and not has_pause_word
+        ) or norm in ("mets de la musique", "lance de la musique", "joue de la musique", "mets la musique", "lance la musique", "musique", "playlist", "spotify")
+    )
 
     if is_media_pause:
         res = actions.execute_tool("control_playback", {"action": "pause"})
@@ -756,12 +792,14 @@ def execute_autonomous_task(
         tools_used.append({"tool": "launch_playlist", "arguments": {}, "success": True})
         return {"handled": True, "reply": "Initialisation du flux audio. Votre playlist est lancée, Moctar.", "tools_used": tools_used, "task_category": "media"}
 
-    # 4b. YOUTUBE & MUSIQUE DÉTERMINISTE
+    # 4c. YOUTUBE & MUSIQUE DÉTERMINISTE
     yt_search_match = re.search(r"^(?:cherche|recherche|trouve)\s+sur\s+youtube\s+(.+)$", norm) or re.search(r"^(?:cherche|recherche|trouve)\s+(.+)\s+sur\s+youtube$", norm)
-    is_play_music = (
-        bool(re.match(r"^(?:mets|met|joue|lance|ecoute)\s+(?:de\s+la\s+|du\s+|un\s+|une\s+|la\s+)?(?:musique|chanson|son|morceau|playlist|video|vidéo|coran)?", norm))
-        and any(k in norm for k in ("musique", "chanson", "son", "morceau", "playlist", "video", "vidéo", "coran", "rap", "rai", "jazz", "audio"))
-    ) or norm.startswith(("mets de la musique", "joue de la musique", "lance la musique", "mets du son", "mets du coran"))
+    is_play_music = (not is_media_pause and not has_pause_word) and (
+        (
+            bool(re.match(r"^(?:mets|met|joue|lance|ecoute)\s+(?:de\s+la\s+|du\s+|un\s+|une\s+|la\s+)?(?:musique|chanson|son|morceau|playlist|video|vidéo|coran)?", norm))
+            and any(k in norm for k in ("musique", "chanson", "son", "morceau", "playlist", "video", "vidéo", "coran", "rap", "rai", "jazz", "audio"))
+        ) or norm.startswith(("mets de la musique", "joue de la musique", "lance la musique", "mets du son", "mets du coran"))
+    )
 
     if yt_search_match or is_play_music:
         target_query = ""
@@ -892,18 +930,6 @@ def execute_autonomous_task(
         msg = win_res.get("message") if isinstance(win_res, dict) else str(win_res)
         return {"handled": True, "reply": msg, "tools_used": tools_used, "task_category": "system_tools"}
 
-    if re.search(r"\b(?:mets?[-\s]le\s+[aà]\s+(?:droite|gauche)|place\s+[aà]\s+(?:droite|gauche)|snap\s+(?:right|left)|plein\s+[ée]cran|maximise|minimise|r[ée]duis)\b", norm):
-        pos = "maximize"
-        if "droite" in norm or "right" in norm:
-            pos = "right"
-        elif "gauche" in norm or "left" in norm:
-            pos = "left"
-        elif "minimise" in norm or "reduis" in norm or "réduis" in norm:
-            pos = "minimize"
-        snap_res = actions.execute_tool("snap_active_window", {"position": pos})
-        tools_used.append({"tool": "snap_active_window", "arguments": {"position": pos}, "success": bool(snap_res.get("success", True))})
-        msg = snap_res.get("message") if isinstance(snap_res, dict) else str(snap_res)
-        return {"handled": True, "reply": msg, "tools_used": tools_used, "task_category": "system_tools"}
 
     # FERMETURE D'APPLICATION
     if norm.startswith("ferme ") and not any(w in norm for w in ("musique", "son", "onglet", "session")):
@@ -989,12 +1015,29 @@ def execute_autonomous_task(
         return {"handled": True, "reply": "Niveau audio ajusté, Moctar.", "tools_used": tools_used, "task_category": "system_tools"}
 
     # 8. TÉLÉMÉTRIE MATÉRIELLE, RÉSEAU & INFRASTRUCTURE
-    is_vision_or_face = bool(words.intersection({
-        "visage", "camera", "caméra", "webcam", "neurovision", "fatigue", "fatigué",
-        "clignement", "clignements", "baillement", "bâillement", "yeux", "tete", "tête",
-        "vois", "regarde", "scanner", "biometrie", "biométrie",
-    }))
-    if is_vision_or_face:
+    # Détection stricte et biométrique du visage / NeuroVision (sans faux positifs sur 'vois', 'regarde', etc.)
+    is_vision_query_explicit = (
+        any(p in norm for p in (
+            "analyse mon visage", "analyse le visage", "detecte mon visage", "détecte mon visage",
+            "score de fatigue", "etat de fatigue", "état de fatigue", "suivi facial",
+            "tu me vois", "est ce que tu me vois", "est-ce que tu me vois",
+            "regarde mon visage", "regarde moi", "regarde-moi",
+            "telemetrie vision", "télémétrie vision", "mes yeux", "mes clignements",
+            "capteur neurovision", "capteur biométrique", "capteur biometrique",
+        ))
+        or bool(words.intersection({
+            "visage", "webcam", "neurovision", "fatigue", "fatigué",
+            "clignement", "clignements", "baillement", "bâillement", "biometrie", "biométrie",
+        }))
+    )
+    # Exclusion stricte : si la phrase parle de musique, youtube, fenêtre, réseau, port, etc., ce n'est PAS de la biométrie faciale
+    if any(k in norm for k in (
+        "musique", "playlist", "chanson", "youtube", "morceau", "son",
+        "fenetre", "fenêtre", "ecran", "écran", "reseau", "réseau", "wifi", "port", "snap", "volume",
+    )):
+        is_vision_query_explicit = False
+
+    if is_vision_query_explicit:
         res = actions.execute_tool("get_vision_telemetry", {})
         tools_used.append({"tool": "get_vision_telemetry", "arguments": {}, "success": bool(res.get("success"))})
         return {

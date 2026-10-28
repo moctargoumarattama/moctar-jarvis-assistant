@@ -38,7 +38,7 @@ DEFAULT_CATEGORY_TTLS: dict[str, float] = {
     "general": 180.0,       # Requêtes générales répétées (3 minutes)
 }
 
-# Réponses dégradées ou temporaires à ne JAMAIS mettre en cache
+# Réponses dégradées, questions de clarification ou erreurs à ne JAMAIS mettre en cache
 UNCACHEABLE_PATTERNS = (
     "mode dégradé",
     "mode degrade",
@@ -50,7 +50,27 @@ UNCACHEABLE_PATTERNS = (
     "pas bien compris",
     "pouvez-vous répéter",
     "pouvez vous repeter",
+    "peux-tu répéter",
+    "peux tu repeter",
+    "tu peux répéter",
+    "tu peux repeter",
+    "pas bien capté",
+    "pas bien capte",
+    "peux me redire",
+    "peux-tu me redire",
+    "peux tu me redire",
+    "tu peux me redire",
+    "redire",
+    "répéter",
+    "pas compris",
+    "pas saisi",
     "micro-coupure",
+    "initialisation du flux audio",
+    "votre playlist est lancée",
+    "lecture mise en pause",
+    "reprise de la lecture",
+    "niveau audio ajusté",
+    "capteur neurovision",
 )
 
 
@@ -395,6 +415,23 @@ class SmartCommandCache:
 
         canonical_key, deduced_cat, _ = canonicalize_query(query)
         cat = category or deduced_cat
+
+        # Ne jamais mettre en cache les actions de contrôle ou d'exécution (media, snap, volume, system tools)
+        NON_CACHEABLE_CATEGORIES = {"media", "system_tools", "workspace_layout", "window", "apps", "neurovision"}
+        if cat in NON_CACHEABLE_CATEGORIES or (category and category in NON_CACHEABLE_CATEGORIES):
+            return False
+
+        # Ne jamais mettre en cache un résultat contenant une action ou des outils de mutation
+        if agent_result and isinstance(agent_result, dict):
+            if agent_result.get("action"):
+                return False
+            tools = agent_result.get("tools_used") or []
+            mutating_tools = {
+                "control_playback", "launch_playlist", "snap_active_window",
+                "close_active_window", "close_app", "adjust_system_volume",
+            }
+            if any(isinstance(t, dict) and t.get("tool") in mutating_tools for t in tools):
+                return False
 
         # Détermination du TTL
         if ttl is not None:

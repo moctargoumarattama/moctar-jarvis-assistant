@@ -1,6 +1,6 @@
 'use strict';
 
-const SW_VERSION = 'v8.0';
+const SW_VERSION = 'v9.0';
 
 // Installation metadata only: pages, scripts, telemetry and API responses are never cached.
 self.addEventListener('install', event => {

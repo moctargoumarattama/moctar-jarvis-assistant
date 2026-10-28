@@ -201,11 +201,21 @@
 }
 
 #nv-client-video {
-  z-index: 5 !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
   width: 100% !important;
   height: 100% !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: cover !important;
   transform: scaleX(-1) !important;
   transform-origin: center center !important;
+  z-index: 5 !important;
 }
 
 /* Overlays Sci-Fi HUD sur la vidéo */

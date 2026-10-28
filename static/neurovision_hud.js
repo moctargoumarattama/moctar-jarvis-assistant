@@ -561,13 +561,22 @@
       if (clientVideo) {
         stopRadarStandby();
         clientVideo.srcObject = stream;
-        clientVideo.style.display = 'block';
-        clientVideo.style.position = 'absolute';
-        clientVideo.style.inset = '0';
-        clientVideo.style.width = '100%';
-        clientVideo.style.height = '100%';
-        clientVideo.style.objectFit = 'cover';
-        clientVideo.style.zIndex = '5';
+        clientVideo.style.setProperty('display', 'block', 'important');
+        clientVideo.style.setProperty('position', 'absolute', 'important');
+        clientVideo.style.setProperty('top', '0', 'important');
+        clientVideo.style.setProperty('left', '0', 'important');
+        clientVideo.style.setProperty('right', '0', 'important');
+        clientVideo.style.setProperty('bottom', '0', 'important');
+        clientVideo.style.setProperty('width', '100%', 'important');
+        clientVideo.style.setProperty('height', '100%', 'important');
+        clientVideo.style.setProperty('min-width', '100%', 'important');
+        clientVideo.style.setProperty('min-height', '100%', 'important');
+        clientVideo.style.setProperty('max-width', '100%', 'important');
+        clientVideo.style.setProperty('max-height', '100%', 'important');
+        clientVideo.style.setProperty('object-fit', 'cover', 'important');
+        clientVideo.style.setProperty('transform', 'scaleX(-1)', 'important');
+        clientVideo.style.setProperty('transform-origin', 'center center', 'important');
+        clientVideo.style.setProperty('z-index', '5', 'important');
         await clientVideo.play();
       }
       if (mySessionToken !== cameraSessionToken || !isNeuroVisionModalOpen()) {

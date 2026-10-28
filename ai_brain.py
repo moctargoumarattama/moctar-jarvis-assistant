@@ -65,7 +65,8 @@ MOCTAR_SYSTEM_PROMPT = (
     + JARVIS_CORE_SYSTEM_PROMPT
 )
 PROVIDER_FAILURE_TTL_SECONDS = 30.0
-GEMINI_BACKUP_MODEL = os.getenv("GEMINI_BACKUP_MODEL", "gemini-2.5-flash")
+GEMINI_BACKUP_MODEL = os.getenv("GEMINI_BACKUP_MODEL", "gemini-2.0-flash")
+GEMINI_FALLBACK_MODELS = [GEMINI_BACKUP_MODEL, "gemini-1.5-flash"]
 GEMINI_COURTESY_OFFLINE_REPLY = (
     "Je subis une micro-coupure de liaison avec le serveur neural, mais je reste en ligne Moctar."
 )
@@ -1826,30 +1827,31 @@ class AIBrain:
                     except Exception as retry_exc:
                         if _is_gemini_503_or_server_error(retry_exc):
                             logger.warning(
-                                "Échec du réessai 503 sur %s: %s. Basculement sur le modèle de secours %s...",
+                                "Échec du réessai 503 sur %s: %s. Tentative sur les modèles de secours Gemini (%s)...",
                                 active_model,
                                 retry_exc,
-                                GEMINI_BACKUP_MODEL,
+                                GEMINI_FALLBACK_MODELS,
                             )
-                            if active_model != GEMINI_BACKUP_MODEL:
+                            backup_success = False
+                            for backup_cand in GEMINI_FALLBACK_MODELS:
+                                if backup_cand == active_model:
+                                    continue
                                 backup_config = current_config.model_copy(update={"thinking_config": None})
                                 try:
-                                    response = _call_gemini_generate(GEMINI_BACKUP_MODEL, backup_config)
-                                    active_model = GEMINI_BACKUP_MODEL
+                                    response = _call_gemini_generate(backup_cand, backup_config)
+                                    active_model = backup_cand
+                                    backup_success = True
+                                    break
                                 except Exception as backup_exc:
-                                    if _is_gemini_503_or_server_error(backup_exc) or "404" in str(backup_exc) or "not_found" in str(backup_exc).lower():
-                                        logger.warning(
-                                            "Échec du serveur Gemini (%s puis %s): %s. Bascule unidirectionnelle Niveau 2 Groq...",
-                                            active_model,
-                                            GEMINI_BACKUP_MODEL,
-                                            backup_exc,
-                                        )
-                                        return _rescue_with_groq_level2()
-                                    raise
-                            else:
+                                    logger.warning(
+                                        "Modèle de secours Gemini %s en échec: %s",
+                                        backup_cand,
+                                        backup_exc,
+                                    )
+                                    continue
+                            if not backup_success:
                                 logger.warning(
-                                    "Échec persistant Gemini 503 sur %s. Bascule unidirectionnelle Niveau 2 Groq...",
-                                    active_model,
+                                    "Échec de tous les modèles de secours Gemini. Bascule immédiate Niveau 2 Groq...",
                                 )
                                 return _rescue_with_groq_level2()
                         else:
@@ -2124,10 +2126,12 @@ _DEAD_GROQ_MODELS: set[str] = {
 GROQ_MODELS_PRIORITY: list[str] = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
+    "qwen/qwen3.8-27b",
 ]
 DEFAULT_PREFERRED_GROQ_MODELS: list[str] = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
+    "qwen/qwen3.8-27b",
 ]
 
 
@@ -2324,6 +2328,9 @@ def voice_fast_llm_reply(
     if groq_api_key and "groq" not in failed_providers:
         discovered_models = get_available_groq_chat_models(groq_api_key)
         models_to_try = [m for m in discovered_models if m and m not in _DEAD_GROQ_MODELS]
+        for fallback_m in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3.8-27b"):
+            if fallback_m not in models_to_try and fallback_m not in _DEAD_GROQ_MODELS:
+                models_to_try.append(fallback_m)
         if "llama-3.3-70b-versatile" in models_to_try:
             models_to_try.remove("llama-3.3-70b-versatile")
             models_to_try.insert(0, "llama-3.3-70b-versatile")

@@ -1142,7 +1142,7 @@ def _call_groq_voice_semantic(
     except Exception:
         pass
     dead_models = getattr(ai_brain, "_DEAD_GROQ_MODELS", set())
-    preferred_order = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+    preferred_order = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3.8-27b"]
     models_to_try = []
     for pref in preferred_order:
         if pref in discovered_models and pref not in dead_models and pref not in models_to_try:
@@ -1150,6 +1150,9 @@ def _call_groq_voice_semantic(
     for m in discovered_models:
         if m and m not in dead_models and m not in models_to_try:
             models_to_try.append(m)
+    for fallback_m in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3.8-27b"):
+        if fallback_m not in models_to_try and fallback_m not in dead_models:
+            models_to_try.append(fallback_m)
 
     for model_name in models_to_try:
         if model_name in dead_models:
