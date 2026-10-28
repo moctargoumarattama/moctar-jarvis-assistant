@@ -1473,7 +1473,28 @@ def execute_voice_semantic_turn(
             "tool_calls": [{"name": "get_vision_telemetry", "arguments": {"question": clean_text}}],
             "finish_reason": "tool_calls",
         }
-    elif brain and hasattr(brain, "chat"):
+    elif groq_api_key and not is_mock_brain:
+        # Priorité absolue à Groq LPU pour la réactivité vocale humaine (< 400ms)
+        try:
+            t0 = time.perf_counter()
+            llm_res = _call_groq_voice_semantic(
+                chat_messages,
+                tools=VOICE_FAST_TOOLS,
+                system_prompt=full_system_prompt,
+                groq_api_key=groq_api_key,
+            )
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            if llm_res and (llm_res.get("tool_calls") or not _is_failed_llm_reply(str(llm_res.get("content") or ""))):
+                LOGGER.info("⚡ [GROQ VOICE SEMANTIC LLM (PRIORITAIRE)] (%dms): finish_reason=%s, tools=%d",
+                            duration_ms, llm_res.get("finish_reason"), len(llm_res.get("tool_calls", [])))
+            else:
+                LOGGER.warning("Groq vocal prioritaire non concluant (%dms), repli sur Gemini.", duration_ms)
+                llm_res = None
+        except Exception as groq_err:
+            LOGGER.warning("Échec Groq vocal prioritaire (%s), repli sur Gemini.", groq_err)
+            llm_res = None
+
+    if llm_res is None and brain and hasattr(brain, "chat"):
         try:
             t0 = time.perf_counter()
             llm_res = brain.chat(
@@ -1484,30 +1505,13 @@ def execute_voice_semantic_turn(
             )
             duration_ms = int((time.perf_counter() - t0) * 1000)
             if llm_res and (llm_res.get("tool_calls") or not _is_failed_llm_reply(str(llm_res.get("content") or ""))):
-                LOGGER.info("⚡ [GEMINI VOICE SEMANTIC LLM] (%dms): finish_reason=%s, tools=%d",
+                LOGGER.info("⚡ [GEMINI VOICE SEMANTIC LLM (REPLI)] (%dms): finish_reason=%s, tools=%d",
                             duration_ms, llm_res.get("finish_reason"), len(llm_res.get("tool_calls", [])))
             else:
-                LOGGER.warning("Gemini sémantique vide/en échec (%dms), bascule Niveau 2 Groq.", duration_ms)
+                LOGGER.warning("Gemini sémantique vide/en échec (%dms)", duration_ms)
                 llm_res = None
         except Exception as exc:
             LOGGER.warning("Erreur lors de l'appel LLM sémantique Gemini : %s", exc)
-            llm_res = None
-
-    if llm_res is None and groq_api_key:
-        try:
-            t0 = time.perf_counter()
-            llm_res = _call_groq_voice_semantic(
-                chat_messages,
-                tools=VOICE_FAST_TOOLS,
-                system_prompt=full_system_prompt,
-                groq_api_key=groq_api_key,
-            )
-            if llm_res:
-                duration_ms = int((time.perf_counter() - t0) * 1000)
-                LOGGER.info("⚡ [GROQ VOICE SEMANTIC LLM] (%dms): finish_reason=%s, tools=%d",
-                            duration_ms, llm_res.get("finish_reason"), len(llm_res.get("tool_calls", [])))
-        except Exception as groq_err:
-            LOGGER.warning("Appel Groq vocal de secours échoué: %s", groq_err)
             llm_res = None
 
     # 3. Traitement des Function Calls s'ils ont été émis par le LLM
@@ -1757,12 +1761,24 @@ def execute_voice_semantic_turn(
                     f"Formule une synthèse naturelle, humaine, posée et concise (1 à 2 phrases) pour Moctar, sans ajouter systématiquement son prénom à la fin."
                 )
                 t_synth = time.perf_counter()
-                synth_res = brain.chat(
-                    synthesis_messages,
-                    tools=None,
-                    system_prompt=synthesis_prompt,
-                    temperature=0.6,
-                )
+                synth_res = None
+                if groq_api_key and not is_mock_brain:
+                    try:
+                        synth_res = _call_groq_voice_semantic(
+                            synthesis_messages,
+                            tools=None,
+                            system_prompt=synthesis_prompt,
+                            groq_api_key=groq_api_key,
+                        )
+                    except Exception as groq_synth_err:
+                        LOGGER.warning("Échec synthèse Groq post-outil (%s), repli sur Gemini", groq_synth_err)
+                if not synth_res and brain and hasattr(brain, "chat"):
+                    synth_res = brain.chat(
+                        synthesis_messages,
+                        tools=None,
+                        system_prompt=synthesis_prompt,
+                        temperature=0.6,
+                    )
                 t_synth_ms = int((time.perf_counter() - t_synth) * 1000)
                 synth_text = (synth_res.get("content") or "").strip() if synth_res else ""
                 if synth_text and not _is_failed_llm_reply(synth_text):
