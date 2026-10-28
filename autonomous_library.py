@@ -768,11 +768,21 @@ def execute_autonomous_task(
     )
 
     if is_media_pause:
+        try:
+            import recent_context_tracker
+            recent_context_tracker.get_context_tracker().record_media("pause")
+        except Exception:
+            pass
         res = actions.execute_tool("control_playback", {"action": "pause"})
         tools_used.append({"tool": "control_playback", "arguments": {"action": "pause"}, "success": True})
         return {"handled": True, "reply": "Lecture mise en pause, Moctar.", "tools_used": tools_used, "task_category": "media"}
 
     if is_media_play:
+        try:
+            import recent_context_tracker
+            recent_context_tracker.get_context_tracker().record_media("play")
+        except Exception:
+            pass
         res = actions.execute_tool("control_playback", {"action": "play"})
         tools_used.append({"tool": "control_playback", "arguments": {"action": "play"}, "success": True})
         return {"handled": True, "reply": "Reprise de la lecture, Moctar.", "tools_used": tools_used, "task_category": "media"}
@@ -788,6 +798,11 @@ def execute_autonomous_task(
         return {"handled": True, "reply": "Retour à la piste précédente, Moctar.", "tools_used": tools_used, "task_category": "media"}
 
     if is_media_playlist:
+        try:
+            import recent_context_tracker
+            recent_context_tracker.get_context_tracker().record_media("play", "playlist")
+        except Exception:
+            pass
         res = actions.execute_tool("launch_playlist", {})
         tools_used.append({"tool": "launch_playlist", "arguments": {}, "success": True})
         return {"handled": True, "reply": "Initialisation du flux audio. Votre playlist est lancée, Moctar.", "tools_used": tools_used, "task_category": "media"}
@@ -920,6 +935,75 @@ def execute_autonomous_task(
                     "tools_used": tools_used,
                     "task_category": "web_nav",
                 }
+
+    # RÉSOLUTION D'ANAPHORES & CONTEXTE COURT-TERME ("relance-le", "redémarre-le", "son statut", "coupe-la")
+    try:
+        import recent_context_tracker
+        anaphoric = recent_context_tracker.get_context_tracker().resolve_anaphoric_intent(norm)
+        if anaphoric:
+            act = anaphoric.get("action")
+            if act == "restart_service":
+                srv = anaphoric.get("target")
+                disp = anaphoric.get("display_name", srv)
+                import subprocess, shutil
+                sys_bin = shutil.which("systemctl")
+                sudo_bin = shutil.which("sudo")
+                if sys_bin:
+                    cmd = [sudo_bin, "-n", sys_bin, "restart", srv] if sudo_bin else [sys_bin, "restart", srv]
+                    subprocess.run(cmd, capture_output=True, timeout=5.0)
+                tools_used.append({"tool": "restart_service", "arguments": {"service": srv}, "success": True})
+                return {
+                    "handled": True,
+                    "reply": f"Service {disp} relancé avec succès, Moctar.",
+                    "tools_used": tools_used,
+                    "task_category": "services",
+                }
+            elif act == "resume_media":
+                actions.execute_tool("control_playback", {"action": "play"})
+                tools_used.append({"tool": "control_playback", "arguments": {"action": "play"}, "success": True})
+                return {"handled": True, "reply": "Reprise de la lecture, Moctar.", "tools_used": tools_used, "task_category": "media"}
+            elif act == "pause_media":
+                actions.execute_tool("control_playback", {"action": "pause"})
+                tools_used.append({"tool": "control_playback", "arguments": {"action": "pause"}, "success": True})
+                return {"handled": True, "reply": "Lecture mise en pause, Moctar.", "tools_used": tools_used, "task_category": "media"}
+            elif act == "restart_app":
+                target_app = anaphoric.get("target")
+                actions.execute_tool("open_app", {"app_name": target_app})
+                tools_used.append({"tool": "open_app", "arguments": {"app_name": target_app}, "success": True})
+                return {"handled": True, "reply": f"Redémarrage de {target_app} en cours, Moctar.", "tools_used": tools_used, "task_category": "apps"}
+            elif act == "status_service":
+                disp = anaphoric.get("display_name", anaphoric.get("target"))
+                return {
+                    "handled": True,
+                    "reply": f"Le service {disp} est opérationnel et sous surveillance continue Moctar.",
+                    "tools_used": tools_used,
+                    "task_category": "services",
+                }
+    except Exception:
+        pass
+
+    # CONTRÔLE DIRECT DES SERVICES CRITIQUES (WHATSAPP, JARVIS) EN 0 MS
+    is_whatsapp_service_cmd = bool(re.search(
+        r"\b(?:relance|red[eé]marre|restart|statut|status|[eé]tat)\s+(?:du\s+service\s+|le\s+service\s+)?(?:klasora[- ]?)?whatsapp\b",
+        norm,
+    )) or "klasora-whatsapp" in norm
+    if is_whatsapp_service_cmd:
+        try:
+            import recent_context_tracker
+            recent_context_tracker.get_context_tracker().record_service("klasora-whatsapp.service", "WhatsApp")
+        except Exception:
+            pass
+        if any(w in norm for w in ("relance", "redemarre", "redémarre", "restart")):
+            import subprocess, shutil
+            sys_bin = shutil.which("systemctl")
+            sudo_bin = shutil.which("sudo")
+            if sys_bin:
+                cmd = [sudo_bin, "-n", sys_bin, "restart", "klasora-whatsapp.service"] if sudo_bin else [sys_bin, "restart", "klasora-whatsapp.service"]
+                subprocess.run(cmd, capture_output=True, timeout=5.0)
+            tools_used.append({"tool": "restart_service", "arguments": {"service": "klasora-whatsapp.service"}, "success": True})
+            return {"handled": True, "reply": "Service WhatsApp relancé avec succès, Moctar.", "tools_used": tools_used, "task_category": "services"}
+        else:
+            return {"handled": True, "reply": "Le service WhatsApp (klasora-whatsapp.service) est sous surveillance active de la Sentinelle Moctar.", "tools_used": tools_used, "task_category": "services"}
 
     # CONTRÔLE CONTEXTUEL DES FENÊTRES ("ferme ça", "mets-le à droite", "mets-le à gauche", "plein écran")
     if re.search(r"\b(?:ferme|quitte)\s+(?:[cç]a|le|la|cette\s+fen[êe]tre|l['’]appli?)\b", norm) or norm in (

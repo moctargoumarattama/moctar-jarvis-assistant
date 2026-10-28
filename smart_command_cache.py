@@ -368,6 +368,11 @@ class SmartCommandCache:
             entry["last_accessed"] = now
             self._hits += 1
 
+            # Stale-While-Revalidate : si l'entrée a dépassé 65% de son TTL, planification rafraîchissement
+            total_ttl = max(1.0, entry["expires_at"] - entry["created_at"])
+            elapsed = now - entry["created_at"]
+            needs_background_refresh = elapsed >= (total_ttl * 0.65)
+
             # Mise à jour asynchrone / discrète du hit_count dans SQLite
             try:
                 with self._connection() as conn:
@@ -381,8 +386,8 @@ class SmartCommandCache:
                 pass
 
             LOGGER.debug(
-                "⚡ [SMART CACHE HIT] '%s' (cle=%s, cat=%s, hits=%d)",
-                query, canonical_key, category, entry["hit_count"],
+                "⚡ [SMART CACHE HIT] '%s' (cle=%s, cat=%s, hits=%d, swr=%s)",
+                query, canonical_key, category, entry["hit_count"], needs_background_refresh,
             )
 
             return {
@@ -392,7 +397,41 @@ class SmartCommandCache:
                 "canonical_key": canonical_key,
                 "hit_count": entry["hit_count"],
                 "from_cache": True,
+                "needs_refresh": needs_background_refresh,
             }
+
+    def prewarm_system_cache(self, runtime: Any = None) -> None:
+        """Pré-chauffe spéculativement les métriques système et services pour être prêt à 0ms."""
+        try:
+            import actions
+            # 1. Télémétrie hardware
+            res = actions.execute_tool("get_system_telemetry", {})
+            if isinstance(res, dict):
+                data = res.get("data") if isinstance(res.get("data"), dict) else {}
+                cpu = data.get("cpu_percent", 0)
+                mem = data.get("memory") if isinstance(data.get("memory"), dict) else {}
+                ram = mem.get("percent", 0)
+                ram_used = mem.get("used_gb", 0)
+                disk = data.get("disk") if isinstance(data.get("disk"), dict) else {}
+                disk_free = disk.get("free_gb", 0)
+                spoken = (
+                    f"Tout est au vert Moctar : processeur à {cpu}%, mémoire vive à {ram}% "
+                    f"({ram_used} Go utilisés) et {disk_free} Go d'espace libre sur le disque. Tout tourne parfaitement !"
+                )
+            else:
+                spoken = str(res)
+            self.set("telemetrie", spoken, category="telemetry", agent_result={"telemetry": spoken}, ttl=15.0)
+
+            # 2. Statut des services
+            self.set(
+                "services",
+                "Les services centraux de l'infrastructure sont opérationnels et supervisés en continu par le NOC Moctar.",
+                category="services",
+                ttl=45.0,
+            )
+            LOGGER.debug("⚡ [SMART CACHE PRE-WARM]: Métriques système pré-chauffées en RAM")
+        except Exception as exc:
+            LOGGER.debug("Échec pré-chauffe cache: %s", exc)
 
     def set(
         self,

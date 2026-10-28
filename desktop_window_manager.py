@@ -317,6 +317,12 @@ def resolve_pronoun_reference(command_text: str, active_window: Optional[Dict[st
     if re.search(r"\b(?:r[ée]duis|minimise|cache|masque)\b", clean):
         return {"action": "snap_active_window", "position": "minimize", "target": current_app}
 
+    # 3. Relance / Redémarrage contextuel ("relance-le", "redémarre-le", "relance ça")
+    if re.search(r"\b(?:relance|red[eé]marre|recommence)\s+(?:[cç]a|le|la)\b", clean) or clean in (
+        "relance-le", "relance le", "redémarre-le", "redemarre-le", "relance ça", "relance ca", "recommence"
+    ):
+        return {"action": "restart_active_window", "target": current_app, "title": act.get("window_title")}
+
     return None
 
 

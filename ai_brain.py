@@ -1802,7 +1802,24 @@ class AIBrain:
                 }
 
             try:
-                response = _call_gemini_generate(active_model, current_config)
+                has_groq = bool(os.getenv("GROQ_API_KEY") or os.getenv("NOC_GROQ_API_KEY"))
+                if has_groq and not tools:
+                    import dual_engine_hedging
+                    hedged_res, winner, hedge_ms = dual_engine_hedging.execute_hedged_call(
+                        primary_fn=lambda: _call_gemini_generate(active_model, current_config),
+                        secondary_fn=_rescue_with_groq_level2,
+                        primary_name="Gemini",
+                        secondary_name="Groq",
+                        hedge_delay=0.65,
+                    )
+                    if isinstance(hedged_res, dict) and "content" in hedged_res:
+                        return hedged_res
+                    elif hedged_res is not None:
+                        response = hedged_res
+                    else:
+                        response = _call_gemini_generate(active_model, current_config)
+                else:
+                    response = _call_gemini_generate(active_model, current_config)
             except Exception as exc:
                 if _is_gemini_503_or_server_error(exc) and getattr(exc, "code", None) != 400:
                     has_groq = bool(os.getenv("GROQ_API_KEY") or os.getenv("NOC_GROQ_API_KEY"))

@@ -1680,6 +1680,15 @@ class Runtime:
                 if self.collector._states.get("collector") == "failed":
                     self.collector.transition("collector", "ready", "Collecteur rétabli", True)
                 await self.publish(snapshot)
+
+                # Sentinelle Proactive d'Auto-Guérison (toutes les 25 secondes)
+                if (started - getattr(self, "_last_sentinel_scan", 0.0)) >= 25.0:
+                    self._last_sentinel_scan = started
+                    try:
+                        import proactive_sentinel
+                        await asyncio.to_thread(proactive_sentinel.get_proactive_sentinel().scan_and_heal)
+                    except Exception:
+                        pass
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -1723,6 +1732,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         task = asyncio.create_task(runtime.collect_loop(), name="noc-collector")
         runtime.collect_task = task
         asyncio.create_task(_prewarm_common_voice_tts(), name="tts-cache-prewarm")
+        try:
+            import warm_pool
+            warm_pool.start_warm_pool()
+            LOGGER.info("⚡ [WARM POOL]: Démon de chauffe Keep-Alive démarré avec succès dans lifespan.")
+        except Exception as wp_exc:
+            LOGGER.debug("Warm pool non démarré dans lifespan: %s", wp_exc)
+        try:
+            import smart_command_cache
+            smart_command_cache.get_command_cache().prewarm_system_cache(runtime)
+            LOGGER.info("⚡ [SMART CACHE]: Pré-chauffe spéculative des métriques exécutée avec succès.")
+        except Exception as sc_exc:
+            LOGGER.debug("Pré-chauffe cache non exécutée: %s", sc_exc)
         try:
             from scheduler import scheduler_core
             scheduler_core.start()
@@ -1794,6 +1815,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 from scheduler import scheduler_core
                 scheduler_core.stop()
                 LOGGER.info("Planificateur supervise Jarvis arrete proprement.")
+            except Exception:
+                pass
+            try:
+                import warm_pool
+                warm_pool.stop_warm_pool()
             except Exception:
                 pass
             task.cancel()

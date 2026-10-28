@@ -1343,6 +1343,21 @@ def execute_voice_semantic_turn(
                 "fast_path": True,
                 "semantic_tool_calling": True,
             }
+        elif act_type == "restart_active_window":
+            target = pronoun_action.get("target") or "l'application"
+            reply_msg = _format_reply_ending(f"Redémarrage de {target} en cours.")
+            LOGGER.info("⚡ [VOICE PRONOUN RESTART (0ms)]: '%s' -> %s", clean_text, target)
+            return {
+                "status": "success",
+                "reply": reply_msg,
+                "action": "restart_app",
+                "url": None,
+                "title": pronoun_action.get("title"),
+                "tools_used": [{"tool": "open_app", "arguments": {"app_name": target}, "success": True}],
+                "thought_chain": ["Relance contextuelle de la fenêtre active (0ms)"],
+                "fast_path": True,
+                "semantic_tool_calling": True,
+            }
 
     # 3. Contexte vivant et télémétrie Dell Precision M4800
     telemetry = build_live_system_context(runtime)

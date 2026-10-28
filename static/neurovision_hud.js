@@ -14,6 +14,7 @@
 
   // Sélecteurs d'éléments DOM
   const dialog = document.getElementById('neurovision-dialog');
+  const mirrorWrapper = document.getElementById('nv-video-mirror-wrapper');
   const clientVideo = document.getElementById('nv-client-video');
   const serverImg = document.getElementById('nv-server-feed');
   const simCanvas = document.getElementById('nv-sim-canvas');
@@ -80,6 +81,7 @@
   function startRadarStandby() {
     if (!simCanvas) return;
     simCanvas.style.display = 'block';
+    if (mirrorWrapper) mirrorWrapper.style.display = 'none';
     if (clientVideo) clientVideo.style.display = 'none';
     if (serverImg) serverImg.style.display = 'none';
     if (!simAnimId) simAnimId = requestAnimationFrame(drawRadarFrame);
@@ -561,8 +563,21 @@
       if (clientVideo) {
         stopRadarStandby();
         clientVideo.srcObject = stream;
+        if (mirrorWrapper) {
+          mirrorWrapper.style.setProperty('display', 'block', 'important');
+          mirrorWrapper.style.setProperty('position', 'absolute', 'important');
+          mirrorWrapper.style.setProperty('inset', '0', 'important');
+          mirrorWrapper.style.setProperty('width', '100%', 'important');
+          mirrorWrapper.style.setProperty('height', '100%', 'important');
+          mirrorWrapper.style.setProperty('overflow', 'hidden', 'important');
+          mirrorWrapper.style.setProperty('transform', 'scaleX(-1)', 'important');
+          mirrorWrapper.style.setProperty('-webkit-transform', 'scaleX(-1)', 'important');
+          mirrorWrapper.style.setProperty('transform-origin', 'center center', 'important');
+          mirrorWrapper.style.setProperty('z-index', '5', 'important');
+        }
         clientVideo.style.setProperty('display', 'block', 'important');
         clientVideo.style.setProperty('position', 'absolute', 'important');
+        clientVideo.style.setProperty('inset', '0', 'important');
         clientVideo.style.setProperty('top', '0', 'important');
         clientVideo.style.setProperty('left', '0', 'important');
         clientVideo.style.setProperty('right', '0', 'important');
@@ -574,9 +589,8 @@
         clientVideo.style.setProperty('max-width', '100%', 'important');
         clientVideo.style.setProperty('max-height', '100%', 'important');
         clientVideo.style.setProperty('object-fit', 'cover', 'important');
-        clientVideo.style.setProperty('transform', 'scaleX(-1)', 'important');
-        clientVideo.style.setProperty('transform-origin', 'center center', 'important');
-        clientVideo.style.setProperty('z-index', '5', 'important');
+        clientVideo.style.setProperty('transform', 'none', 'important');
+        clientVideo.style.setProperty('-webkit-transform', 'none', 'important');
         await clientVideo.play();
       }
       if (mySessionToken !== cameraSessionToken || !isNeuroVisionModalOpen()) {
@@ -661,6 +675,10 @@
       clientVideo.style.display = 'none';
       clientVideo.style.zIndex = '0';
     }
+    if (mirrorWrapper) {
+      mirrorWrapper.style.display = 'none';
+      mirrorWrapper.style.zIndex = '0';
+    }
     if (simCanvas) {
       simCanvas.style.display = 'block';
       simCanvas.style.visibility = 'visible';
@@ -724,6 +742,7 @@
       serverImg.src = '/api/vision/stream?t=' + Date.now();
       serverImg.style.display = 'block';
     }
+    if (mirrorWrapper) mirrorWrapper.style.display = 'none';
     if (clientVideo) clientVideo.style.display = 'none';
     isCameraActive = true;
     updateStatusUI('● FLUX SERVEUR HÔTE', '#00ff88');

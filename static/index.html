@@ -1130,8 +1130,10 @@
       <!-- ================= COLONNE 1 : VIEWPORT VIDÉO & CONTRÔLES ================= -->
       <div class="nv-col">
         <div class="nv-viewport-card" style="position: relative !important; display: block !important; width: 100% !important; aspect-ratio: 16/10 !important; overflow: hidden !important;">
-          <!-- Flux Vidéo Local (PC Client de Moctar) -->
-          <video id="nv-client-video" class="nv-media-element" autoplay playsinline muted style="display:none; position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; object-fit: cover !important; transform: scaleX(-1) !important; z-index: 5 !important;"></video>
+          <!-- Flux Vidéo Local (PC Client de Moctar) avec conteneur miroir séparé (anti-bug 50% Chromium) -->
+          <div id="nv-video-mirror-wrapper" class="nv-mirror-wrapper" style="position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; overflow: hidden !important; transform: scaleX(-1) !important; -webkit-transform: scaleX(-1) !important; transform-origin: center center !important; z-index: 5 !important; display: none;">
+            <video id="nv-client-video" class="nv-media-element" autoplay playsinline muted style="position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; min-width: 100% !important; min-height: 100% !important; object-fit: cover !important; transform: none !important; -webkit-transform: none !important; display: block;"></video>
+          </div>
           <!-- Flux Vidéo de Secours Serveur -->
           <img id="nv-server-feed" class="nv-media-element" src="" alt="Flux NeuroVision" style="display:none; position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; object-fit: cover !important; z-index: 4 !important;" />
           <canvas id="nv-sim-canvas" class="nv-media-element" style="display:block; position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; z-index: 1 !important;"></canvas>

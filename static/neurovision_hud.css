@@ -200,12 +200,28 @@
   height: 100% !important;
 }
 
-#nv-client-video {
+#nv-video-mirror-wrapper {
   position: absolute !important;
+  inset: 0 !important;
   top: 0 !important;
   left: 0 !important;
   right: 0 !important;
   bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  transform: scaleX(-1) !important;
+  -webkit-transform: scaleX(-1) !important;
+  transform-origin: center center !important;
+  z-index: 5 !important;
+  display: none;
+}
+
+#nv-client-video {
+  position: absolute !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
   width: 100% !important;
   height: 100% !important;
   min-width: 100% !important;
@@ -213,9 +229,9 @@
   max-width: 100% !important;
   max-height: 100% !important;
   object-fit: cover !important;
-  transform: scaleX(-1) !important;
-  transform-origin: center center !important;
-  z-index: 5 !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+  display: block;
 }
 
 /* Overlays Sci-Fi HUD sur la vidéo */
