@@ -941,7 +941,16 @@
           }
           releaseEchoLock();
           if (requestId !== currentRequestId || generation !== current.generation || destroyed || suspended) return;
-          if (payload && (payload.session_active === false || payload.action === 'mute_mic' || payload.action === 'disengage')) {
+          if (payload && payload.action === 'mute_mic') {
+            phase = 'wake';
+            manual = false;
+            clearFollowup();
+            updateSolarVoiceState('off');
+            if (typeof api.disable === 'function') {
+              api.disable();
+            }
+            return;
+          } else if (payload && (payload.session_active === false || payload.action === 'disengage')) {
             phase = 'wake';
             manual = false;
             clearFollowup();
@@ -950,7 +959,7 @@
               emit('wake', {
                 rms: 0,
                 isSpeaking: false,
-                message: '💤 VEILLE SILENCIEUSE · Micro en sommeil (Dites « Jarvis » pour réveiller)',
+                message: '💤 VEILLE SILENCIEUSE · Micro en sommeil (Dites « Moctar » pour réveiller)',
               });
             }
           } else if (payload && payload.action === 'unmute_mic') {

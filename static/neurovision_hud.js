@@ -79,10 +79,20 @@
   }
 
   function startRadarStandby() {
+    stopCameraRenderLoop();
     if (!simCanvas) return;
     simCanvas.style.display = 'block';
+    simCanvas.style.visibility = 'visible';
+    simCanvas.style.zIndex = '1';
     if (mirrorWrapper) mirrorWrapper.style.display = 'none';
-    if (clientVideo) clientVideo.style.display = 'none';
+    if (clientVideo) {
+      clientVideo.style.display = 'block';
+      clientVideo.style.opacity = '0.001';
+      clientVideo.style.pointerEvents = 'none';
+      clientVideo.style.width = '1px';
+      clientVideo.style.height = '1px';
+      clientVideo.style.zIndex = '-1';
+    }
     if (serverImg) serverImg.style.display = 'none';
     if (!simAnimId) simAnimId = requestAnimationFrame(drawRadarFrame);
   }
@@ -92,7 +102,71 @@
       cancelAnimationFrame(simAnimId);
       simAnimId = null;
     }
-    if (simCanvas) simCanvas.style.display = 'none';
+  }
+
+  let cameraAnimId = null;
+
+  function drawCameraStreamFrame() {
+    if (!isCameraActive || !isClientMode || !clientVideo || !simCanvas) return;
+    const ctx = simCanvas.getContext('2d');
+    if (!ctx) return;
+    const cw = simCanvas.width = simCanvas.clientWidth || 480;
+    const ch = simCanvas.height = simCanvas.clientHeight || 300;
+
+    if (clientVideo.readyState >= 2) {
+      const vw = clientVideo.videoWidth || 640;
+      const vh = clientVideo.videoHeight || 480;
+      const targetAspect = cw / Math.max(1, ch);
+      const videoAspect = vw / Math.max(1, vh);
+      let sx = 0, sy = 0, sw = vw, sh = vh;
+
+      if (videoAspect > targetAspect) {
+        sw = vh * targetAspect;
+        sx = (vw - sw) / 2;
+      } else {
+        sh = vw / targetAspect;
+        sy = (vh - sh) / 2;
+      }
+
+      ctx.save();
+      // Miroir horizontal parfait et centré sans aucun décalage
+      ctx.translate(cw, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(clientVideo, sx, sy, sw, sh, 0, 0, cw, ch);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = '#030710';
+      ctx.fillRect(0, 0, cw, ch);
+    }
+
+    if (isCameraActive && isClientMode) {
+      cameraAnimId = requestAnimationFrame(drawCameraStreamFrame);
+    }
+  }
+
+  function startCameraRenderLoop() {
+    stopRadarStandby();
+    if (cameraAnimId) {
+      cancelAnimationFrame(cameraAnimId);
+      cameraAnimId = null;
+    }
+    if (simCanvas) {
+      simCanvas.style.display = 'block';
+      simCanvas.style.visibility = 'visible';
+      simCanvas.style.position = 'absolute';
+      simCanvas.style.inset = '0';
+      simCanvas.style.width = '100%';
+      simCanvas.style.height = '100%';
+      simCanvas.style.zIndex = '2';
+    }
+    cameraAnimId = requestAnimationFrame(drawCameraStreamFrame);
+  }
+
+  function stopCameraRenderLoop() {
+    if (cameraAnimId) {
+      cancelAnimationFrame(cameraAnimId);
+      cameraAnimId = null;
+    }
   }
   const toggleBtn = document.getElementById('nv-toggle-btn');
   const switchSrcBtn = document.getElementById('nv-switch-source-btn');
@@ -563,44 +637,22 @@
       if (clientVideo) {
         stopRadarStandby();
         clientVideo.srcObject = stream;
-        if (mirrorWrapper) {
-          mirrorWrapper.style.setProperty('display', 'block', 'important');
-          mirrorWrapper.style.setProperty('position', 'absolute', 'important');
-          mirrorWrapper.style.setProperty('inset', '0', 'important');
-          mirrorWrapper.style.setProperty('width', '100%', 'important');
-          mirrorWrapper.style.setProperty('height', '100%', 'important');
-          mirrorWrapper.style.setProperty('overflow', 'hidden', 'important');
-          mirrorWrapper.style.setProperty('transform', 'scaleX(-1)', 'important');
-          mirrorWrapper.style.setProperty('-webkit-transform', 'scaleX(-1)', 'important');
-          mirrorWrapper.style.setProperty('transform-origin', 'center center', 'important');
-          mirrorWrapper.style.setProperty('z-index', '5', 'important');
-        }
+        if (mirrorWrapper) mirrorWrapper.style.display = 'none';
         clientVideo.style.setProperty('display', 'block', 'important');
         clientVideo.style.setProperty('position', 'absolute', 'important');
-        clientVideo.style.setProperty('inset', '0', 'important');
+        clientVideo.style.setProperty('width', '1px', 'important');
+        clientVideo.style.setProperty('height', '1px', 'important');
+        clientVideo.style.setProperty('opacity', '0.001', 'important');
+        clientVideo.style.setProperty('pointer-events', 'none', 'important');
+        clientVideo.style.setProperty('z-index', '-1', 'important');
         clientVideo.style.setProperty('top', '0', 'important');
         clientVideo.style.setProperty('left', '0', 'important');
-        clientVideo.style.setProperty('right', '0', 'important');
-        clientVideo.style.setProperty('bottom', '0', 'important');
-        clientVideo.style.setProperty('width', '100%', 'important');
-        clientVideo.style.setProperty('height', '100%', 'important');
-        clientVideo.style.setProperty('min-width', '100%', 'important');
-        clientVideo.style.setProperty('min-height', '100%', 'important');
-        clientVideo.style.setProperty('max-width', '100%', 'important');
-        clientVideo.style.setProperty('max-height', '100%', 'important');
-        clientVideo.style.setProperty('object-fit', 'cover', 'important');
-        clientVideo.style.setProperty('transform', 'none', 'important');
-        clientVideo.style.setProperty('-webkit-transform', 'none', 'important');
         await clientVideo.play();
+        startCameraRenderLoop();
       }
       if (mySessionToken !== cameraSessionToken || !isNeuroVisionModalOpen()) {
         stopClientCamera(true);
         return;
-      }
-      if (simCanvas) {
-        simCanvas.style.display = 'none';
-        simCanvas.style.visibility = 'hidden';
-        simCanvas.style.zIndex = '0';
       }
       if (serverImg) {
         serverImg.style.display = 'none';
@@ -663,6 +715,7 @@
   function stopClientCamera(purgeServer = true) {
     cameraSessionToken++;
     isTelemetryUploadInFlight = false;
+    stopCameraRenderLoop();
     if (clientStream) {
       try {
         clientStream.getTracks().forEach(t => t.stop());

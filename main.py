@@ -576,24 +576,16 @@ def extract_voice_interact_command(transcript: str, session_active: bool = False
     if _is_pure_filler_or_wake(clean_text):
         return False, "", False
 
-    # Tout énoncé intelligible (2 mots ou plus, ou verbe/question/action évidente)
-    # ne doit JAMAIS être ignoré silencieusement.
-    # Dans une interaction vocale avec Moctar, JARVIS doit toujours écouter et répondre comme un humain attentif.
-    words = [w for w in re.split(r"[\s,.:;!?-]+", clean_text) if len(w) > 1]
+    # Hors-session et sans mot-clé, seules les commandes matérielles explicites
+    # ou les mots-clés d'état très courts ("cpu", "ram", "statut", "météo", "heure") sont acceptés.
+    # Les discussions ambiantes ("comment dirais-je", "c'est deux filles...", etc.) exigent strictement le mot-clé réveil.
     norm_clean = _strip_accents_1to1(clean_text).lower()
     common_short_commands = {
         "cpu", "ram", "statut", "status", "meteo", "météo", "heure", "date",
         "aide", "bonjour", "salut", "merci", "pause", "stop", "musique",
         "terre", "globe", "plasma", "quantum", "bureau", "code", "terminal",
     }
-    if norm_clean in common_short_commands or any(
-        norm_clean.startswith(prefix)
-        for prefix in (
-            "qui", "quoi", "comment", "pourquoi", "quand", "ou ", "où ",
-            "est-ce", "peux-tu", "dis ", "aide", "donne", "fais", "lance",
-            "ouvre", "ferme", "montre", "affiche", "mets", "raconte",
-        )
-    ):
+    if norm_clean in common_short_commands:
         return True, clean_text, True
 
     return False, "", False
@@ -723,7 +715,7 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
         normalized
     )) or normalized in ("et stop", "coupe micro", "mute micro", "coupe le micro", "coupe ton micro", "silence radio")
     if is_mute_cmd:
-        return "Micro coupé Moctar. Je passe en veille silencieuse. Dis « Jarvis » ou « allume ton micro » dès que tu as besoin de moi."
+        return "Micro coupé Moctar. Je passe en veille silencieuse. Dis « Moctar » ou active ton micro dès que tu as besoin de moi."
 
     # 0a0b. Commandes de réactivation micro ("allume ton micro", "tu peux reprendre", "réveille-toi")
     is_unmute_cmd = bool(re.search(

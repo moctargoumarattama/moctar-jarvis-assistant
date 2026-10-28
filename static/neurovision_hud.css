@@ -189,48 +189,44 @@
 }
 
 #nv-sim-canvas {
-  z-index: 1 !important;
-  width: 100% !important;
-  height: 100% !important;
-}
-
-#nv-server-feed {
-  z-index: 2 !important;
-  width: 100% !important;
-  height: 100% !important;
-}
-
-#nv-video-mirror-wrapper {
   position: absolute !important;
   inset: 0 !important;
   top: 0 !important;
   left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
   width: 100% !important;
   height: 100% !important;
+  z-index: 2 !important;
+  display: block;
+}
+
+#nv-server-feed {
+  position: absolute !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  z-index: 3 !important;
+}
+
+#nv-video-mirror-wrapper {
+  display: none !important;
+  position: absolute !important;
+  width: 0 !important;
+  height: 0 !important;
   overflow: hidden !important;
-  transform: scaleX(-1) !important;
-  -webkit-transform: scaleX(-1) !important;
-  transform-origin: center center !important;
-  z-index: 5 !important;
-  display: none;
 }
 
 #nv-client-video {
   position: absolute !important;
-  inset: 0 !important;
   top: 0 !important;
   left: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
-  min-width: 100% !important;
-  min-height: 100% !important;
-  max-width: 100% !important;
-  max-height: 100% !important;
-  object-fit: cover !important;
-  transform: none !important;
-  -webkit-transform: none !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0.001 !important;
+  pointer-events: none !important;
+  z-index: -1 !important;
   display: block;
 }
 
