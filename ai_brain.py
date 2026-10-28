@@ -65,7 +65,7 @@ MOCTAR_SYSTEM_PROMPT = (
     + JARVIS_CORE_SYSTEM_PROMPT
 )
 PROVIDER_FAILURE_TTL_SECONDS = 30.0
-GEMINI_BACKUP_MODEL = os.getenv("GEMINI_BACKUP_MODEL", "gemini-2.5-flash-lite")
+GEMINI_BACKUP_MODEL = os.getenv("GEMINI_BACKUP_MODEL", "gemini-2.5-flash")
 GEMINI_COURTESY_OFFLINE_REPLY = (
     "Je subis une micro-coupure de liaison avec le serveur neural, mais je reste en ligne Moctar."
 )
@@ -1767,7 +1767,18 @@ class AIBrain:
             try:
                 response = _call_gemini_generate(active_model, current_config)
             except Exception as exc:
-                if _is_gemini_503_or_server_error(exc):
+                if _is_gemini_503_or_server_error(exc) and getattr(exc, "code", None) != 400:
+                    has_groq = bool(os.getenv("GROQ_API_KEY") or os.getenv("NOC_GROQ_API_KEY"))
+                    if has_groq:
+                        logger.warning(
+                            "Incident Gemini (%s) detecte sur %s: %s. Bascule rapide et immediate Niveau 2 Groq...",
+                            getattr(exc, "code", "ServerError"),
+                            active_model,
+                            exc,
+                        )
+                        rescue = _rescue_with_groq_level2()
+                        if rescue.get("content") and not rescue.get("fallback_courtesy"):
+                            return rescue
                     logger.warning(
                         "Gemini 503 / ServerError détecté sur le modèle %s: %s. Pause de 1.0s avant réessai...",
                         active_model,

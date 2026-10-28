@@ -659,8 +659,8 @@ def _is_compound_or_actionable_request(cleaned: str, normalized: str) -> bool:
     if not cleaned:
         return False
 
-    # Exceptions bienveillantes et pauses légitimes
-    if re.search(r"\b(?:je\s+fais\s+une\s+pause|pause\s+caf[ée]|je\s+prends\s+(?:l['’]air|une\s+pause)|je\s+vais\s+prendre\s+l['’]air|je\s+souffle\s+un\s+peu|bonne\s+nuit|je\s+vais\s+dormir)\b", normalized):
+    # Exceptions bienveillantes, pauses légitimes et requêtes directes de profil/localisation
+    if re.search(r"\b(?:je\s+fais\s+une\s+pause|pause\s+caf[ée]|je\s+prends\s+(?:l['’]air|une\s+pause)|je\s+vais\s+prendre\s+l['’]air|je\s+souffle\s+un\s+peu|bonne\s+nuit|je\s+vais\s+dormir|trouve\s+(?:ma\s+)?localisation)\b", normalized):
         return False
 
     norm_words = set(re.findall(r"\b[\w-]+\b", normalized))
@@ -925,6 +925,18 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
             except Exception:
                 pass
         return "C'est gravé dans ma mémoire avec fierté Moctar : nationalité nigérienne enregistrée dans ton profil permanent !"
+
+    # 1b4. Localisation & Résidence actuelle ("localisation", "où je suis", "où suis-je", "trouve ma localisation", "la localisation actuelle")
+    if re.search(r"\b(?:(?:ma\s+|la\s+)?localisation(?:\s+actuelle)?|trouve\s+(?:ma\s+)?localisation|o[uù]\s+(?:je\s+suis|suis[- ]je)|o[uù]\s+est[- ]ce\s+que\s+je\s+suis|dans\s+quelle?\s+(?:ville|pays)\s+(?:je\s+suis|suis[- ]je))\b", normalized):
+        profile = {}
+        if memory and hasattr(memory, "get_moctar_profile"):
+            try:
+                profile = memory.get_moctar_profile() or {}
+            except Exception:
+                pass
+        loc = profile.get("current_location", "Maroc (Rabat)")
+        orig = profile.get("origin") or profile.get("country", "Niger")
+        return f"Tu es actuellement localisé à {loc}, originaire du {orig}, Moctar."
 
     # 1c. Transition collaborative ("on va passer à ceci", "on continue", "on enchaîne")
     if re.search(r"\b(?:on\s+(?:va\s+)?passer\s+[aà]\s+ceci|on\s+enchaine|on\s+encha[îi]ne|on\s+continue|passons\s+[aà]\s+la\s+suite)\b", normalized):

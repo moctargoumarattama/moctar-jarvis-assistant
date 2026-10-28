@@ -1100,8 +1100,12 @@ def _is_failed_llm_reply(text: str) -> bool:
     low = (text or "").lower().strip()
     if not low:
         return True
-    return low.startswith(("erreur:", "erreur api", "erreur backend", "error:")) or any(
-        phrase in low for phrase in ("modèle indisponible", "service indisponible", "fournisseur offline", "tous les modèles sont hors-ligne")
+    return low.startswith(("erreur:", "erreur api", "erreur backend", "error:", "mode dégradé", "mode degrade")) or any(
+        phrase in low for phrase in (
+            "modèle indisponible", "service indisponible", "fournisseur offline",
+            "tous les modèles sont hors-ligne", "injoignables", "timeout/quota",
+            "api primaire et secours injoignables",
+        )
     )
 
 
