@@ -76,3 +76,4 @@ def test_autonomous_library_neurovision_actions():
     res_face = autonomous_library.execute_autonomous_task("analyse mon visage")
     assert res_face.get("handled") is True
     assert res_face.get("task_category") == "neurovision"
+

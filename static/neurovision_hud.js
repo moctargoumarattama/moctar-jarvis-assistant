@@ -568,6 +568,9 @@
         stopClientCamera(true);
         return;
       }
+      if (simCanvas) {
+        simCanvas.style.display = 'none';
+      }
       if (serverImg) {
         serverImg.style.display = 'none';
         serverImg.src = '';
