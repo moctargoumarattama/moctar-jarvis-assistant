@@ -266,3 +266,63 @@ def test_voice_micro_mute_sleep_and_wake_protocol():
     assert proactive_muted is None, 'Le compagnon ne doit JAMAIS émettre d événement si le micro est coupé'
 
 
+def test_voice_microphone_lock_and_unlock_with_yo():
+    """Vérifie le protocole de verrouillage strict du micro déverrouillable UNIQUEMENT via 'yo'."""
+    import main
+    import dynamic_attention_engine
+
+    # 1. Détection des commandes de verrouillage strict
+    assert main.is_microphone_lock_command("verrouiller le micro") is True
+    assert main.is_microphone_lock_command("verrouille ton micro") is True
+    assert main.is_microphone_lock_command("verrouille le micro") is True
+    assert main.is_microphone_lock_command("bloque le micro") is True
+    assert main.is_microphone_lock_command("ferme le micro carrement") is True
+    assert main.is_microphone_lock_command("ferme carrément le micro") is True
+    assert main.is_microphone_lock_command("coupe le micro") is False  # mute standard, pas lock
+
+    # 2. Détection des commandes de déverrouillage strict (mot-clé exclusif 'yo' ou déverrouille)
+    assert main.is_microphone_unlock_command("yo") is True
+    assert main.is_microphone_unlock_command("yo !") is True
+    assert main.is_microphone_unlock_command("yo moctar") is True
+    assert main.is_microphone_unlock_command("déverrouille le micro") is True
+    assert main.is_microphone_unlock_command("deverrouille le micro") is True
+    assert main.is_microphone_unlock_command("debloque le micro") is True
+    assert main.is_microphone_unlock_command("bonjour") is False
+    assert main.is_microphone_unlock_command("quelle heure est-il") is False
+
+    # 3. Réponse locale instantanée (0ms) au verrouillage
+    res_lock = main.handle_instant_local_command("verrouiller le micro")
+    assert res_lock is not None
+    assert "Micro verrouillé Moctar" in res_lock
+    assert "Yo" in res_lock
+
+    # 4. Réponse locale instantanée (0ms) au déverrouillage
+    res_unlock = main.handle_instant_local_command("yo")
+    assert res_unlock is not None
+    assert "Micro déverrouillé Moctar" in res_unlock
+
+    # 5. Extraction du wake word "yo"
+    accepted_yo, cmd_yo, wake_yo = main.extract_voice_interact_command("yo")
+    assert accepted_yo is True
+    assert cmd_yo == main._WAKE_ONLY_SENTINEL
+    assert wake_yo is True
+
+    accepted_cmd, cmd_text, wake_cmd = main.extract_voice_interact_command("yo moctar quelle heure est-il")
+    assert accepted_cmd is True
+    assert "quelle heure est-il" in cmd_text
+    assert wake_cmd is True
+
+    # 6. DynamicAttentionEngine clôture la session sur ordre de verrouillage
+    att_lock = dynamic_attention_engine.classify_utterance_attention("verrouiller le micro", is_session_active=True)
+    assert att_lock["should_disengage"] is True
+    assert att_lock["intent"] == "disengage"
+
+    # 7. ProactiveCompanion bloque toute initiative si le micro est verrouillé
+    from proactive_companion import ProactiveCompanion
+    comp = ProactiveCompanion.get_instance()
+    locked_rt = type('Runtime', (), {'voice_locked': True, 'voice_muted': True, 'mic_sleep': True, 'voice_session_until': 0.0})()
+    comp._last_activity_time = time.monotonic()
+    assert comp.evaluate_proactive_event(locked_rt) is None
+
+
+

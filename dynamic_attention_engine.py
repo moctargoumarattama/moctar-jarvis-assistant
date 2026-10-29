@@ -101,6 +101,9 @@ _DISENGAGE_PHRASES = {
     "c est bon pour aujourd'hui", "je pense que c'est tout", "je pense que c est tout",
     "bonne soirée", "bonne soiree", "le point est fait",
     "coupe ton micro", "coupe le micro", "coupe micro", "mute micro",
+    "verrouille le micro", "verrouiller le micro", "verrouille ton micro", "verrouille ce micro",
+    "verrouille micro", "verrouiller micro", "bloque le micro", "bloquer le micro", "bloque micro",
+    "ferme carrement le micro", "ferme le micro carrement", "verrouille", "verrouiller",
     "et stop", "silence radio", "sourdine", "en veille", "mets toi en veille",
     "mets-toi en veille", "passe en veille", "dors", "va dormir",
 }
@@ -112,6 +115,8 @@ _DISENGAGE_REGEX = re.compile(
     r"fini\s+pour\s+aujourd['’]hui|"
     r"c['’]?est\s+bon(?:\s+pour\s+(?:moi|aujourd['’]hui))?|"
     r"coupe(?:\s+ton|\s+le|\s+ce)?\s+micro(?:\s+stop)?|"
+    r"(?:verrouille|verrouiller|verrouillez|bloque|bloquer|cadenasse)(?:\s+ton|\s+le|\s+ce)?\s+micro(?:\s+carrement)?|"
+    r"ferme(?:\s+carrement|\s+le\s+micro\s+carrement|\s+ce\s+micro\s+carrement)?\s*(?:le\s+micro|ton\s+micro)?|"
     r"mute(?:\s+ton|\s+le)?\s+micro|"
     r"arr[êe]te\s+d['’][ée]couter|"
     r"mets[- ]toi\s+en\s+(?:veille|sourdine)|"
@@ -189,7 +194,7 @@ def classify_utterance_attention(text: str, is_session_active: bool = False) -> 
     norm = clean.lower().strip(" ,.:;!?-'\u2019")
 
     # 1. Formules de clôture / désengagement explicite
-    if norm in _DISENGAGE_PHRASES or _DISENGAGE_REGEX.search(norm) or any(norm.startswith(dp) for dp in ("merci moctar", "c'est bon moctar", "bonne nuit", "voilà tout", "coupe ton micro", "coupe le micro", "coupe micro")):
+    if norm in _DISENGAGE_PHRASES or _DISENGAGE_REGEX.search(norm) or any(norm.startswith(dp) for dp in ("merci moctar", "c'est bon moctar", "bonne nuit", "voilà tout", "coupe ton micro", "coupe le micro", "coupe micro", "verrouille", "verrouiller", "bloque le micro")):
         return {
             "intent": "disengage",
             "is_directed": True,

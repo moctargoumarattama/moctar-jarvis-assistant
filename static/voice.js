@@ -7,7 +7,7 @@
   'use strict';
 
   const DEFAULT_WAKE_WORDS = [
-    'yo moctar', 'hey moctar', 'allo moctar', 'dis moctar', 'ok moctar', 'salut moctar',
+    'yo', 'yo moctar', 'hey moctar', 'allo moctar', 'dis moctar', 'ok moctar', 'salut moctar',
     'moctar', 'moktar', 'mokta', 'mokhtar', 'mouctar', 'mouktar', 'motard',
     "m'occupe tard", 'moccupe tard', "m'occaque", 'moccaque', 'jarvis',
     'yo elmo', 'hey elmo', 'hey el mo', 'el mo', 'elmo',
@@ -30,6 +30,9 @@
   const STOP_PHRASES = new Set([
     'merci moctar', 'merci elmo', 'tu peux te reposer', 'fin de conversation',
     'stop', 'et stop', 'coupe ton micro', 'coupe le micro', 'coupe micro', 'mute micro',
+    'verrouille le micro', 'verrouiller le micro', 'verrouille ton micro', 'verrouille micro',
+    'bloque le micro', 'bloquer le micro', 'bloque micro', 'verrouille', 'verrouiller',
+    'ferme carrement le micro', 'ferme le micro carrement',
     'silence', 'silence radio', 'tais toi', 'tais-toi', 'chut', 'en veille',
     'mets toi en veille', 'mets-toi en veille', 'passe en veille', 'sourdine', 'bonne nuit', 'dors', 'va dormir'
   ]);
@@ -94,6 +97,7 @@
     let generation = 0;
     let job = null;
     let status = 'idle';
+    let isLocked = false;
 
     let stream = null;
     let audioCtx = null;
@@ -516,8 +520,33 @@
       }
     }
 
-    function isMutePhrase(text) {
+    function isLockPhrase(text) {
       if (!text) return false;
+      const t = String(text).toLowerCase().trim()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return (
+        /\b(?:verrouille|verrouiller|verrouillez|bloque|bloquer|bloquez|cadenasse|cadenasser|lock)\b.*(?:micro|ecoute|reception|tout)?/.test(t) ||
+        /\b(?:ferme|coupe)\s+(?:carrement|completement)\s+(?:le\s+)?micro\b/.test(t) ||
+        /\b(?:ferme|coupe)\s+(?:le\s+)?micro\s+(?:carrement|completement)\b/.test(t) ||
+        t === 'verrouille le micro' || t === 'verrouiller le micro' || t === 'verrouille ton micro' || t === 'verrouille micro' ||
+        t === 'bloque le micro' || t === 'bloquer le micro' || t === 'bloque micro' || t === 'verrouille' || t === 'verrouiller'
+      );
+    }
+
+    function isUnlockPhrase(text) {
+      if (!text) return false;
+      const t = String(text).toLowerCase().trim()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return (
+        /^(?:yo|yop|yo\s+moctar|yo\s+elmo|allo|salut)$/.test(t) ||
+        /\b(?:deverrouille|deverrouiller|debloque|debloquer)\b.*(?:micro|ecoute)?/.test(t) ||
+        /\b(?:ouvre|ouvrir|active|activer)\s+(?:le\s+)?micro\b/.test(t) ||
+        t === 'yo' || t === 'yo !' || t === 'yo moctar' || t === 'deverrouille le micro' || t === 'deverrouille ton micro'
+      );
+    }
+
+    function isMutePhrase(text) {
+      if (!text || isLockPhrase(text)) return false;
       const t = String(text).toLowerCase().trim()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       return (
@@ -882,7 +911,7 @@
           return;
         }
 
-        if (payload.user_text && STOP_PHRASES.has(phrase(String(payload.user_text)))) {
+        if (payload.user_text && !isLockPhrase(payload.user_text) && !isMutePhrase(payload.user_text) && STOP_PHRASES.has(phrase(String(payload.user_text)))) {
           generation += 1;
           abortActiveVoiceNetworkAndAudio();
           phase = 'wake';
@@ -903,6 +932,17 @@
           if (FOLLOWUP_MS <= 0) {
             phase = 'wake';
             manual = false;
+          }
+          if (payload.reason === 'mic_locked' || isLocked) {
+            isLocked = true;
+            phase = 'wake';
+            updateSolarVoiceState('off');
+            emit('locked', {
+              rms: 0,
+              isSpeaking: false,
+              message: '🔒 MICRO VERROUILLÉ · Écoute fermée (Dites « Yo » pour déverrouiller)',
+            });
+            return;
           }
           updateSolarVoiceState('idle');
           if (wanted()) {
@@ -952,10 +992,38 @@
           }
           releaseEchoLock();
           if (requestId !== currentRequestId || generation !== current.generation || destroyed || suspended) return;
+          const isLock = (payload && payload.action === 'lock_mic') ||
+            isLockPhrase(payload.user_text) ||
+            (replyText && /\b(?:micro verrouill[eé]|l['’]ecoute est ferm[eé]e)\b/i.test(replyText));
+          const isUnlock = (payload && payload.action === 'unlock_mic') ||
+            isUnlockPhrase(payload.user_text);
           const isMute = (payload && payload.action === 'mute_mic') ||
             isMutePhrase(payload.user_text) ||
             (replyText && /\b(?:je coupe le micro|micro coup[eé]|bonne nuit moctar|veille silencieuse)\b/i.test(replyText));
-          if (isMute) {
+
+          if (isLock) {
+            isLocked = true;
+            phase = 'wake';
+            manual = false;
+            clearFollowup();
+            updateSolarVoiceState('off');
+            emit('locked', {
+              rms: 0,
+              isSpeaking: false,
+              message: '🔒 MICRO VERROUILLÉ · Écoute fermée (Dites « Yo » pour déverrouiller)',
+            });
+            return;
+          } else if (isUnlock) {
+            isLocked = false;
+            phase = 'listening';
+            openFollowup();
+            updateSolarVoiceState('listening');
+            emit('listening', {
+              rms: 0,
+              isSpeaking: false,
+              message: "🎙️ MICRO DÉVERROUILLÉ · Je t'écoute Moctar...",
+            });
+          } else if (isMute) {
             phase = 'wake';
             manual = false;
             clearFollowup();
@@ -1553,6 +1621,7 @@
       get listeningDesired() { return enabled; },
       get usingWebAudio() { return true; },
       get state() { return state; },
+      get isLocked() { return isLocked; },
       get rms() { return currentRms; },
       get isSpeaking() { return isSpeaking; },
       get isPushToTalk() { return isPushToTalk; },
@@ -1570,6 +1639,7 @@
         fault = null;
         enabled = true;
         manual = false;
+        isLocked = false;
         phase = 'wake';
         clearFollowup();
         await reconcile();
@@ -1593,6 +1663,7 @@
         generation += 1;
         fault = null;
         manual = true;
+        isLocked = false;
         phase = 'listening';
         clearFollowup();
         if (FOLLOWUP_MS > 0) openFollowup();

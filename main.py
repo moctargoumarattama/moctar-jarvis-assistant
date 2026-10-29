@@ -346,7 +346,7 @@ _WAKE_ONLY_SENTINEL = "__MOCTAR_WAKE_ONLY__"
 
 _VOICE_WAKE_PREFIX_RE = re.compile(
     r"^\s*(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|et\s+vous|you|c['’]est\s+(?:le\s+)?)\s*)?"
-    r"(?:yo\s+moctar|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|mothar|mothard|mocthar|"
+    r"(?:yo\s+moctar|yo\s+elmo|yo|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|mothar|mothard|mocthar|"
     r"m['’]?occupe\s+tard|m['’]?occaque|moccupe\s+tard|moccaque|"
     r"m(?:\.|\s)*o(?:\.|\s)*c(?:\.|\s)*t(?:\.|\s)*a(?:\.|\s)*r(?:\.|\b)|"
     r"moc|mok|mokti|jarvis|elmo)\b[\s,.:;!?-]*",
@@ -354,10 +354,10 @@ _VOICE_WAKE_PREFIX_RE = re.compile(
 )
 _VOICE_WAKE_ANYWHERE_RE = re.compile(
     r"\b(?:(?:yo|hey|ok|bonjour|salut|dis|allo|ecoute|et\s+vous|you|c['’]est\s+(?:le\s+)?)\s*)?"
-    r"(yo\s+moctar|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|mothar|mothard|mocthar|"
+    r"(yo\s+moctar|yo\s+elmo|yo|moctar|moktar|mokta|mokhtar|mouctar|mouktar|motard|mothar|mothard|mocthar|"
     r"m['’]?occupe\s+tard|m['’]?occaque|moccupe\s+tard|moccaque|"
     r"m(?:\.|\s)*o(?:\.|\s)*c(?:\.|\s)*t(?:\.|\s)*a(?:\.|\s)*r(?:\.|\b)|"
-    r"moc|mok|mokti|jarvis|elmo|yo\s+elmo|allo\s+moctar|dis\s+moctar)\b[\s,.:;!?-]*",
+    r"moc|mok|mokti|jarvis|elmo|allo\s+moctar|dis\s+moctar)\b[\s,.:;!?-]*",
     re.IGNORECASE,
 )
 _VOICE_FILLER_WORDS = {
@@ -382,6 +382,52 @@ def _is_pure_filler_or_wake(text: str) -> bool:
     if not tokens:
         return True
     return all(tok in _VOICE_FILLER_WORDS for tok in tokens)
+
+
+def is_microphone_lock_command(text: str) -> bool:
+    """Détecte avec certitude si une phrase demande de verrouiller ou fermer carrément le micro."""
+    if not text:
+        return False
+    norm = _strip_accents_1to1(text).lower().strip()
+    norm = norm.strip(" .,:;!?'\"")
+    if norm in (
+        "verrouille le micro", "verrouiller le micro", "verrouille ton micro", "verrouille ce micro",
+        "verrouille micro", "verrouilles le micro", "verrouiller micro", "verrouille", "verrouiller",
+        "bloque le micro", "bloquer le micro", "bloque ton micro", "bloque ce micro", "bloque micro",
+        "bloque", "bloquer", "cadenasse le micro", "lock le micro", "lock micro", "lock",
+        "ferme carrement le micro", "ferme le micro carrement", "fermer carrement le micro",
+        "fermer le micro carrement", "coupe carrement le micro", "coupe le micro carrement",
+        "couper carrement le micro", "couper le micro carrement",
+    ):
+        return True
+    if bool(re.search(r"\b(?:verrouille|verrouiller|verrouillez|bloque|bloquer|bloquez|cadenasse|cadenasser|lock)\b.*(?:micro|ecoute|reception)?", norm)):
+        return True
+    if bool(re.search(r"\b(?:ferme|fermer|fermez|coupe|couper|coupez)\b.*(?:\bcarrement\b|\bcompletement\b).*\b(?:micro|ecoute)\b", norm)):
+        return True
+    if bool(re.search(r"\b(?:ferme|fermer|fermez|coupe|couper|coupez)\b.*\b(?:micro|ecoute)\b.*(?:\bcarrement\b|\bcompletement\b)", norm)):
+        return True
+    return False
+
+
+def is_microphone_unlock_command(text: str) -> bool:
+    """Détecte avec certitude si une phrase demande de déverrouiller le micro (mot-clé exclusif 'yo' ou déverrouille)."""
+    if not text:
+        return False
+    norm = _strip_accents_1to1(text).lower().strip()
+    norm = norm.strip(" .,:;!?'\"")
+    if norm in (
+        "yo", "yo !", "yo moctar", "yo jarvis", "yo elmo", "yop",
+        "deverrouille le micro", "deverrouiller le micro", "deverrouille ton micro", "deverrouille ce micro",
+        "deverrouille micro", "deverrouilles le micro", "deverrouiller micro", "deverrouille", "deverrouiller",
+        "debloque le micro", "debloquer le micro", "debloque ton micro", "debloque ce micro", "debloque micro",
+        "debloque", "debloquer", "ouvre le micro", "ouvre ton micro", "ouvre micro",
+    ):
+        return True
+    if bool(re.match(r"^yo(?:[\s,.:;!?-]+.*)?$", norm)):
+        return True
+    if bool(re.search(r"\b(?:deverrouille|deverrouiller|deverrouillez|debloque|debloquer|debloquez)\b.*(?:micro|ecoute|reception)?", norm)):
+        return True
+    return False
 
 
 def is_direct_voice_command(text: str) -> bool:
@@ -445,7 +491,9 @@ def is_direct_voice_command(text: str) -> bool:
     # 5. Gestion Système, Contexte & Organisation
     if re.search(r"\b(?:briefing|o[uù]\s+en\s+est[- ]on|optimise\s+le\s+syst[èe]me|mode\s+optimisation|fin\s+de\s+journ[ée]e|bonne\s+nuit|dors|va\s+dormir|liste\s+mes\s+t[aâ]ches|mes\s+todos)\b", norm):
         return True
-    # 5b. Coupure et Réactivation Micro explicite ("coupe ton micro", "allume ton micro", "en veille")
+    # 5b. Coupure, Verrouillage et Réactivation Micro explicite ("verrouille le micro", "coupe ton micro", "allume ton micro", "en veille")
+    if is_microphone_lock_command(norm) or is_microphone_unlock_command(norm) or is_microphone_mute_command(norm) or is_microphone_unmute_command(norm):
+        return True
     if re.search(r"\b(?:coupe(?:\s+ton|\s+le|\s+ce)?\s+micro|allume(?:\s+ton|\s+le)?\s+micro|r[ée]active(?:\s+ton|\s+le)?\s+micro|active(?:\s+ton|\s+le)?\s+micro|tu\s+peux\s+reprendre|reprends?\s+l['’][ée]coute|r[ée]veille[- ]toi|mets[- ]toi\s+en\s+(?:veille|sourdine)|mise\s+en\s+veille|en\s+veille|silence\s+radio)\b", norm) or norm.strip(" .,:;!?'\"") in ("stop", "et stop", "coupe micro", "mute micro", "coupe le micro", "coupe ton micro", "silence radio"):
         return True
     # 6. Contrôle de fenêtres & actions sur pronoms ("ferme ça", "mets-le à droite", "plein écran")
@@ -684,7 +732,7 @@ def _is_compound_or_actionable_request(cleaned: str, normalized: str) -> bool:
 
 def is_microphone_mute_command(text: str) -> bool:
     """Détecte avec certitude si une phrase demande de couper, éteindre ou mettre en veille le micro."""
-    if not text:
+    if not text or is_microphone_lock_command(text):
         return False
     norm = _strip_accents_1to1(text).lower().strip()
     if norm in (
@@ -757,6 +805,14 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
                 return res.get("message")
         except Exception:
             pass
+
+    # 0a00. Commandes de verrouillage strict du micro ("verrouille le micro", "ferme le micro carrément")
+    if is_microphone_lock_command(normalized):
+        return "Micro verrouillé Moctar. L'écoute est fermée. Dis simplement « Yo » pour me déverrouiller dès que tu as besoin de moi."
+
+    # 0a00b. Commandes de déverrouillage strict ("yo", "déverrouille le micro")
+    if is_microphone_unlock_command(normalized):
+        return "Micro déverrouillé Moctar ! 5 sur 5, je t'écoute et je suis prêt."
 
     # 0a0. Commandes de coupure micro / mise en sommeil explicite
     if is_microphone_mute_command(normalized):
@@ -2680,6 +2736,84 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             )
 
+        # 1c. Guard Verrouillage Strict du Micro ("Verrouiller le micro" -> Seul "yo" ou déverrouille peut ouvrir)
+        if getattr(runtime, "voice_locked", False):
+            # Vérifier si l'utilisateur a prononcé la commande magique de déverrouillage "yo" ou "déverrouille"
+            is_unlock = (
+                is_microphone_unlock_command(repaired_transcript)
+                or is_microphone_unlock_command(transcript)
+                or bool(re.search(r"\b(?:yo|deverrouille|deverrouiller|debloque)\b", _strip_accents_1to1(repaired_transcript).lower()))
+            )
+            if not is_unlock:
+                LOGGER.info("🔒 [VOICE LOCKED]: Micro verrouillé Moctar. Son ambiant ou mot-clé ignoré ('%s')", transcript)
+                return voice_interaction_response(
+                    {
+                        "ok": True,
+                        "ignored": True,
+                        "reason": "mic_locked",
+                        "user_text": transcript,
+                        "reply_text": "",
+                        "audio_url": None,
+                        "session_active": False,
+                        "action": "lock_mic",
+                    }
+                )
+
+            # Déverrouillage immédiat !
+            LOGGER.info("🔓 [VOICE UNLOCKED]: Commande de déverrouillage entendue ('%s')", transcript)
+            runtime.voice_locked = False
+            runtime.voice_muted = False
+            runtime.mic_sleep = False
+            runtime.voice_session_until = time.monotonic() + 45.0
+            try:
+                from proactive_companion import ProactiveCompanion
+                ProactiveCompanion.get_instance().set_do_not_disturb(0)
+            except Exception:
+                pass
+
+            norm_rep = _strip_accents_1to1(repaired_transcript).lower().strip(" .,:;!?'\"")
+            is_pure_unlock = norm_rep in (
+                "yo", "yo moctar", "yo !", "yop", "deverrouille", "deverrouille le micro",
+                "deverrouiller le micro", "deverrouille ton micro", "debloque le micro",
+                "ouvre le micro", "ouvre ton micro"
+            ) or bool(re.match(r"^yo[\s,!.]*$", norm_rep))
+            if is_pure_unlock:
+                reply_text = "Micro déverrouillé Moctar ! 5 sur 5, je t'écoute et je suis prêt."
+                audio_url: str | None = None
+                audio_chunks: list[str] = []
+                try:
+                    audio_url, audio_chunks = await generate_cached_tts_chunks(reply_text, DEFAULT_TTS_VOICE)
+                except Exception:
+                    pass
+                try:
+                    hud_state_manager.set_hud_voice_status(
+                        "idle",
+                        user_transcript=transcript,
+                        assistant_reply=reply_text,
+                    )
+                except Exception:
+                    pass
+                return voice_interaction_response(
+                    {
+                        "ok": True,
+                        "ignored": False,
+                        "user_text": transcript,
+                        "raw_transcript": transcript,
+                        "reply_text": reply_text,
+                        "audio_url": audio_url,
+                        "audio_chunks": audio_chunks,
+                        "first_chunk_audio_url": audio_chunks[0] if audio_chunks else audio_url,
+                        "session_active": True,
+                        "wake_word_detected": True,
+                        "action": "unlock_mic",
+                        "url": None,
+                        "title": None,
+                        "tools_used": [],
+                        "thought_chain": ["Déverrouillage vocal sécurisé immédiat via 'yo' (0ms)"],
+                        "fast_path": True,
+                    }
+                )
+
         # 2. Dynamic Turn-Taking & Attention Engine (Gestion naturelle de la parole)
         attention = dynamic_attention_engine.classify_utterance_attention(
             repaired_transcript,
@@ -2932,15 +3066,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     action_name = "toggle_fullscreen"
                     action_tools = [{"tool": "toggle_fullscreen", "arguments": {"enable": True}, "success": True}]
 
-            # Métadonnées action Sommeil / Coupure Micro
-            if is_microphone_mute_command(norm_cmd):
+            # Métadonnées action Sommeil / Coupure / Verrouillage Micro
+            if is_microphone_lock_command(norm_cmd) or is_microphone_lock_command(transcript):
+                action_name = "lock_mic"
+                runtime.voice_session_until = 0.0
+                runtime.voice_locked = True
+                runtime.voice_muted = True
+                runtime.mic_sleep = True
+                try:
+                    from proactive_companion import ProactiveCompanion
+                    ProactiveCompanion.get_instance().set_do_not_disturb(36000)
+                except Exception:
+                    pass
+            elif is_microphone_mute_command(norm_cmd):
                 action_name = "mute_mic"
                 runtime.voice_session_until = 0.0
                 runtime.voice_muted = True
                 runtime.mic_sleep = True
                 try:
                     from proactive_companion import ProactiveCompanion
-                    ProactiveCompanion.get_instance().set_do_not_disturb(600)
+                    ProactiveCompanion.get_instance().set_do_not_disturb(36000)
+                except Exception:
+                    pass
+            elif is_microphone_unlock_command(norm_cmd) or is_microphone_unlock_command(transcript):
+                action_name = "unlock_mic"
+                runtime.voice_session_until = time.monotonic() + 45.0
+                runtime.voice_locked = False
+                runtime.voice_muted = False
+                runtime.mic_sleep = False
+                try:
+                    from proactive_companion import ProactiveCompanion
+                    ProactiveCompanion.get_instance().set_do_not_disturb(0)
                 except Exception:
                     pass
             elif is_microphone_unmute_command(norm_cmd):
@@ -3111,12 +3267,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception:
             pass
 
-        # GARANTIE STRICTE : Forcer action='mute_mic' sur TOUT chemin (SmartCache, AgentCore, LLM)
+        # GARANTIE STRICTE : Forcer action='lock_mic' / 'mute_mic' / 'unlock_mic' sur TOUT chemin
+        cmd_is_lock = is_microphone_lock_command(command_text) or is_microphone_lock_command(transcript)
         cmd_is_mute = is_microphone_mute_command(command_text)
+        cmd_is_unlock = is_microphone_unlock_command(command_text) or is_microphone_unlock_command(transcript)
         cmd_is_unmute = is_microphone_unmute_command(command_text)
         rep_norm = _strip_accents_1to1(reply_text).lower()
 
-        if cmd_is_mute or any(p in rep_norm for p in ("micro coupe", "je coupe le micro", "bonne nuit moctar", "veille silencieuse")):
+        if cmd_is_lock or any(p in rep_norm for p in ("micro verrouille", "l'ecoute est fermee", "lecoute est fermee")):
+            agent_result["action"] = "lock_mic"
+            runtime.voice_session_until = 0.0
+            runtime.voice_locked = True
+            runtime.voice_muted = True
+            runtime.mic_sleep = True
+            attention["should_disengage"] = True
+            try:
+                from proactive_companion import ProactiveCompanion
+                ProactiveCompanion.get_instance().set_do_not_disturb(36000)
+            except Exception:
+                pass
+        elif cmd_is_mute or any(p in rep_norm for p in ("micro coupe", "je coupe le micro", "bonne nuit moctar", "veille silencieuse")):
             agent_result["action"] = "mute_mic"
             runtime.voice_session_until = 0.0
             runtime.voice_muted = True
@@ -3124,7 +3294,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             attention["should_disengage"] = True
             try:
                 from proactive_companion import ProactiveCompanion
-                ProactiveCompanion.get_instance().set_do_not_disturb(600)
+                ProactiveCompanion.get_instance().set_do_not_disturb(36000)
+            except Exception:
+                pass
+        elif cmd_is_unlock:
+            agent_result["action"] = "unlock_mic"
+            runtime.voice_session_until = time.monotonic() + 45.0
+            runtime.voice_locked = False
+            runtime.voice_muted = False
+            runtime.mic_sleep = False
+            try:
+                from proactive_companion import ProactiveCompanion
+                ProactiveCompanion.get_instance().set_do_not_disturb(0)
             except Exception:
                 pass
         elif cmd_is_unmute:
@@ -3210,7 +3391,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if hour >= 22 or hour < 8:
             return {"ok": True, "has_event": False, "event": None}
         runtime = getattr(application.state, "runtime", None)
-        if runtime and (getattr(runtime, "voice_muted", False) or getattr(runtime, "mic_sleep", False)):
+        if runtime and (getattr(runtime, "voice_locked", False) or getattr(runtime, "voice_muted", False) or getattr(runtime, "mic_sleep", False)):
             return {"ok": True, "has_event": False, "event": None}
         from proactive_companion import ProactiveCompanion
         companion = ProactiveCompanion.get_instance()

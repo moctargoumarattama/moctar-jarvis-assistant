@@ -810,5 +810,74 @@ test('full-duplex barge-in interrupts assistant playback when user speaks and st
   assert.equal(f.engine.userBargedIn, true, 'userBargedIn flag must be set');
 });
 
+test('microphone lock and unlock protocol via lock_mic and unlock_mic/yo', async t => {
+  let responsePayload = {
+    ok: true,
+    ignored: false,
+    user_text: 'verrouille le micro',
+    reply_text: "Micro verrouillé Moctar. L'écoute est fermée. Dis simplement « Yo » pour me déverrouiller.",
+    action: 'lock_mic',
+    session_active: false,
+  };
+  const f = createWebAudioFixture(t, {
+    fetch: async () => ({
+      ok: true,
+      json: async () => responsePayload,
+    }),
+  });
+
+  await f.engine.enable();
+  await f.settle();
+  assert.equal(f.engine.isLocked, false);
+
+  // 1. Déclencher "verrouille le micro"
+  await f.engine.startPushToTalk();
+  await f.settle();
+  f.engine.stopPushToTalk();
+  await f.settle();
+  f.finishAudio();
+  await f.settle();
+
+  // Le micro doit être verrouillé
+  assert.equal(f.engine.isLocked, true);
+  assert.ok(f.states.some(s => s.state === 'locked'));
+
+  // 2. Bruit ambiant ou autre phrase reçue alors que le micro est verrouillé
+  responsePayload = {
+    ok: true,
+    ignored: true,
+    reason: 'mic_locked',
+    action: 'lock_mic',
+    session_active: false,
+  };
+  await f.engine.startPushToTalk();
+  await f.settle();
+  f.engine.stopPushToTalk();
+  await f.settle();
+
+  // Doit rester verrouillé sans jouer de son
+  assert.equal(f.engine.isLocked, true);
+
+  // 3. Réception de la commande de déverrouillage "yo"
+  responsePayload = {
+    ok: true,
+    ignored: false,
+    user_text: 'yo',
+    reply_text: 'Micro déverrouillé Moctar ! 5 sur 5, je t\'écoute et je suis prêt.',
+    action: 'unlock_mic',
+    session_active: true,
+  };
+  await f.engine.startPushToTalk();
+  await f.settle();
+  f.engine.stopPushToTalk();
+  await f.settle();
+  f.finishAudio();
+  await f.settle();
+
+  // Le micro est désormais déverrouillé et en phase d'écoute active
+  assert.equal(f.engine.isLocked, false);
+  assert.equal(f.engine.state, 'listening');
+});
+
 
 
