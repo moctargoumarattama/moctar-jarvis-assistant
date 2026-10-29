@@ -682,6 +682,55 @@ def _is_compound_or_actionable_request(cleaned: str, normalized: str) -> bool:
     return False
 
 
+def is_microphone_mute_command(text: str) -> bool:
+    """Détecte avec certitude si une phrase demande de couper, éteindre ou mettre en veille le micro."""
+    if not text:
+        return False
+    norm = _strip_accents_1to1(text).lower().strip()
+    if norm in (
+        "coupe le micro", "coupe ton micro", "coupe ce micro", "coupe micro",
+        "coupes le micro", "coupes de micro", "coupe de micro",
+        "arrete le micro", "arrete ton micro", "arrete ce micro", "arrete micro",
+        "mute micro", "mute le micro", "mute ton micro",
+        "eteins le micro", "eteins ton micro", "eteins micro",
+        "ferme le micro", "ferme ton micro", "ferme micro",
+        "desactive le micro", "desactive ton micro",
+        "bonne nuit", "en veille", "mets-toi en veille", "passe en veille", "mise en veille",
+        "sourdine", "silence radio", "et stop", "dors", "va dormir"
+    ):
+        return True
+    has_action = bool(re.search(r"\b(?:coupe|coupes|arrete|arretez|eteins|eteignez|ferme|fermez|desactive|desactivez|mute|stop|stoppe)\b", norm))
+    has_target = bool(re.search(r"\b(?:micro|ecoute|reception)\b", norm))
+    if has_action and has_target:
+        return True
+    if bool(re.search(r"\b(?:bonne\s+nuit|mets[- ]toi\s+en\s+veille|passe\s+en\s+veille|mise\s+en\s+veille|en\s+veille|sourdine|silence\s+radio|va\s+dormir|dors\s+bien)\b", norm)):
+        return True
+    return False
+
+
+def is_microphone_unmute_command(text: str) -> bool:
+    """Détecte avec certitude si une phrase demande de rallumer ou réactiver le micro."""
+    if not text:
+        return False
+    norm = _strip_accents_1to1(text).lower().strip()
+    if norm in (
+        "allume le micro", "allume ton micro", "allume ce micro", "allume micro",
+        "active le micro", "active ton micro", "active ce micro", "active micro",
+        "reactive le micro", "reactive ton micro", "reactive micro",
+        "rallume le micro", "rallume ton micro",
+        "tu peux reprendre", "reprends l'ecoute", "reprends lecoute", "reprends",
+        "reveille-toi", "reveille toi", "debout"
+    ):
+        return True
+    has_action = bool(re.search(r"\b(?:allume|allumez|active|activez|reactive|reactivez|rallume|rallumez|reprends|reprenez)\b", norm))
+    has_target = bool(re.search(r"\b(?:micro|ecoute|reception)\b", norm))
+    if has_action and has_target:
+        return True
+    if bool(re.search(r"\b(?:tu\s+peux\s+reprendre|reprends?\s+l['’]?ecoute|r[eé]veille[- ]toi|debout)\b", norm)):
+        return True
+    return False
+
+
 def _handle_instant_local_command_logic(text: str, memory: Any = None, client_device: str | None = None) -> str | None:
     cleaned = (text or "").strip()
     if not cleaned:
@@ -709,20 +758,14 @@ def _handle_instant_local_command_logic(text: str, memory: Any = None, client_de
         except Exception:
             pass
 
-    # 0a0. Commandes de coupure micro / mise en sommeil explicite ("coupe ton micro", "coupe le micro", "en veille", "sourdine")
-    is_mute_cmd = bool(re.search(
-        r"\b(?:coupe(?:\s+ton|\s+le|\s+ce)?\s+micro|mute(?:\s+ton|\s+le)?\s+micro|arr[êe]te\s+d['’][ée]couter|mets[- ]toi\s+en\s+(?:veille|sourdine)|passe\s+en\s+(?:veille|sourdine)|mise\s+en\s+veille|en\s+veille|silence\s+radio|stop\s+l['’][ée]coute|sourdine)\b",
-        normalized
-    )) or normalized in ("et stop", "coupe micro", "mute micro", "coupe le micro", "coupe ton micro", "silence radio")
-    if is_mute_cmd:
+    # 0a0. Commandes de coupure micro / mise en sommeil explicite
+    if is_microphone_mute_command(normalized):
+        if bool(re.search(r"\b(?:bonne\s+nuit|va\s+dormir|dors(?:\s+bien)?|fais\s+dodo|je\s+vais\s+(?:dormir|me\s+coucher|au\s+lit|pioncer)|[aà]\s+demain)\b", normalized)):
+            return "Bonne nuit Moctar ! Repose-toi bien, tu as fait une grosse session. Micro coupé, je veille en silence et tout sera prêt pour demain !"
         return "Micro coupé Moctar. Je passe en veille silencieuse. Dis « Moctar » ou active ton micro dès que tu as besoin de moi."
 
     # 0a0b. Commandes de réactivation micro ("allume ton micro", "tu peux reprendre", "réveille-toi")
-    is_unmute_cmd = bool(re.search(
-        r"\b(?:allume(?:\s+ton|\s+le)?\s+micro|r[ée]active(?:\s+ton|\s+le)?\s+micro|active(?:\s+ton|\s+le)?\s+micro|tu\s+peux\s+reprendre|reprends?\s+l['’][ée]coute|r[ée]veille[- ]toi|debout)\b",
-        normalized
-    ))
-    if is_unmute_cmd:
+    if is_microphone_unmute_command(normalized):
         return "Micro réactivé Moctar ! 5 sur 5, je t'écoute et je suis prêt."
 
     # 0a. Commandes d'interruption vocale (Barge-In)
@@ -2890,13 +2933,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     action_tools = [{"tool": "toggle_fullscreen", "arguments": {"enable": True}, "success": True}]
 
             # Métadonnées action Sommeil / Coupure Micro
-            if any(k in norm_cmd for k in ("coupe", "sourdine", "veille", "stop", "bonne nuit", "dors", "silence radio")):
-                if any(k in norm_cmd for k in ("micro", "sourdine", "veille", "stop", "bonne nuit", "dors", "ecoute", "écoute")):
-                    action_name = "mute_mic"
-                    runtime.voice_session_until = 0.0
-            elif any(k in norm_cmd for k in ("allume ton micro", "allume le micro", "active ton micro", "active le micro", "reprends", "reveille", "réveille")):
+            if is_microphone_mute_command(norm_cmd):
+                action_name = "mute_mic"
+                runtime.voice_session_until = 0.0
+                runtime.voice_muted = True
+                runtime.mic_sleep = True
+                try:
+                    from proactive_companion import ProactiveCompanion
+                    ProactiveCompanion.get_instance().set_do_not_disturb(600)
+                except Exception:
+                    pass
+            elif is_microphone_unmute_command(norm_cmd):
                 action_name = "unmute_mic"
                 runtime.voice_session_until = time.monotonic() + 45.0
+                runtime.voice_muted = False
+                runtime.mic_sleep = False
+                try:
+                    from proactive_companion import ProactiveCompanion
+                    ProactiveCompanion.get_instance().set_do_not_disturb(0)
+                except Exception:
+                    pass
 
             agent_result = {
                 **instant_local_status(instant_reply),
@@ -3045,6 +3101,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             from proactive_companion import ProactiveCompanion
             comp = ProactiveCompanion.get_instance()
+            comp.record_activity()
             proactive_event = comp.evaluate_proactive_event(runtime)
             if proactive_event and not attention.get("should_disengage"):
                 init_msg = proactive_event.get("message")
@@ -3053,6 +3110,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     runtime.voice_session_until = time.monotonic() + 15.0
         except Exception:
             pass
+
+        # GARANTIE STRICTE : Forcer action='mute_mic' sur TOUT chemin (SmartCache, AgentCore, LLM)
+        cmd_is_mute = is_microphone_mute_command(command_text)
+        cmd_is_unmute = is_microphone_unmute_command(command_text)
+        rep_norm = _strip_accents_1to1(reply_text).lower()
+
+        if cmd_is_mute or any(p in rep_norm for p in ("micro coupe", "je coupe le micro", "bonne nuit moctar", "veille silencieuse")):
+            agent_result["action"] = "mute_mic"
+            runtime.voice_session_until = 0.0
+            runtime.voice_muted = True
+            runtime.mic_sleep = True
+            attention["should_disengage"] = True
+            try:
+                from proactive_companion import ProactiveCompanion
+                ProactiveCompanion.get_instance().set_do_not_disturb(600)
+            except Exception:
+                pass
+        elif cmd_is_unmute:
+            agent_result["action"] = "unmute_mic"
+            runtime.voice_session_until = time.monotonic() + 45.0
+            runtime.voice_muted = False
+            runtime.mic_sleep = False
+            try:
+                from proactive_companion import ProactiveCompanion
+                ProactiveCompanion.get_instance().set_do_not_disturb(0)
+            except Exception:
+                pass
 
         runtime.last_tts_reply_text = reply_text
         runtime.last_tts_timestamp = time.monotonic()
@@ -3121,9 +3205,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/api/voice/proactive")
     async def get_proactive_speech():
         """Récupère la suggestion proactive du compagnon si un événement ou rappel bienveillant est opportun."""
+        hour = datetime.now().hour
+        # Garde-fou nocturne absolu : entre 22h et 8h du matin, aucun déclenchement vocal spontané
+        if hour >= 22 or hour < 8:
+            return {"ok": True, "has_event": False, "event": None}
+        runtime = getattr(application.state, "runtime", None)
+        if runtime and (getattr(runtime, "voice_muted", False) or getattr(runtime, "mic_sleep", False)):
+            return {"ok": True, "has_event": False, "event": None}
         from proactive_companion import ProactiveCompanion
         companion = ProactiveCompanion.get_instance()
-        runtime = getattr(application.state, "runtime", None)
         event = companion.evaluate_proactive_event(runtime)
         if not event:
             return {"ok": True, "has_event": False, "event": None}

@@ -235,4 +235,34 @@ def test_voice_micro_mute_sleep_and_wake_protocol():
     res_wake2 = main.handle_instant_local_command("tu peux reprendre")
     assert "Micro réactivé Moctar" in res_wake2
 
+    # 4. Variations complexes et composées ('Maintenant, coupe et arrête le micro', 'coupes de micro')
+    res_mute4 = main.handle_instant_local_command('Maintenant, coupe et arrête le micro')
+    assert res_mute4 is not None
+    assert 'Micro coupé Moctar' in res_mute4
+
+    res_mute5 = main.handle_instant_local_command('Coupes de micro')
+    assert res_mute5 is not None
+    assert 'Micro coupé Moctar' in res_mute5
+
+    res_mute6 = main.handle_instant_local_command('arrête le micro')
+    assert res_mute6 is not None
+    assert 'Micro coupé Moctar' in res_mute6
+
+    # 5. Garde-fou inactivité et silence nocturne ProactiveCompanion
+    from proactive_companion import ProactiveCompanion
+    import time
+    comp = ProactiveCompanion.get_instance()
+    # Simuler inactivité > 5 minutes (utilisateur endormi dans sa chambre)
+    comp._last_activity_time = time.monotonic() - 400.0
+    comp._work_session_start = time.monotonic() - 3600.0
+    # En pleine nuit avec inactivité : JAMAIS de prise de parole spontanée
+    circadian_silent = comp.check_circadian_wellness()
+    assert circadian_silent is None, 'Le compagnon ne doit JAMAIS parler quand Moctar dort'
+
+    # Simuler runtime avec micro coupé
+    fake_rt = type('Runtime', (), {'voice_muted': True, 'mic_sleep': True, 'voice_session_until': 0.0})()
+    comp._last_activity_time = time.monotonic()
+    proactive_muted = comp.evaluate_proactive_event(fake_rt)
+    assert proactive_muted is None, 'Le compagnon ne doit JAMAIS émettre d événement si le micro est coupé'
+
 

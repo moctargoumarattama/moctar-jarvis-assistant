@@ -179,6 +179,12 @@ class ProactiveCompanion:
         now_dt = datetime.now()
         hour = now_dt.hour
         now = time.monotonic()
+
+        # Garde-fou inactivité : si l'utilisateur n'a pas interagi depuis plus de 5 minutes,
+        # il est probablement endormi ou absent. INTERDICTION absolue de parler la nuit.
+        if (now - self._last_activity_time) > 300.0:
+            return None
+
         # Nuit tardive : entre 23h et 5h du matin
         if hour >= 23 or hour < 5:
             # Ne pas harceler : au moins 30 minutes de session active
@@ -249,13 +255,21 @@ class ProactiveCompanion:
         if self.is_in_cooldown() or (time.monotonic() < self._dnd_until):
             return None
 
-        # Respect absolu du verrou d'écoute et de parole active (zéro coupure intempestive)
+        # Respect absolu du mode sourdine / micro coupé / écoute active
         if runtime:
+            if getattr(runtime, "voice_muted", False) or getattr(runtime, "mic_sleep", False):
+                return None
             voice_until = getattr(runtime, "voice_session_until", 0.0)
             if voice_until and (voice_until > time.monotonic()):
                 return None
             if getattr(runtime, "is_speaking", False) or getattr(runtime, "is_listening", False):
                 return None
+
+        # Garde-fou inactivité : si aucune interaction utilisateur depuis plus de 10 minutes,
+        # l'utilisateur n'est pas devant l'écran (absent ou endormi).
+        # Interdiction absolue de parler seul à une pièce vide ou à un utilisateur qui dort.
+        if (time.monotonic() - self._last_activity_time) > 600.0:
+            return None
 
         # Priorité 0 : Initiative explicite enregistrée (ex: tâche d'arrière-plan terminée)
         if self._pending_suggestion:

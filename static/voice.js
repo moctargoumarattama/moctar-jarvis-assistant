@@ -516,6 +516,17 @@
       }
     }
 
+    function isMutePhrase(text) {
+      if (!text) return false;
+      const t = String(text).toLowerCase().trim()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return (
+        /\b(?:coupe|coupes|arrete|arretez|eteins|eteignez|ferme|fermez|desactive|mute|stoppe?)\b.*\b(?:micro|ecoute|reception)\b/.test(t) ||
+        /\b(?:bonne\s+nuit|en\s+veille|sourdine|silence\s+radio|stop\s+l\s*ecoute|mets\s*toi\s+en\s+veille|va\s+dormir|dors)\b/.test(t) ||
+        t === 'et stop' || t === 'coupe micro' || t === 'mute micro' || t === 'coupes de micro'
+      );
+    }
+
     function clearMaxSpeechTimer() {
       if (maxSpeechTimer !== null) {
         cancel(maxSpeechTimer);
@@ -941,7 +952,10 @@
           }
           releaseEchoLock();
           if (requestId !== currentRequestId || generation !== current.generation || destroyed || suspended) return;
-          if (payload && payload.action === 'mute_mic') {
+          const isMute = (payload && payload.action === 'mute_mic') ||
+            isMutePhrase(payload.user_text) ||
+            (replyText && /\b(?:je coupe le micro|micro coup[eé]|bonne nuit moctar|veille silencieuse)\b/i.test(replyText));
+          if (isMute) {
             phase = 'wake';
             manual = false;
             clearFollowup();
@@ -1429,6 +1443,10 @@
       if (destroyed || suspended || !wanted() || isAssistantSpeaking || processingAudio || job || isSpeaking) return;
       if (phase !== 'wake') return;
       if (!fetchImpl) return;
+
+      const currentHour = new Date().getHours();
+      // Garde-fou nuit absolu : entre 22h et 8h du matin, aucun déclenchement vocal spontané la nuit
+      if (currentHour >= 22 || currentHour < 8) return;
 
       isProactivePollInFlight = true;
       const reqEpoch = currentRequestId;
