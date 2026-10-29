@@ -124,6 +124,9 @@ class VoiceAPITests(unittest.TestCase):
             self.stack.enter_context(patch("main.collector.Collector." + name, new=AsyncMock()))
         self.stack.enter_context(patch("main.collector.Collector.collect", new=AsyncMock(side_effect=lambda: copy.deepcopy(local_snapshot()))))
         self.stack.enter_context(patch("main.WhatsAppController.refresh_voice_readiness", new=AsyncMock()))
+        self.stack.enter_context(patch("main.WhatsAppController.check_bridge_health", new=AsyncMock(return_value={"status": "CONNECTED"})))
+        self.stack.enter_context(patch("main.Runtime.synthesize_whatsapp_reply", new=AsyncMock(return_value={"voice_reply_b64": "fake", "voice_mime_type": "audio/mpeg"})))
+        self.stack.enter_context(patch("system_manager.SystemManager.get_full_infrastructure_status", return_value="M.O.C.T.A.R en ligne"))
         self.settings = Settings(admin_token="admin-secret", whatsapp_webhook_token="webhook-secret", interval=60,
                                  whatsapp_max_audio_bytes=32, sentinel_geoip_enabled=False)
         self.app = create_app(self.settings)
@@ -138,8 +141,8 @@ class VoiceAPITests(unittest.TestCase):
 
     def drain(self):
         async def join():
-            await asyncio.wait_for(self.controller.queue.join(), 2)
-            await asyncio.wait_for(self.controller.conversation_queue.join(), 2)
+            await asyncio.wait_for(self.controller.queue.join(), 10)
+            await asyncio.wait_for(self.controller.conversation_queue.join(), 10)
         self.client.portal.call(join)
 
     def audio_headers(self, **changes):

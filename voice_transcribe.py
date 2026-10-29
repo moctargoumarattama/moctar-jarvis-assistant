@@ -52,7 +52,7 @@ def _cache_roots() -> Iterator[Path]:
         yield Path(os.environ["HF_HOME"]).expanduser() / "hub"
     if os.environ.get("XDG_CACHE_HOME"):
         yield Path(os.environ["XDG_CACHE_HOME"]).expanduser() / "huggingface" / "hub"
-    for d in APP_DIRS:
+    for d in (APP_DIR, Path('/opt/noc-dashboard')):
         yield d / "models" / ".download-cache" / "hub"
         yield d / "models"
     yield Path.home() / ".cache" / "huggingface" / "hub"
@@ -84,7 +84,7 @@ def _candidates(requested: str) -> Iterator[tuple[Path, str]]:
     if configured:
         yield Path(configured).expanduser(), requested
     names = (requested, *(name for name in MODEL_NAMES if name != requested))
-    for d in APP_DIRS:
+    for d in (APP_DIR, Path('/opt/noc-dashboard')):
         yield d / "models" / "whisper", requested
         for name in names:
             yield d / "models" / ("whisper-" + name), name
@@ -571,7 +571,9 @@ def transcribe_groq_api(
 
     # Essai 1 : SDK groq si présent
     try:
-        from groq import Groq  # type: ignore[import-not-found]
+        import importlib
+        groq_mod = importlib.import_module("groq")
+        Groq = getattr(groq_mod, "Groq")
 
         client = Groq(api_key=key, timeout=8.0, max_retries=0)
         with audio.open("rb") as f:

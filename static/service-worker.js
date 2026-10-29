@@ -1,6 +1,6 @@
 'use strict';
 
-const SW_VERSION = 'v11.0';
+const SW_VERSION = 'v11.1';
 
 // Installation metadata only: pages, scripts, telemetry and API responses are never cached.
 self.addEventListener('install', event => {
@@ -36,14 +36,11 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   const request = event.request;
+  if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  // Mode NetworkOnly strict pour toutes les routes vocales (/api/voice/*)
-  if (url.pathname.startsWith('/api/voice/')) {
-    event.respondWith(fetch(request, {cache: 'no-store'}));
-    return;
-  }
-  if (request.method !== 'GET') return;
+  // Bypasser totalement le Service Worker pour la voix et les flux SSE/WebSocket
+  if (url.pathname.startsWith('/api/voice/')) return;
   // Let the native connection stream SSE without an intermediary response.
   if ((request.headers.get('accept') || '').includes('text/event-stream')) return;
   event.respondWith(fetch(request, {cache: 'no-store'}));

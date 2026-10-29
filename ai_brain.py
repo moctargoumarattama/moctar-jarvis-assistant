@@ -1351,7 +1351,10 @@ class AIBrain:
         if model and (api_type in {None, "auto", "gemini"}) and model.strip().startswith("gemini-"):
             self.gemini_model = model.strip()
         self.model = self.gemini_model
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY", config.GEMINI_API_KEY).strip()
+        configured_key = os.getenv("GEMINI_API_KEY")
+        if configured_key is None:
+            configured_key = getattr(config, "GEMINI_API_KEY", "")
+        self.api_key = (api_key if api_key is not None else configured_key).strip()
         self.gemini_client = None
         gemini_key = self.api_key
         if gemini_key and genai is not None:
@@ -1379,11 +1382,10 @@ class AIBrain:
         if not force and self.gemini_client is not None and self._provider_online.get("gemini") is not False:
             return True
         load_dotenv()
-        gemini_key = (
-            self.api_key
-            or os.getenv("GEMINI_API_KEY", "")
-            or getattr(config, "GEMINI_API_KEY", "")
-        ).strip()
+        configured_key = os.getenv("GEMINI_API_KEY")
+        if configured_key is None:
+            configured_key = getattr(config, "GEMINI_API_KEY", "")
+        gemini_key = (self.api_key if self.api_key is not None else configured_key).strip()
         if not gemini_key or genai is None or genai_types is None:
             logger.warning("Échec reconnexion IA : clé d'API absente ou google-genai non disponible")
             return False
@@ -2360,7 +2362,9 @@ def voice_fast_llm_reply(
                 return None
             # 1. SDK Groq officiel (si le package groq est installé)
             try:
-                from groq import Groq  # type: ignore[import-not-found]
+                import importlib
+                groq_mod = importlib.import_module("groq")
+                Groq = getattr(groq_mod, "Groq")
 
                 client = Groq(api_key=groq_api_key, timeout=call_timeout, max_retries=0)
                 start_t = time.perf_counter()
